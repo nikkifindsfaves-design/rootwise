@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+  console.log('API KEY EXISTS:', !!process.env.ANTHROPIC_API_KEY, 'KEY LENGTH:', process.env.ANTHROPIC_API_KEY?.length)
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
