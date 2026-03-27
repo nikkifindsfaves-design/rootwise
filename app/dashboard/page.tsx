@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { addPerson } from "./actions";
+import DocumentUploadSection from "./document-upload";
 
 type PersonRow = {
   id: string;
@@ -68,6 +69,8 @@ export default async function DashboardPage({
             Could not load persons: {personsError.message}
           </p>
         ) : null}
+
+        <DocumentUploadSection />
 
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-medium text-zinc-900">Add a person</h2>
