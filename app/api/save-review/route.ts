@@ -356,6 +356,8 @@ export async function POST(request: NextRequest) {
     for (const ev of evs) {
       if (typeof ev !== "object" || ev === null) continue;
       const e = ev as Record<string, unknown>;
+      const noteText =
+        String(e.notes ?? e.description ?? "").trim() || null;
       const { error: evErr } = await supabase.from("events").insert({
         user_id: user.id,
         person_id: personId,
@@ -363,11 +365,115 @@ export async function POST(request: NextRequest) {
         event_type: String(e.event_type ?? "").trim() || "other",
         event_date: String(e.event_date ?? "").trim() || null,
         event_place: String(e.event_place ?? "").trim() || null,
-        description: String(e.description ?? "").trim() || null,
+        notes: noteText,
       });
 
       if (evErr) {
         return NextResponse.json({ error: evErr.message }, { status: 500 });
+      }
+    }
+  }
+
+  // Half-siblings / full siblings: for each person saved in this batch who has a
+  // parent edge (person_a = parent, person_b = child, type parent), link them as
+  // siblings to every other child of the same parent if not already linked.
+  for (const personId of resolvedIds) {
+    const { data: asChildRows, error: asChildErr } = await supabase
+      .from("relationships")
+      .select("person_a_id")
+      .eq("user_id", user.id)
+      .eq("person_b_id", personId)
+      .eq("relationship_type", "parent");
+
+    if (asChildErr) {
+      return NextResponse.json({ error: asChildErr.message }, { status: 500 });
+    }
+
+    const parentIds = [
+      ...new Set(
+        (asChildRows ?? []).map(
+          (row: { person_a_id: string }) => row.person_a_id
+        )
+      ),
+    ];
+
+    for (const parentId of parentIds) {
+      const { data: coChildRows, error: coErr } = await supabase
+        .from("relationships")
+        .select("person_b_id")
+        .eq("user_id", user.id)
+        .eq("person_a_id", parentId)
+        .eq("relationship_type", "parent");
+
+      if (coErr) {
+        return NextResponse.json({ error: coErr.message }, { status: 500 });
+      }
+
+      const otherChildren = [
+        ...new Set(
+          (coChildRows ?? [])
+            .map((row: { person_b_id: string }) => row.person_b_id)
+            .filter((id: string) => id !== personId)
+        ),
+      ];
+
+      for (const otherId of otherChildren) {
+        const { data: sib1, error: s1Err } = await supabase
+          .from("relationships")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("relationship_type", "sibling")
+          .eq("person_a_id", personId)
+          .eq("person_b_id", otherId)
+          .maybeSingle();
+
+        if (s1Err) {
+          return NextResponse.json({ error: s1Err.message }, { status: 500 });
+        }
+
+        const { data: sib2, error: s2Err } = await supabase
+          .from("relationships")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("relationship_type", "sibling")
+          .eq("person_a_id", otherId)
+          .eq("person_b_id", personId)
+          .maybeSingle();
+
+        if (s2Err) {
+          return NextResponse.json({ error: s2Err.message }, { status: 500 });
+        }
+
+        if (sib1 || sib2) continue;
+
+        const { error: insSib1 } = await supabase.from("relationships").insert({
+          user_id: user.id,
+          person_a_id: personId,
+          person_b_id: otherId,
+          relationship_type: "sibling",
+        });
+
+        if (insSib1) {
+          return NextResponse.json({ error: insSib1.message }, { status: 500 });
+        }
+
+        const { error: insSib2 } = await supabase.from("relationships").insert({
+          user_id: user.id,
+          person_a_id: otherId,
+          person_b_id: personId,
+          relationship_type: "sibling",
+        });
+
+        if (insSib2) {
+          await supabase
+            .from("relationships")
+            .delete()
+            .eq("user_id", user.id)
+            .eq("person_a_id", personId)
+            .eq("person_b_id", otherId)
+            .eq("relationship_type", "sibling");
+          return NextResponse.json({ error: insSib2.message }, { status: 500 });
+        }
       }
     }
   }

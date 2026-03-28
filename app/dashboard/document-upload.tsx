@@ -16,6 +16,9 @@ const RECORD_TYPES = [
   "Other",
 ] as const;
 
+const sans = "var(--font-dg-body), Lato, sans-serif";
+const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
+
 export default function DocumentUploadSection() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -70,9 +73,24 @@ export default function DocumentUploadSection() {
   }
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-medium text-zinc-900">Upload a Record</h2>
-      <p className="mt-1 text-sm text-zinc-600">
+    <section
+      className="rounded-xl border p-6 shadow-sm"
+      style={{
+        backgroundColor: "#FFFCF7",
+        borderColor: "#C4A882",
+        boxShadow: "0 4px 20px rgba(61, 41, 20, 0.06)",
+      }}
+    >
+      <h2
+        className="text-xl font-bold"
+        style={{ fontFamily: serif, color: "#3D2914" }}
+      >
+        Upload a Record
+      </h2>
+      <p
+        className="mt-1 text-sm"
+        style={{ fontFamily: sans, color: "#7A6654" }}
+      >
         Upload a document and let Claude extract people, events, and
         relationships.
       </p>
@@ -81,7 +99,8 @@ export default function DocumentUploadSection() {
         <div>
           <label
             htmlFor="record_file"
-            className="mb-1 block text-sm font-medium text-zinc-700"
+            className="mb-1 block text-sm font-medium"
+            style={{ fontFamily: sans, color: "#5C3D2E" }}
           >
             File (JPG, PNG, PDF)
           </label>
@@ -90,14 +109,23 @@ export default function DocumentUploadSection() {
             type="file"
             accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            className="block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-800"
+            className="block w-full rounded-md px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#3D2914] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[#FFFCF7] hover:file:opacity-90"
+            style={{
+              fontFamily: sans,
+              borderWidth: 1,
+              borderStyle: "solid",
+              borderColor: "#A08060",
+              backgroundColor: "#FAF7F2",
+              color: "#3D2914",
+            }}
           />
         </div>
 
         <div>
           <label
             htmlFor="record_type"
-            className="mb-1 block text-sm font-medium text-zinc-700"
+            className="mb-1 block text-sm font-medium"
+            style={{ fontFamily: sans, color: "#5C3D2E" }}
           >
             Record type
           </label>
@@ -107,7 +135,15 @@ export default function DocumentUploadSection() {
             onChange={(event) =>
               setRecordType(event.target.value as (typeof RECORD_TYPES)[number])
             }
-            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-indigo-500 focus:ring-2 sm:max-w-xs"
+            className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[#2C4A3E]/35 sm:max-w-xs"
+            style={{
+              fontFamily: sans,
+              borderWidth: 1,
+              borderStyle: "solid",
+              borderColor: "#A08060",
+              backgroundColor: "#FAF7F2",
+              color: "#3D2914",
+            }}
           >
             {RECORD_TYPES.map((type) => (
               <option key={type} value={type}>
@@ -121,18 +157,31 @@ export default function DocumentUploadSection() {
           type="button"
           onClick={handleUpload}
           disabled={isLoading}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70"
+          className="rounded-md px-4 py-2 text-sm font-semibold transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+          style={{
+            fontFamily: sans,
+            backgroundColor: "#3D2914",
+            color: "#FFFCF7",
+          }}
         >
           Upload and Analyze
         </button>
 
         {isLoading ? (
-          <p className="text-sm text-zinc-700">Claude is reading your document...</p>
+          <p className="text-sm italic" style={{ fontFamily: sans, color: "#5C3D2E" }}>
+            Claude is reading your document…
+          </p>
         ) : null}
 
         {error ? (
           <p
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            className="rounded-md border px-3 py-2 text-sm"
+            style={{
+              fontFamily: sans,
+              borderColor: "#C45C5C",
+              backgroundColor: "#FDF2F2",
+              color: "#7A2E2E",
+            }}
             role="alert"
           >
             {error}

@@ -514,21 +514,6 @@ export default function ReviewDuplicatesPage() {
                           name={`merge-card-${match.id}`}
                           checked={
                             (cardMergeChoice[match.id] ?? "existing") ===
-                            "existing"
-                          }
-                          onChange={() =>
-                            setCardMergeChoiceForPerson(match.id, "existing")
-                          }
-                          className="text-emerald-600"
-                        />
-                        Keep existing record
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
-                        <input
-                          type="radio"
-                          name={`merge-card-${match.id}`}
-                          checked={
-                            (cardMergeChoice[match.id] ?? "existing") ===
                             "record"
                           }
                           onChange={() =>
@@ -536,7 +521,22 @@ export default function ReviewDuplicatesPage() {
                           }
                           className="text-emerald-600"
                         />
-                        Update with new information
+                        Use from record
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
+                        <input
+                          type="radio"
+                          name={`merge-card-${match.id}`}
+                          checked={
+                            (cardMergeChoice[match.id] ?? "existing") ===
+                            "existing"
+                          }
+                          onChange={() =>
+                            setCardMergeChoiceForPerson(match.id, "existing")
+                          }
+                          className="text-emerald-600"
+                        />
+                        Keep from tree
                       </label>
                     </div>
                   </div>

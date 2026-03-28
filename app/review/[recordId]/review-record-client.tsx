@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateString } from "@/lib/utils/dates";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type MouseEvent } from "react";
 
@@ -91,6 +92,8 @@ type EventRow = {
   eventType: EvOption;
   eventDate: string;
   eventPlace: string;
+  /** From AI `description`; saved to DB as `events.notes`. */
+  eventNotes: string;
 };
 
 type PersonCardState = {
@@ -121,6 +124,7 @@ export type PendingReviewPayload = {
       event_type: string;
       event_date: string | null;
       event_place: string | null;
+      notes: string | null;
     }>;
   }>;
 };
@@ -179,8 +183,8 @@ function toForm(p: AiPerson): PersonForm {
     first_name: p.first_name ?? "",
     middle_name: p.middle_name ?? "",
     last_name: p.last_name ?? "",
-    birth_date: p.birth_date ?? "",
-    death_date: p.death_date ?? "",
+    birth_date: formatDateString(p.birth_date ?? ""),
+    death_date: formatDateString(p.death_date ?? ""),
     gender: (p.gender ?? "").trim() || "Unknown",
     notes: p.notes ?? "",
   };
@@ -300,8 +304,9 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
         events.push({
           key: newKey("ev"),
           eventType: normalizeEventType(String(e.event_type ?? "other")),
-          eventDate: e.event_date ?? "",
+          eventDate: formatDateString(e.event_date ?? ""),
           eventPlace: e.event_place ?? "",
+          eventNotes: (e.description ?? "").trim(),
         });
       }
     }
@@ -435,6 +440,8 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
 const inputClass =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600";
 
+const textareaClass = `${inputClass} min-h-[5rem] resize-y`;
+
 const labelClass = "mb-1 block text-xs font-medium text-zinc-600";
 
 export default function ReviewRecordClient({
@@ -494,6 +501,7 @@ export default function ReviewRecordClient({
           event_type: e.eventType,
           event_date: e.eventDate.trim() || null,
           event_place: e.eventPlace.trim() || null,
+          notes: e.eventNotes.trim() || null,
         })),
       })),
     };
@@ -847,6 +855,7 @@ export default function ReviewRecordClient({
                                     eventType: "other",
                                     eventDate: "",
                                     eventPlace: "",
+                                    eventNotes: "",
                                   },
                                 ],
                               })
@@ -935,6 +944,28 @@ export default function ReviewRecordClient({
                                           ),
                                         })
                                       }
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <label className={labelClass}>Notes</label>
+                                    <textarea
+                                      className={textareaClass}
+                                      value={ev.eventNotes}
+                                      onChange={(e) =>
+                                        updateCard(item.key, {
+                                          ...item,
+                                          events: item.events.map((x) =>
+                                            x.key === ev.key
+                                              ? {
+                                                  ...x,
+                                                  eventNotes: e.target.value,
+                                                }
+                                              : x
+                                          ),
+                                        })
+                                      }
+                                      rows={3}
+                                      placeholder="Details from the document (saved as timeline notes)"
                                     />
                                   </div>
                                 </div>
