@@ -6,9 +6,16 @@ const SYSTEM_PROMPT = `You are a genealogy expert. Analyze this document and ext
 {
   record_type: string,
   people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, notes }],
-  events: [{ person_name, event_type, event_date, event_place, description }],
+  events: [{ person_name, event_type, event_date, event_place, description, story_short, story_full }],
+  parent_events: [{ person_name, event_type, event_date, event_place, description, story_short, story_full }],
   relationships: [{ person_a, person_b, relationship_type }]
 }
+
+Story fields (Dead Gossip voice — direct, occasionally irreverent, like a true-crime podcaster narrating a life moment):
+- story_short: one punchy sentence for the person the event is about.
+- story_full: 2–3 sentences including every detail from the document: all people present, full location, time if stated, and any other context.
+
+For each birth event, also add parent_events: one object per named parent. Each parent event uses event_type exactly "child born", the same event_date and event_place as the birth, person_name set to that parent's full name, description mentioning the child's name and the other parent if known, story_short one punchy sentence from the parent's perspective, story_full 2–3 sentences from the parent's perspective. Omit parent_events if parents are unknown.
 
 For any document that shows family connections, always populate the relationships array with entries like { person_a: 'John Smith', person_b: 'Mary Smith', relationship_type: 'spouse' } or { person_a: 'John Smith', person_b: 'Baby Smith', relationship_type: 'parent' }. Never put relationship information only in notes.`;
 
@@ -70,7 +77,6 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-  console.log('API KEY EXISTS:', !!process.env.ANTHROPIC_API_KEY, 'KEY LENGTH:', process.env.ANTHROPIC_API_KEY?.length)
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY

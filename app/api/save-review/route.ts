@@ -1,5 +1,8 @@
+import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse, type NextRequest } from "next/server";
+
+/** Requires `event_sources` — apply `supabase/migrations/20260329120000_event_sources.sql`. */
 
 const MERGE_FIELDS = [
   "first_name",
@@ -131,6 +134,16 @@ function parsePendingPersons(raw: unknown): PendingPersonBody[] {
   return raw.filter((x) => typeof x === "object" && x !== null) as PendingPersonBody[];
 }
 
+function extractParentEventsFromAi(ai: unknown): Record<string, unknown>[] {
+  if (typeof ai !== "object" || ai === null) return [];
+  const pe = (ai as Record<string, unknown>).parent_events;
+  if (!Array.isArray(pe)) return [];
+  return pe.filter(
+    (x): x is Record<string, unknown> =>
+      typeof x === "object" && x !== null && !Array.isArray(x)
+  );
+}
+
 export async function POST(request: NextRequest) {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return NextResponse.json(
@@ -170,7 +183,7 @@ export async function POST(request: NextRequest) {
 
   const { data: recordRow, error: recordErr } = await supabase
     .from("records")
-    .select("id")
+    .select("id, ai_response")
     .eq("id", recordId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -358,19 +371,58 @@ export async function POST(request: NextRequest) {
       const e = ev as Record<string, unknown>;
       const noteText =
         String(e.notes ?? e.description ?? "").trim() || null;
-      const { error: evErr } = await supabase.from("events").insert({
-        user_id: user.id,
-        person_id: personId,
-        record_id: recordId,
-        event_type: String(e.event_type ?? "").trim() || "other",
-        event_date: String(e.event_date ?? "").trim() || null,
-        event_place: String(e.event_place ?? "").trim() || null,
-        notes: noteText,
-      });
+      const storyShort =
+        String(e.story_short ?? "").trim() || null;
+      const storyFull = String(e.story_full ?? "").trim() || null;
+      const { error: evSaveErr } = await savePersonEventWithDedupe(
+        supabase,
+        user.id,
+        personId,
+        recordId,
+        {
+          event_type: String(e.event_type ?? "").trim() || "other",
+          event_date: String(e.event_date ?? "").trim() || null,
+          event_place: String(e.event_place ?? "").trim() || null,
+          notes: noteText,
+          story_short: storyShort,
+          story_full: storyFull,
+        }
+      );
 
-      if (evErr) {
-        return NextResponse.json({ error: evErr.message }, { status: 500 });
+      if (evSaveErr) {
+        return NextResponse.json({ error: evSaveErr }, { status: 500 });
       }
+    }
+  }
+
+  for (const pe of extractParentEventsFromAi(recordRow.ai_response)) {
+    const parentName = String(pe.person_name ?? "").trim();
+    if (!parentName) continue;
+
+    const parentId = nameToId.get(normalizeFullName(parentName));
+    if (!parentId) continue;
+
+    const descText = String(pe.description ?? "").trim() || null;
+    const pStoryShort = String(pe.story_short ?? "").trim() || null;
+    const pStoryFull = String(pe.story_full ?? "").trim() || null;
+
+    const { error: peSaveErr } = await savePersonEventWithDedupe(
+      supabase,
+      user.id,
+      parentId,
+      recordId,
+      {
+        event_type: String(pe.event_type ?? "").trim() || "child born",
+        event_date: String(pe.event_date ?? "").trim() || null,
+        event_place: String(pe.event_place ?? "").trim() || null,
+        notes: descText,
+        story_short: pStoryShort,
+        story_full: pStoryFull,
+      }
+    );
+
+    if (peSaveErr) {
+      return NextResponse.json({ error: peSaveErr }, { status: 500 });
     }
   }
 

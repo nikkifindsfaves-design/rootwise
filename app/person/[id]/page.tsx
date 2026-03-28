@@ -42,6 +42,8 @@ type EventRow = {
   description: string | null;
   record_id: string | null;
   notes: string | null;
+  story_short: string | null;
+  story_full: string | null;
 };
 
 type RelRow = {
@@ -59,9 +61,15 @@ type RecordRow = {
   ai_response: unknown;
 };
 
+type EventSourceRow = {
+  id: string;
+  event_id: string;
+  record_id: string;
+  notes: string | null;
+  created_at: string;
+};
+
 const SIGNED_URL_EXPIRY_SEC = 3600;
-const DAY_MS = 86400000;
-const CLUSTER_WINDOW_MS = 365 * DAY_MS;
 
 type TabId = "details" | "documents" | "photos" | "notes";
 
@@ -102,11 +110,22 @@ function parseEventDateMs(s: string | null | undefined): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+function recordTypeLabel(row: RecordRow): string {
+  if (row.record_type && String(row.record_type).trim() !== "") {
+    return String(row.record_type);
+  }
+  const ai = row.ai_response as { record_type?: string } | null;
+  if (ai && typeof ai.record_type === "string" && ai.record_type.trim() !== "") {
+    return ai.record_type;
+  }
+  return "Record";
+}
+
 /**
- * Group by normalized event_type; within each type, merge consecutive events
- * whose dates are at most 365 days apart (by sorted order).
+ * One timeline row per normalized event_type; legacy duplicate rows (same type)
+ * are merged for display.
  */
-function clusterEventsForTimeline(events: EventRow[]): EventCluster[] {
+function groupTimelineByEventType(events: EventRow[]): EventCluster[] {
   const byTypeKey = new Map<string, EventRow[]>();
   for (const ev of events) {
     const key = (ev.event_type || "other").trim().toLowerCase() || "other";
@@ -117,44 +136,11 @@ function clusterEventsForTimeline(events: EventRow[]): EventCluster[] {
   const clusters: EventCluster[] = [];
 
   for (const [, list] of byTypeKey) {
-    const withDates = list.filter((e) => parseEventDateMs(e.event_date) != null);
-    const noDates = list.filter((e) => parseEventDateMs(e.event_date) == null);
-
-    withDates.sort(
-      (a, b) =>
-        parseEventDateMs(a.event_date)! - parseEventDateMs(b.event_date)!
-    );
-
-    let chunk: EventRow[] = [];
-    for (const ev of withDates) {
-      const t = parseEventDateMs(ev.event_date)!;
-      if (chunk.length === 0) {
-        chunk = [ev];
-      } else {
-        const prevT = parseEventDateMs(chunk[chunk.length - 1]!.event_date)!;
-        if (t - prevT <= CLUSTER_WINDOW_MS) {
-          chunk.push(ev);
-        } else {
-          clusters.push({
-            displayType: chunk[0]!.event_type || "Event",
-            events: chunk,
-          });
-          chunk = [ev];
-        }
-      }
-    }
-    if (chunk.length > 0) {
-      clusters.push({
-        displayType: chunk[0]!.event_type || "Event",
-        events: chunk,
-      });
-    }
-    if (noDates.length > 0) {
-      clusters.push({
-        displayType: noDates[0]!.event_type || "Event",
-        events: noDates,
-      });
-    }
+    const sorted = sortEventsChronologically(list);
+    clusters.push({
+      displayType: sorted[0]!.event_type || "Event",
+      events: sorted,
+    });
   }
 
   clusters.sort((a, b) => {
@@ -167,6 +153,139 @@ function clusterEventsForTimeline(events: EventRow[]): EventCluster[] {
   });
 
   return clusters;
+}
+
+function clusterStableKey(cluster: EventCluster): string {
+  return [...cluster.events].map((e) => e.id).sort().join("|");
+}
+
+function eventsSortedByDate(cluster: EventCluster): EventRow[] {
+  return [...cluster.events].sort((a, b) => {
+    const ma = parseEventDateMs(a.event_date);
+    const mb = parseEventDateMs(b.event_date);
+    if (ma == null && mb == null) return 0;
+    if (ma == null) return 1;
+    if (mb == null) return -1;
+    return ma - mb;
+  });
+}
+
+function clusterPlacesLine(cluster: EventCluster): string {
+  const parts = [
+    ...new Set(
+      cluster.events
+        .map((e) => e.event_place?.trim())
+        .filter(Boolean) as string[]
+    ),
+  ];
+  return parts.join(" · ");
+}
+
+function representativeEventForCluster(cluster: EventCluster): EventRow {
+  return eventsSortedByDate(cluster)[0]!;
+}
+
+/** First chronological row with a non-empty story_short (for heading). */
+function firstStoryShortInCluster(cluster: EventCluster): {
+  text: string;
+  eventId: string;
+} {
+  for (const e of eventsSortedByDate(cluster)) {
+    const s = e.story_short?.trim();
+    if (s) return { text: s, eventId: e.id };
+  }
+  const rep = representativeEventForCluster(cluster);
+  return { text: "", eventId: rep.id };
+}
+
+/** First chronological row with a non-empty story_full (for Read more). */
+function firstStoryFullInCluster(cluster: EventCluster): {
+  text: string;
+  eventId: string;
+} {
+  for (const e of eventsSortedByDate(cluster)) {
+    const s = e.story_full?.trim();
+    if (s) return { text: s, eventId: e.id };
+  }
+  const rep = representativeEventForCluster(cluster);
+  return { text: "", eventId: rep.id };
+}
+
+function clusterDescriptionLines(cluster: EventCluster): string[] {
+  return [
+    ...new Set(
+      cluster.events
+        .map((e) => e.description?.trim())
+        .filter(Boolean) as string[]
+    ),
+  ];
+}
+
+/**
+ * One expandable Notes block: all `event_sources.notes` for every `event_id` in
+ * this cluster, ordered by `created_at`. If none, falls back to legacy `events.notes`
+ * (chronological) so older rows still show something.
+ */
+function clusterNotesSegmentsForTimeline(
+  cluster: EventCluster,
+  sourcesByEventId: Map<string, EventSourceRow[]>
+): string[] {
+  type Item = { t: number; text: string };
+  const items: Item[] = [];
+  for (const ev of eventsSortedByDate(cluster)) {
+    for (const s of sourcesByEventId.get(ev.id) ?? []) {
+      const text = s.notes?.trim();
+      if (!text) continue;
+      items.push({
+        t: new Date(s.created_at).getTime(),
+        text,
+      });
+    }
+  }
+  items.sort((a, b) => a.t - b.t);
+  if (items.length > 0) return items.map((i) => i.text);
+
+  const legacy: string[] = [];
+  for (const ev of eventsSortedByDate(cluster)) {
+    if (ev.notes?.trim()) legacy.push(ev.notes.trim());
+  }
+  return legacy;
+}
+
+function clusterLinkedSources(
+  cluster: EventCluster,
+  sourcesByEventId: Map<string, EventSourceRow[]>,
+  recordsById: Map<string, RecordRow>,
+  signedDocUrls: Map<string, string>
+): { id: string; label: string; url: string | null }[] {
+  const seen = new Set<string>();
+  const out: { id: string; label: string; url: string | null }[] = [];
+
+  for (const ev of cluster.events) {
+    for (const row of sourcesByEventId.get(ev.id) ?? []) {
+      const rid = row.record_id;
+      if (!rid || seen.has(rid) || !recordsById.has(rid)) continue;
+      seen.add(rid);
+      const rec = recordsById.get(rid)!;
+      out.push({
+        id: rid,
+        label: recordTypeLabel(rec),
+        url: signedDocUrls.get(rid) ?? null,
+      });
+    }
+    const legacy = ev.record_id?.trim();
+    if (legacy && !seen.has(legacy) && recordsById.has(legacy)) {
+      seen.add(legacy);
+      const rec = recordsById.get(legacy)!;
+      out.push({
+        id: legacy,
+        label: recordTypeLabel(rec),
+        url: signedDocUrls.get(legacy) ?? null,
+      });
+    }
+  }
+
+  return out;
 }
 
 function clusterDateLabel(cluster: EventCluster): string {
@@ -201,38 +320,6 @@ function formatResearchNoteTimestamp(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function recordSourcesForCluster(
-  cluster: EventCluster,
-  recordsById: Map<string, RecordRow>,
-  signedDocUrls: Map<string, string>
-): { id: string; label: string; url: string | null }[] {
-  const seen = new Set<string>();
-  const out: { id: string; label: string; url: string | null }[] = [];
-  for (const ev of cluster.events) {
-    const id = ev.record_id;
-    if (!id || seen.has(id) || !recordsById.has(id)) continue;
-    seen.add(id);
-    const rec = recordsById.get(id)!;
-    out.push({
-      id,
-      label: recordTypeLabel(rec),
-      url: signedDocUrls.get(id) ?? null,
-    });
-  }
-  return out;
-}
-
-function recordTypeLabel(row: RecordRow): string {
-  if (row.record_type && String(row.record_type).trim() !== "") {
-    return String(row.record_type);
-  }
-  const ai = row.ai_response as { record_type?: string } | null;
-  if (ai && typeof ai.record_type === "string" && ai.record_type.trim() !== "") {
-    return ai.record_type;
-  }
-  return "Record";
 }
 
 function classifyRelationship(
@@ -438,7 +525,13 @@ export default function PersonProfilePage() {
   const [signedDocUrls, setSignedDocUrls] = useState<Map<string, string>>(
     new Map()
   );
-  const [expandedEventNotesIds, setExpandedEventNotesIds] = useState<
+  const [eventSources, setEventSources] = useState<EventSourceRow[]>([]);
+  const [expandedTimelineNotesKeys, setExpandedTimelineNotesKeys] = useState<
+    Set<string>
+  >(() => new Set());
+  const [expandedTimelineSourcesKeys, setExpandedTimelineSourcesKeys] =
+    useState<Set<string>>(() => new Set());
+  const [expandedStoryFullIds, setExpandedStoryFullIds] = useState<
     Set<string>
   >(() => new Set());
   const [researchNoteId, setResearchNoteId] = useState<string | null>(null);
@@ -453,7 +546,9 @@ export default function PersonProfilePage() {
   >(null);
 
   useEffect(() => {
-    setExpandedEventNotesIds(new Set());
+    setExpandedTimelineNotesKeys(new Set());
+    setExpandedTimelineSourcesKeys(new Set());
+    setExpandedStoryFullIds(new Set());
   }, [personId]);
 
   const load = useCallback(async () => {
@@ -506,7 +601,7 @@ export default function PersonProfilePage() {
     const { data: eventData, error: eventErr } = await supabase
       .from("events")
       .select(
-        "id, event_type, event_date, event_place, description, record_id, notes"
+        "id, event_type, event_date, event_place, description, record_id, notes, story_short, story_full"
       )
       .eq("person_id", personId)
       .eq("user_id", user.id)
@@ -585,13 +680,32 @@ export default function PersonProfilePage() {
       photosParsed = photosData as Record<string, unknown>[];
     }
 
-    const recordIds = [
-      ...new Set(
-        sortedEvents
-          .map((e) => e.record_id)
-          .filter((id): id is string => typeof id === "string" && id.length > 0)
-      ),
-    ];
+    let sourceRows: EventSourceRow[] = [];
+    const eventIds = sortedEvents.map((e) => e.id);
+    if (eventIds.length > 0) {
+      const { data: esData, error: esErr } = await supabase
+        .from("event_sources")
+        .select("id, event_id, record_id, notes, created_at")
+        .in("event_id", eventIds);
+
+      if (esErr) {
+        setError(esErr.message);
+        setLoading(false);
+        return;
+      }
+      sourceRows = (esData ?? []) as EventSourceRow[];
+    }
+
+    const recordIdSet = new Set<string>();
+    for (const e of sortedEvents) {
+      const rid = e.record_id?.trim();
+      if (rid) recordIdSet.add(rid);
+    }
+    for (const s of sourceRows) {
+      const rid = s.record_id?.trim();
+      if (rid) recordIdSet.add(rid);
+    }
+    const recordIds = [...recordIdSet];
 
     let recMap = new Map<string, RecordRow>();
     if (recordIds.length > 0) {
@@ -631,6 +745,7 @@ export default function PersonProfilePage() {
 
     setPerson(p);
     setEvents(sortedEvents);
+    setEventSources(sourceRows);
     setPhotoRows(photosParsed);
     setRecordsById(recMap);
     setFamily({
@@ -691,12 +806,39 @@ export default function PersonProfilePage() {
   );
 
   const timelineClusters = useMemo(
-    () => clusterEventsForTimeline(events),
+    () => groupTimelineByEventType(events),
     [events]
   );
 
-  function toggleEventNotesExpanded(eventId: string) {
-    setExpandedEventNotesIds((prev) => {
+  const eventSourcesByEventId = useMemo(() => {
+    const m = new Map<string, EventSourceRow[]>();
+    for (const row of eventSources) {
+      if (!m.has(row.event_id)) m.set(row.event_id, []);
+      m.get(row.event_id)!.push(row);
+    }
+    return m;
+  }, [eventSources]);
+
+  function toggleTimelineNotesCluster(clusterKey: string) {
+    setExpandedTimelineNotesKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(clusterKey)) next.delete(clusterKey);
+      else next.add(clusterKey);
+      return next;
+    });
+  }
+
+  function toggleTimelineSourcesCluster(clusterKey: string) {
+    setExpandedTimelineSourcesKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(clusterKey)) next.delete(clusterKey);
+      else next.add(clusterKey);
+      return next;
+    });
+  }
+
+  function toggleStoryFullExpanded(eventId: string) {
+    setExpandedStoryFullIds((prev) => {
       const next = new Set(prev);
       if (next.has(eventId)) next.delete(eventId);
       else next.add(eventId);
@@ -834,14 +976,18 @@ export default function PersonProfilePage() {
     .filter(Boolean)
     .join(" ");
 
-  const documentRecords = [
-    ...new Map(
-      events
-        .map((e) => e.record_id)
-        .filter((id): id is string => !!id && recordsById.has(id))
-        .map((id) => [id, recordsById.get(id)!] as const)
-    ).values(),
-  ];
+  const documentRecordIds = new Set<string>();
+  for (const e of events) {
+    const id = e.record_id?.trim();
+    if (id && recordsById.has(id)) documentRecordIds.add(id);
+  }
+  for (const s of eventSources) {
+    const id = s.record_id?.trim();
+    if (id && recordsById.has(id)) documentRecordIds.add(id);
+  }
+  const documentRecords = [...documentRecordIds].map(
+    (id) => recordsById.get(id)!
+  );
 
   function handleTabClick(tab: TabId) {
     setActiveTab(tab);
@@ -1075,31 +1221,36 @@ export default function PersonProfilePage() {
                   />
                   <ul className="space-y-0">
                     {timelineClusters.map((cluster, cIdx) => {
-                      const sources = recordSourcesForCluster(
+                      const cKey = clusterStableKey(cluster);
+                      const rep = representativeEventForCluster(cluster);
+                      const typ = (rep.event_type || "Event").trim();
+                      const storyHead = firstStoryShortInCluster(cluster);
+                      const headline = storyHead.text || typ;
+                      const fullPick = firstStoryFullInCluster(cluster);
+                      const full = fullPick.text;
+                      const storyOpen = expandedStoryFullIds.has(
+                        fullPick.eventId
+                      );
+                      const placesLine = clusterPlacesLine(cluster);
+                      const noteSegments = clusterNotesSegmentsForTimeline(
                         cluster,
+                        eventSourcesByEventId
+                      );
+                      const notesOpen = expandedTimelineNotesKeys.has(cKey);
+                      const linkedSources = clusterLinkedSources(
+                        cluster,
+                        eventSourcesByEventId,
                         recordsById,
                         signedDocUrls
                       );
-                      const places = [
-                        ...new Set(
-                          cluster.events
-                            .map((e) => e.event_place?.trim())
-                            .filter(Boolean) as string[]
-                        ),
-                      ];
-                      const descriptions = [
-                        ...new Set(
-                          cluster.events
-                            .map((e) => e.description?.trim())
-                            .filter(Boolean) as string[]
-                        ),
-                      ];
-                      const clusterKey =
-                        cluster.events.map((e) => e.id).join("-") ||
-                        `cluster-${cIdx}`;
+                      const sourcesOpen =
+                        expandedTimelineSourcesKeys.has(cKey);
+                      const descLines = clusterDescriptionLines(cluster);
+                      const listKey = `${cKey}-${cIdx}`;
+
                       return (
                         <li
-                          key={`${clusterKey}-${cIdx}`}
+                          key={listKey}
                           className="relative flex gap-4 pb-10 sm:gap-6"
                         >
                           <div
@@ -1139,126 +1290,184 @@ export default function PersonProfilePage() {
                                   color: colors.brownDark,
                                 }}
                               >
-                                {cluster.displayType || "Event"}
+                                {headline}
                               </p>
-                              {places.length > 0 ? (
-                                <p
-                                  className="mt-1 text-sm"
-                                  style={{
-                                    fontFamily: sans,
-                                    color: colors.brownMid,
-                                    fontStyle: "italic",
-                                  }}
-                                >
-                                  {places.join(" · ")}
-                                </p>
+                              <p
+                                className="mt-1 text-sm italic"
+                                style={{
+                                  fontFamily: sans,
+                                  color: colors.brownMuted,
+                                }}
+                              >
+                                {placesLine || "—"}
+                              </p>
+                              {full ? (
+                                <div className="mt-2">
+                                  {!storyOpen ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleStoryFullExpanded(
+                                          fullPick.eventId
+                                        )
+                                      }
+                                      className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.forest,
+                                        fontWeight: 600,
+                                        cursor: "pointer",
+                                      }}
+                                      aria-expanded={false}
+                                    >
+                                      Read more
+                                    </button>
+                                  ) : (
+                                    <div>
+                                      <p
+                                        className="whitespace-pre-wrap text-sm leading-relaxed"
+                                        style={{
+                                          fontFamily: sans,
+                                          color: colors.brownMid,
+                                        }}
+                                      >
+                                        {full}
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          toggleStoryFullExpanded(
+                                            fullPick.eventId
+                                          )
+                                        }
+                                        className="mt-2 border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                        style={{
+                                          fontFamily: sans,
+                                          color: colors.forest,
+                                          fontWeight: 600,
+                                          cursor: "pointer",
+                                        }}
+                                        aria-expanded={true}
+                                      >
+                                        Show less
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               ) : null}
-                              {descriptions.map((text, di) => (
+                              {descLines.map((line, di) => (
                                 <p
-                                  key={`d-${di}-${text.slice(0, 24)}`}
+                                  key={`${listKey}-d-${di}`}
                                   className="mt-2 text-sm leading-relaxed"
                                   style={{
                                     fontFamily: sans,
                                     color: colors.brownMuted,
                                   }}
                                 >
-                                  {text}
+                                  {line}
                                 </p>
                               ))}
-                              {cluster.events.some((e) => e.notes?.trim()) ? (
-                                <div className="mt-3 space-y-2">
-                                  {cluster.events.map((e) => {
-                                    const noteText = e.notes?.trim();
-                                    if (!noteText) return null;
-                                    const open = expandedEventNotesIds.has(
-                                      e.id
-                                    );
-                                    return (
-                                      <div key={e.id}>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            toggleEventNotesExpanded(e.id)
-                                          }
-                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                          style={{
-                                            fontFamily: sans,
-                                            color: colors.forest,
-                                            fontWeight: 600,
-                                            cursor: "pointer",
-                                          }}
-                                          aria-expanded={open}
-                                        >
-                                          {open
-                                            ? "▼ Hide notes"
-                                            : "▸ Show notes"}
-                                        </button>
-                                        {open ? (
-                                          <p
-                                            className="mt-1.5 whitespace-pre-wrap pl-0.5 text-sm leading-relaxed"
-                                            style={{
-                                              fontFamily: sans,
-                                              color: colors.brownMid,
-                                            }}
-                                          >
-                                            {noteText}
-                                          </p>
-                                        ) : null}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : null}
-                              {sources.length > 0 ? (
-                                <div
-                                  className="mt-3 border-t pt-3"
-                                  style={{
-                                    borderColor: `${colors.brownBorder}55`,
-                                  }}
-                                >
-                                  <p
-                                    className="mb-1.5 text-[10px] font-bold uppercase tracking-widest"
+                              {noteSegments.length > 0 ? (
+                                <div className="mt-3">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      toggleTimelineNotesCluster(cKey)
+                                    }
+                                    className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
                                     style={{
                                       fontFamily: sans,
-                                      color: colors.brownMuted,
+                                      color: colors.forest,
+                                      fontWeight: 600,
+                                      cursor: "pointer",
                                     }}
+                                    aria-expanded={notesOpen}
                                   >
-                                    Document sources
-                                  </p>
-                                  <ul className="space-y-1.5">
-                                    {sources.map((src) => (
-                                      <li key={src.id}>
-                                        {src.url ? (
-                                          <a
-                                            href={src.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                            style={{
-                                              fontFamily: sans,
-                                              color: colors.forest,
-                                              fontWeight: 600,
-                                            }}
-                                          >
-                                            {src.label}
-                                          </a>
-                                        ) : (
-                                          <span
-                                            className="text-sm"
-                                            style={{
-                                              fontFamily: sans,
-                                              color: colors.brownMuted,
-                                            }}
-                                          >
-                                            {src.label}
-                                            <span className="ml-1 text-xs italic">
-                                              (link unavailable)
+                                    {notesOpen ? "Hide notes" : "Notes"}
+                                  </button>
+                                  {notesOpen ? (
+                                    <div
+                                      className="mt-2 pl-0.5 text-sm leading-relaxed"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMid,
+                                      }}
+                                    >
+                                      {noteSegments.map((chunk, ni) => (
+                                        <div key={`${listKey}-n-${ni}`}>
+                                          {ni > 0 ? (
+                                            <hr
+                                              className="my-3 border-0 border-t"
+                                              style={{
+                                                borderColor: `${colors.brownBorder}99`,
+                                              }}
+                                            />
+                                          ) : null}
+                                          <p className="whitespace-pre-wrap">
+                                            {chunk}
+                                          </p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {linkedSources.length > 0 ? (
+                                <div className="mt-3">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      toggleTimelineSourcesCluster(cKey)
+                                    }
+                                    className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                    style={{
+                                      fontFamily: sans,
+                                      color: colors.forest,
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                    }}
+                                    aria-expanded={sourcesOpen}
+                                  >
+                                    {sourcesOpen
+                                      ? "Hide sources"
+                                      : `Sources (${linkedSources.length})`}
+                                  </button>
+                                  {sourcesOpen ? (
+                                    <ul className="mt-2 space-y-1.5 pl-0.5">
+                                      {linkedSources.map((src) => (
+                                        <li key={src.id}>
+                                          {src.url ? (
+                                            <a
+                                              href={src.url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                              style={{
+                                                fontFamily: sans,
+                                                color: colors.forest,
+                                                fontWeight: 600,
+                                              }}
+                                            >
+                                              {src.label}
+                                            </a>
+                                          ) : (
+                                            <span
+                                              className="text-sm"
+                                              style={{
+                                                fontFamily: sans,
+                                                color: colors.brownMuted,
+                                              }}
+                                            >
+                                              {src.label}
+                                              <span className="ml-1 text-xs italic">
+                                                (link unavailable)
+                                              </span>
                                             </span>
-                                          </span>
-                                        )}
-                                      </li>
-                                    ))}
-                                  </ul>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
                                 </div>
                               ) : null}
                             </div>

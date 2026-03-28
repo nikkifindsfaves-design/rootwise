@@ -20,6 +20,8 @@ type AiEvent = {
   event_date?: string | null;
   event_place?: string | null;
   description?: string | null;
+  story_short?: string | null;
+  story_full?: string | null;
 };
 
 type AiRelationship = {
@@ -94,6 +96,8 @@ type EventRow = {
   eventPlace: string;
   /** From AI `description`; saved to DB as `events.notes`. */
   eventNotes: string;
+  eventStoryShort: string;
+  eventStoryFull: string;
 };
 
 type PersonCardState = {
@@ -125,6 +129,8 @@ export type PendingReviewPayload = {
       event_date: string | null;
       event_place: string | null;
       notes: string | null;
+      story_short: string | null;
+      story_full: string | null;
     }>;
   }>;
 };
@@ -307,6 +313,8 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           eventDate: formatDateString(e.event_date ?? ""),
           eventPlace: e.event_place ?? "",
           eventNotes: (e.description ?? "").trim(),
+          eventStoryShort: (e.story_short ?? "").trim(),
+          eventStoryFull: (e.story_full ?? "").trim(),
         });
       }
     }
@@ -502,6 +510,8 @@ export default function ReviewRecordClient({
           event_date: e.eventDate.trim() || null,
           event_place: e.eventPlace.trim() || null,
           notes: e.eventNotes.trim() || null,
+          story_short: e.eventStoryShort.trim() || null,
+          story_full: e.eventStoryFull.trim() || null,
         })),
       })),
     };
@@ -856,6 +866,8 @@ export default function ReviewRecordClient({
                                     eventDate: "",
                                     eventPlace: "",
                                     eventNotes: "",
+                                    eventStoryShort: "",
+                                    eventStoryFull: "",
                                   },
                                 ],
                               })

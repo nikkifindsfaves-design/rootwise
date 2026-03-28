@@ -1,5 +1,6 @@
 "use server";
 
+import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
 
 export type PersonRow = {
@@ -377,6 +378,8 @@ export type CardEventInput = {
   event_date: string | null;
   event_place: string | null;
   notes: string | null;
+  story_short: string | null;
+  story_full: string | null;
 };
 
 function inverseRelationshipType(t: string): string {
@@ -399,7 +402,7 @@ function inverseRelationshipType(t: string): string {
  * Saves the person, relationship edges (two rows per relationship: A→B and B→A perspectives), and events.
  * `relationships`: this person's relationship toward `related_name` with `relationship_type`.
  * Tables: `relationships` (user_id, person_a_id, person_b_id, relationship_type),
- * `events` (user_id, person_id, record_id, event_type, event_date, event_place, notes).
+ * `events` (user_id, person_id, record_id, event_type, event_date, event_place, notes, story_short, story_full).
  */
 export async function acceptPersonCard(params: {
   form: PersonFormInput;
@@ -591,18 +594,23 @@ export async function acceptPersonCard(params: {
   }
 
   for (const ev of params.events) {
-    const { error: evErr } = await supabase.from("events").insert({
-      user_id: user.id,
-      person_id: personId,
-      record_id: params.recordId,
-      event_type: ev.event_type.trim() || "other",
-      event_date: ev.event_date?.trim() || null,
-      event_place: ev.event_place?.trim() || null,
-      notes: ev.notes?.trim() || null,
-    });
+    const { error: evErr } = await savePersonEventWithDedupe(
+      supabase,
+      user.id,
+      personId,
+      params.recordId,
+      {
+        event_type: ev.event_type.trim() || "other",
+        event_date: ev.event_date?.trim() || null,
+        event_place: ev.event_place?.trim() || null,
+        notes: ev.notes?.trim() || null,
+        story_short: ev.story_short?.trim() || null,
+        story_full: ev.story_full?.trim() || null,
+      }
+    );
 
     if (evErr) {
-      return { ok: false, error: evErr.message };
+      return { ok: false, error: evErr };
     }
   }
 
