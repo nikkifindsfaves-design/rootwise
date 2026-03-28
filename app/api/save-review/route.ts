@@ -2,7 +2,11 @@ import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse, type NextRequest } from "next/server";
 
-/** Requires `event_sources` — apply `supabase/migrations/20260329120000_event_sources.sql`. */
+/**
+ * Event dedupe writes `event_sources` via `@/lib/events/dedupe` with `user_id` set
+ * to the authenticated user on every insert.
+ * Migrations: `20260329120000_event_sources.sql`, `20260330120000_event_sources_user_id.sql`.
+ */
 
 const MERGE_FIELDS = [
   "first_name",

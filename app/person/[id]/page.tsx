@@ -379,6 +379,16 @@ function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
   return "?";
 }
 
+/** "Male" / "Female" for header pill; Unknown or other values → hidden. */
+function genderBadgeLabel(
+  gender: string | null | undefined
+): "Male" | "Female" | null {
+  const n = (gender ?? "").trim().toLowerCase();
+  if (n === "male") return "Male";
+  if (n === "female") return "Female";
+  return null;
+}
+
 function formatUploadedAt(iso: string | null): string {
   if (!iso) return "—";
   try {
@@ -976,6 +986,17 @@ export default function PersonProfilePage() {
     .filter(Boolean)
     .join(" ");
 
+  const headerGenderBadge = genderBadgeLabel(person.gender);
+  const headerDateBits: string[] = [];
+  if (person.birth_date) {
+    headerDateBits.push(`b. ${formatDateString(person.birth_date)}`);
+  }
+  if (person.death_date) {
+    headerDateBits.push(`d. ${formatDateString(person.death_date)}`);
+  }
+  const headerDateSegment = headerDateBits.join("  ·  ");
+  const headerNoDates = headerDateBits.length === 0;
+
   const documentRecordIds = new Set<string>();
   for (const e of events) {
     const id = e.record_id?.trim();
@@ -1044,35 +1065,46 @@ export default function PersonProfilePage() {
               </span>
             )}
           </div>
-          <div className="mt-6 min-w-0 flex-1 sm:mt-0">
-            <h1
-              className="text-4xl font-bold leading-tight sm:text-5xl"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              {lastName}
-            </h1>
-            {firstMiddle ? (
-              <p
-                className="mt-2 text-xl sm:text-2xl"
-                style={{ fontFamily: serif, color: colors.brownMid }}
+          <div className="mt-6 min-w-0 w-full flex-1 sm:mt-0">
+            <div className="mx-auto inline-block max-w-full text-left sm:mx-0 sm:block sm:w-full">
+              <h1
+                className="text-4xl font-bold leading-tight sm:text-5xl"
+                style={{ fontFamily: serif, color: colors.brownDark }}
               >
-                {firstMiddle}
-              </p>
-            ) : null}
+                {lastName}
+              </h1>
+              {firstMiddle ? (
+                <p
+                  className="mt-2 text-xl sm:text-2xl"
+                  style={{ fontFamily: serif, color: colors.brownMid }}
+                >
+                  {firstMiddle}
+                </p>
+              ) : null}
+              {headerGenderBadge ? (
+                <div className="mt-2">
+                  <span
+                    className="inline-block shrink-0 font-medium leading-none"
+                    style={{
+                      fontFamily: sans,
+                      fontSize: 12,
+                      padding: "2px 10px",
+                      borderRadius: 12,
+                      backgroundColor: "#8B6F4E",
+                      color: "#fff",
+                    }}
+                  >
+                    {headerGenderBadge}
+                  </span>
+                </div>
+              ) : null}
+            </div>
             <p
               className="mt-4 text-sm italic sm:text-base"
               style={{ fontFamily: sans, color: colors.brownMuted }}
             >
-              {person.birth_date
-                ? `b. ${formatDateString(person.birth_date)}`
-                : ""}
-              {person.birth_date && person.death_date ? "  ·  " : ""}
-              {person.death_date
-                ? `d. ${formatDateString(person.death_date)}`
-                : ""}
-              {!person.birth_date && !person.death_date
-                ? "Dates unknown"
-                : ""}
+              {headerDateSegment ? headerDateSegment : null}
+              {headerNoDates ? "Dates unknown" : null}
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3 sm:justify-start">
               <button

@@ -184,6 +184,32 @@ function relatedPersonDisplayLabel(
   return rel.relatedNameExternal || "—";
 }
 
+/**
+ * Must match <select> option values exactly: Male, Female, Unknown.
+ * AI often returns lowercase or synonyms; normalize so the dropdown is controlled
+ * correctly and localStorage matches what the user sees.
+ */
+function normalizeGenderForPendingReview(
+  raw: string | null | undefined
+): "Male" | "Female" | "Unknown" {
+  const s = String(raw ?? "").trim();
+  if (!s) return "Unknown";
+  const n = s.toLowerCase();
+  if (n === "male" || n === "m" || n === "man") return "Male";
+  if (n === "female" || n === "f" || n === "woman") return "Female";
+  if (
+    n === "unknown" ||
+    n === "other" ||
+    n === "u" ||
+    n === "nonbinary" ||
+    n === "non-binary"
+  ) {
+    return "Unknown";
+  }
+  if (s === "Male" || s === "Female" || s === "Unknown") return s;
+  return "Unknown";
+}
+
 function toForm(p: AiPerson): PersonForm {
   return {
     first_name: p.first_name ?? "",
@@ -191,7 +217,7 @@ function toForm(p: AiPerson): PersonForm {
     last_name: p.last_name ?? "",
     birth_date: formatDateString(p.birth_date ?? ""),
     death_date: formatDateString(p.death_date ?? ""),
-    gender: (p.gender ?? "").trim() || "Unknown",
+    gender: normalizeGenderForPendingReview(p.gender),
     notes: p.notes ?? "",
   };
 }
@@ -497,7 +523,7 @@ export default function ReviewRecordClient({
         last_name: c.form.last_name.trim(),
         birth_date: c.form.birth_date.trim() || null,
         death_date: c.form.death_date.trim() || null,
-        gender: c.form.gender.trim() || "Unknown",
+        gender: normalizeGenderForPendingReview(c.form.gender),
         notes: c.form.notes.trim() || null,
         relationships: c.relationships
           .map((r) => ({
@@ -515,6 +541,11 @@ export default function ReviewRecordClient({
         })),
       })),
     };
+
+    console.log(
+      "[review step1] pendingReview before localStorage:",
+      JSON.parse(JSON.stringify(payload))
+    );
 
     try {
       localStorage.setItem(PENDING_REVIEW_KEY, JSON.stringify(payload));

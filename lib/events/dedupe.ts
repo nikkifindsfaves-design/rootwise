@@ -29,6 +29,7 @@ export async function findExistingEventIdForPersonType(
 /** Inserts a junction row unless (event_id, record_id) already exists. */
 export async function insertEventSourceIfMissing(
   supabase: SupabaseClient,
+  userId: string,
   eventId: string,
   recordId: string,
   notes: string | null
@@ -43,6 +44,7 @@ export async function insertEventSourceIfMissing(
   if (existing) return { error: null };
 
   const { error } = await supabase.from("event_sources").insert({
+    user_id: userId,
     event_id: eventId,
     record_id: recordId,
     notes,
@@ -75,6 +77,7 @@ export async function savePersonEventWithDedupe(
   if (existingId) {
     return insertEventSourceIfMissing(
       supabase,
+      userId,
       existingId,
       recordId,
       fields.notes
@@ -103,6 +106,7 @@ export async function savePersonEventWithDedupe(
 
   return insertEventSourceIfMissing(
     supabase,
+    userId,
     inserted.id as string,
     recordId,
     fields.notes

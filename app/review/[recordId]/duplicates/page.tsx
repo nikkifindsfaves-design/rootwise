@@ -249,6 +249,15 @@ export default function ReviewDuplicatesPage() {
         people: pr.people as PendingPerson[],
       };
 
+      payload.people.forEach((person, idx) => {
+        console.log(
+          `[duplicates] person[${idx}] from localStorage:`,
+          JSON.parse(JSON.stringify(person)),
+          "gender:",
+          person.gender
+        );
+      });
+
       if (payload.recordId !== recordIdParam) {
         setLoadError(
           "This page does not match the record in your saved review. Open the correct record or restart from step 1."
