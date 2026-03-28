@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const serif =
   "var(--font-dg-display), 'Playfair Display', Georgia, serif";
@@ -45,7 +45,6 @@ const MERGE_COMPARE_KEYS = [
   "birth_place",
   "gender",
   "notes",
-  "photo_url",
 ] as const;
 
 type MergeCompareKey = (typeof MERGE_COMPARE_KEYS)[number];
@@ -59,7 +58,6 @@ const MERGE_FIELD_LABELS: Record<MergeCompareKey, string> = {
   birth_place: "Birth place",
   gender: "Gender",
   notes: "Notes",
-  photo_url: "Photo URL",
 };
 
 function mergeFieldStr(
@@ -81,27 +79,10 @@ function mergeFieldsConflict(
   return a !== "" && b !== "" && a !== b;
 }
 
-function mergeSingleDisplayValue(
-  primary: PersonRow,
-  dup: PersonRow,
-  key: MergeCompareKey
-): string {
-  const a = mergeFieldStr(primary, key);
-  const b = mergeFieldStr(dup, key);
-  if (a && b && a === b) return a;
-  if (a && !b) return a;
-  if (!a && b) return b;
-  return "";
-}
-
 function formatMergeFieldForUi(key: MergeCompareKey, raw: string): string {
   if (!raw) return "—";
   if (key === "birth_date" || key === "death_date") {
     return formatDateString(raw);
-  }
-  if (key === "photo_url") {
-    if (raw.length > 48) return `${raw.slice(0, 24)}…${raw.slice(-12)}`;
-    return raw;
   }
   if (key === "notes" && raw.length > 200) {
     return `${raw.slice(0, 200)}…`;
@@ -338,6 +319,40 @@ function pickPrimaryPhotoUrl(
   return personPhotoUrl;
 }
 
+/** Same row order as `pickPrimaryPhotoUrl` uses for a gallery URL (not legacy person.photo_url). */
+function pickHeaderPhotoCropRow(
+  photoRows: Record<string, unknown>[]
+): Record<string, unknown> | null {
+  const primary = photoRows.find(
+    (p) => p.is_primary === true || p.primary === true
+  );
+  if (primary && photoUrlFromRow(primary)) return primary;
+  for (const row of photoRows) {
+    if (photoUrlFromRow(row)) return row;
+  }
+  return null;
+}
+
+function cropPercentFromUnknown(v: unknown, fallback: number): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.min(100, Math.max(0, v));
+  }
+  return fallback;
+}
+
+function cropZoomFromUnknown(v: unknown, fallback: number): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.min(3, Math.max(1, v));
+  }
+  return fallback;
+}
+
+const CROP_PREVIEW_PX = 280;
+/** Pixel delta → % change: (delta / 1.5) / 280 * 100 */
+function cropDragDeltaToPercent(deltaPx: number): number {
+  return ((deltaPx / 1.5) / CROP_PREVIEW_PX) * 100;
+}
+
 function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
   const f = p.first_name.trim();
   const l = p.last_name.trim();
@@ -398,6 +413,26 @@ function IconTrash({ className }: { className?: string }) {
       <path d="M3 6h18" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+function IconStar({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
     </svg>
   );
 }
@@ -691,11 +726,26 @@ export default function PersonProfilePage() {
   const [mergeSelectedDup, setMergeSelectedDup] = useState<PersonRow | null>(
     null
   );
+  /** Explicit step so the compare view always shows after picking a search result. */
+  const [mergeUiStep, setMergeUiStep] = useState<"search" | "compare">("search");
   const [mergeFieldChoices, setMergeFieldChoices] = useState<
     Record<string, "primary" | "duplicate">
   >({});
   const [mergeSaving, setMergeSaving] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
+
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+
+  const [cropModalPhoto, setCropModalPhoto] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
+  const [cropZoom, setCropZoom] = useState(1.0);
+  const [cropDragging, setCropDragging] = useState(false);
+  const cropMouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const cropTouchDragCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     setExpandedTimelineNotesKeys(new Set());
@@ -717,7 +767,18 @@ export default function PersonProfilePage() {
     setMergeError(null);
     setMergeSaving(false);
     setMergeSearchLoading(false);
+    setMergeUiStep("search");
+    setCropModalPhoto(null);
   }, [personId]);
+
+  useEffect(() => {
+    if (cropModalPhoto) return;
+    cropMouseDragCleanupRef.current?.();
+    cropMouseDragCleanupRef.current = null;
+    cropTouchDragCleanupRef.current?.();
+    cropTouchDragCleanupRef.current = null;
+    setCropDragging(false);
+  }, [cropModalPhoto]);
 
   const load = useCallback(async () => {
     if (!personId) {
@@ -1021,6 +1082,16 @@ export default function PersonProfilePage() {
     [person, photoRows]
   );
 
+  const headerPhotoCrop = useMemo(() => {
+    const row = pickHeaderPhotoCropRow(photoRows);
+    if (!row) return { x: 50, y: 50, zoom: 1 };
+    return {
+      x: cropPercentFromUnknown(row.crop_x, 50),
+      y: cropPercentFromUnknown(row.crop_y, 50),
+      zoom: cropZoomFromUnknown(row.crop_zoom, 1),
+    };
+  }, [photoRows]);
+
   const eventTypeSelectOptions = useMemo(
     () => buildEventTypeSelectOptions(events),
     [events]
@@ -1047,6 +1118,265 @@ export default function PersonProfilePage() {
       else next.add(eventId);
       return next;
     });
+  }
+
+  function extFromImageFile(file: File): string {
+    const t = (file.type || "").toLowerCase();
+    if (t === "image/jpeg" || t === "image/jpg") return "jpg";
+    if (t === "image/png") return "png";
+    if (t === "image/webp") return "webp";
+    if (t === "image/gif") return "gif";
+    const n = file.name.toLowerCase();
+    if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "jpg";
+    if (n.endsWith(".png")) return "png";
+    if (n.endsWith(".webp")) return "webp";
+    if (n.endsWith(".gif")) return "gif";
+    return "jpg";
+  }
+
+  function photosStoragePathFromFileUrl(fileUrl: string): string | null {
+    try {
+      const url = new URL(fileUrl);
+      const pub = "/object/public/photos/";
+      const pi = url.pathname.indexOf(pub);
+      if (pi !== -1) {
+        return decodeURIComponent(
+          url.pathname.slice(pi + pub.length).split("?")[0] ?? ""
+        );
+      }
+      const loose = url.pathname.indexOf("/photos/");
+      if (loose !== -1) {
+        return decodeURIComponent(
+          url.pathname.slice(loose + "/photos/".length).split("?")[0] ?? ""
+        );
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  async function uploadPhoto(file: File) {
+    if (!personId) return;
+    setPhotoUploadError(null);
+    setPhotoUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setPhotoUploadError("Not signed in.");
+        return;
+      }
+      const ext = extFromImageFile(file);
+      const path = `${user.id}/${personId}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("photos")
+        .upload(path, file, {
+          contentType: file.type || `image/${ext}`,
+          upsert: false,
+        });
+      if (upErr) {
+        setPhotoUploadError(upErr.message);
+        return;
+      }
+      const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
+      const file_url = pub.publicUrl;
+      const { error: insErr } = await supabase.from("photos").insert({
+        user_id: user.id,
+        person_id: personId,
+        file_url,
+        is_primary: false,
+      });
+      if (insErr) {
+        setPhotoUploadError(insErr.message);
+        return;
+      }
+      await load();
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
+  async function setPrimaryPhoto(photoRowId: string) {
+    if (!personId) return;
+    setPhotoUploadError(null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setPhotoUploadError("Not signed in.");
+      return;
+    }
+    const { error: e1 } = await supabase
+      .from("photos")
+      .update({ is_primary: false })
+      .eq("person_id", personId)
+      .eq("user_id", user.id);
+    if (e1) {
+      setPhotoUploadError(e1.message);
+      return;
+    }
+    const { error: e2 } = await supabase
+      .from("photos")
+      .update({ is_primary: true })
+      .eq("id", photoRowId)
+      .eq("user_id", user.id);
+    if (e2) {
+      setPhotoUploadError(e2.message);
+      return;
+    }
+    await load();
+  }
+
+  async function deletePhoto(row: Record<string, unknown>) {
+    const id = typeof row.id === "string" ? row.id : null;
+    if (!id) return;
+    setPhotoUploadError(null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setPhotoUploadError("Not signed in.");
+      return;
+    }
+    const fileUrl = photoUrlFromRow(row);
+    if (fileUrl) {
+      const storagePath = photosStoragePathFromFileUrl(fileUrl);
+      if (storagePath) {
+        const { error: rmErr } = await supabase.storage
+          .from("photos")
+          .remove([storagePath]);
+        if (rmErr) {
+          setPhotoUploadError(rmErr.message);
+          return;
+        }
+      }
+    }
+    const { error: delErr } = await supabase
+      .from("photos")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+    if (delErr) {
+      setPhotoUploadError(delErr.message);
+      return;
+    }
+    await load();
+  }
+
+  async function saveCropPosition(
+    photoRowId: string,
+    x: number,
+    y: number,
+    zoom: number
+  ) {
+    // requires crop_zoom column on photos table
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const cx = Math.min(100, Math.max(0, x));
+    const cy = Math.min(100, Math.max(0, y));
+    const cz = Math.min(3, Math.max(1, zoom));
+    const { error } = await supabase
+      .from("photos")
+      .update({ crop_x: cx, crop_y: cy, crop_zoom: cz })
+      .eq("id", photoRowId)
+      .eq("user_id", user.id);
+    if (error) {
+      setPhotoUploadError(error.message);
+      return;
+    }
+    setCropModalPhoto(null);
+    await load();
+  }
+
+  function attachCropMouseDrag(startX: number, startY: number) {
+    cropMouseDragCleanupRef.current?.();
+    setCropDragging(true);
+    let lastX = startX;
+    let lastY = startY;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - lastX;
+      const dy = ev.clientY - lastY;
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      const dxp = cropDragDeltaToPercent(dx);
+      const dyp = cropDragDeltaToPercent(dy);
+      setCropPos((p) => ({
+        x: Math.min(100, Math.max(0, p.x + dxp)),
+        y: Math.min(100, Math.max(0, p.y + dyp)),
+      }));
+    };
+    const onUp = () => {
+      setCropDragging(false);
+      cropMouseDragCleanupRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    cropMouseDragCleanupRef.current = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setCropDragging(false);
+    };
+  }
+
+  function handleCropCircleMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    attachCropMouseDrag(e.clientX, e.clientY);
+  }
+
+  function attachCropTouchDrag(startClientX: number, startClientY: number) {
+    cropTouchDragCleanupRef.current?.();
+    setCropDragging(true);
+    let lastX = startClientX;
+    let lastY = startClientY;
+    const onMove = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1) return;
+      ev.preventDefault();
+      const t = ev.touches[0]!;
+      const dx = t.clientX - lastX;
+      const dy = t.clientY - lastY;
+      lastX = t.clientX;
+      lastY = t.clientY;
+      const dxp = cropDragDeltaToPercent(dx);
+      const dyp = cropDragDeltaToPercent(dy);
+      setCropPos((p) => ({
+        x: Math.min(100, Math.max(0, p.x + dxp)),
+        y: Math.min(100, Math.max(0, p.y + dyp)),
+      }));
+    };
+    const onEnd = () => {
+      setCropDragging(false);
+      cropTouchDragCleanupRef.current = null;
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
+    };
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
+    window.addEventListener("touchcancel", onEnd);
+    cropTouchDragCleanupRef.current = () => {
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
+      setCropDragging(false);
+    };
+  }
+
+  function handleCropCircleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0]!;
+    attachCropTouchDrag(t.clientX, t.clientY);
   }
 
   async function saveResearchNotes() {
@@ -1218,6 +1548,7 @@ export default function PersonProfilePage() {
     setMergeSearchResults([]);
     setMergeSearchError(null);
     setMergeSelectedDup(null);
+    setMergeUiStep("search");
     setMergeFieldChoices({});
     setMergeError(null);
     setMergeSaving(false);
@@ -1236,12 +1567,34 @@ export default function PersonProfilePage() {
 
   function selectMergeDuplicate(dup: PersonRow) {
     if (!person) return;
-    setMergeSelectedDup(dup);
+    const id = String(dup?.id ?? "").trim();
+    if (!id) return;
+    const normalized: PersonRow = {
+      ...dup,
+      id,
+      first_name: dup.first_name ?? "",
+      last_name: dup.last_name ?? "",
+      middle_name: dup.middle_name ?? null,
+      birth_date: dup.birth_date ?? null,
+      death_date: dup.death_date ?? null,
+      birth_place: dup.birth_place ?? null,
+      photo_url: dup.photo_url ?? null,
+      gender: dup.gender ?? null,
+      notes: dup.notes ?? null,
+    };
+    setMergeSelectedDup(normalized);
+    setMergeUiStep("compare");
     const choices: Record<string, "primary" | "duplicate"> = {};
     for (const k of MERGE_COMPARE_KEYS) {
-      if (mergeFieldsConflict(person, dup, k)) choices[k] = "primary";
+      if (mergeFieldsConflict(person, normalized, k)) choices[k] = "primary";
     }
     setMergeFieldChoices(choices);
+  }
+
+  function backToMergeSearch() {
+    setMergeSelectedDup(null);
+    setMergeFieldChoices({});
+    setMergeUiStep("search");
   }
 
   async function confirmMerge() {
@@ -1533,12 +1886,19 @@ export default function PersonProfilePage() {
             }}
           >
             {headerPhotoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={headerPhotoUrl}
-                alt=""
-                className="h-full w-full object-cover"
-              />
+              <div className="h-full w-full overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={headerPhotoUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  style={{
+                    objectPosition: `${headerPhotoCrop.x}% ${headerPhotoCrop.y}%`,
+                    transform: `scale(${headerPhotoCrop.zoom})`,
+                    transformOrigin: "center center",
+                  }}
+                />
+              </div>
             ) : (
               <span
                 className="flex h-full w-full items-center justify-center text-4xl font-bold"
@@ -2459,6 +2819,50 @@ export default function PersonProfilePage() {
             >
               Photos
             </h2>
+            <div className="mb-6 flex flex-wrap items-center gap-3">
+              <input
+                id="person-profile-photo-upload"
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={photoUploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void uploadPhoto(f);
+                }}
+              />
+              <label
+                htmlFor="person-profile-photo-upload"
+                className="inline-block cursor-pointer rounded border-2 px-4 py-2 text-sm font-semibold transition-opacity"
+                style={{
+                  fontFamily: sans,
+                  borderColor: colors.brownOutline,
+                  color: colors.brownDark,
+                  backgroundColor: colors.cream,
+                  opacity: photoUploading ? 0.6 : 1,
+                  pointerEvents: photoUploading ? "none" : "auto",
+                }}
+              >
+                Upload photo
+              </label>
+              {photoUploading ? (
+                <span
+                  className="text-sm italic"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Uploading…
+                </span>
+              ) : null}
+            </div>
+            {photoUploadError ? (
+              <p
+                className="mb-4 text-sm"
+                style={{ fontFamily: sans, color: "#8B3A3A" }}
+              >
+                {photoUploadError}
+              </p>
+            ) : null}
             {photoRows.length === 0 ? (
               <p
                 className="text-sm italic"
@@ -2467,24 +2871,128 @@ export default function PersonProfilePage() {
                 No photos uploaded for this person yet.
               </p>
             ) : (
-              <ul className="flex flex-wrap gap-3">
+              <ul className="flex flex-wrap gap-4">
                 {photoRows.map((row, i) => {
                   const url = photoUrlFromRow(row);
                   const pid =
                     typeof row.id === "string" ? row.id : `photo-${i}`;
+                  const rowId = typeof row.id === "string" ? row.id : null;
+                  const isPrimary =
+                    row.is_primary === true || row.primary === true;
                   if (!url) return null;
+                  const openCropModal = () => {
+                    setCropModalPhoto(row);
+                    setCropPos({
+                      x: cropPercentFromUnknown(row.crop_x, 50),
+                      y: cropPercentFromUnknown(row.crop_y, 50),
+                    });
+                    setCropZoom(cropZoomFromUnknown(row.crop_zoom, 1));
+                  };
                   return (
-                    <li
-                      key={pid}
-                      className="h-28 w-28 overflow-hidden rounded-lg border"
-                      style={{ borderColor: colors.brownBorder }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={url}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
+                    <li key={pid}>
+                      <div
+                        className="group relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
+                        style={{
+                          borderColor: colors.brownBorder,
+                          backgroundColor: colors.parchment,
+                        }}
+                      >
+                        {rowId ? (
+                          <button
+                            type="button"
+                            className="absolute inset-0 z-0 block h-full w-full border-none p-0"
+                            style={{
+                              cursor: "pointer",
+                              backgroundColor: "transparent",
+                            }}
+                            aria-label="Adjust photo"
+                            onClick={openCropModal}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={url}
+                              alt=""
+                              className="pointer-events-none h-full w-full object-cover"
+                            />
+                          </button>
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={url}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        )}
+                        {rowId ? (
+                          <div
+                            className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center bg-[#2A1810]/0 transition-colors group-hover:bg-[#2A1810]/45"
+                            aria-hidden
+                          >
+                            <span className="inline-flex scale-[2] opacity-0 transition-opacity group-hover:opacity-100">
+                              <IconPencil className="block text-[#FFFCF7] drop-shadow-md" />
+                            </span>
+                          </div>
+                        ) : null}
+                        {isPrimary ? (
+                          <span
+                            className="pointer-events-none absolute left-1.5 top-1.5 z-[2] rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                            style={{
+                              fontFamily: sans,
+                              backgroundColor: colors.brownOutline,
+                              color: colors.cream,
+                            }}
+                          >
+                            Primary
+                          </span>
+                        ) : null}
+                        {rowId ? (
+                          <div
+                            className="absolute inset-0 z-[3] flex items-end justify-center gap-2 bg-gradient-to-t from-[#3D2914]/70 via-transparent to-transparent pb-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                            style={{ pointerEvents: "none" }}
+                          >
+                            <button
+                              type="button"
+                              className="rounded-md border p-1.5 shadow-sm"
+                              style={{
+                                fontFamily: sans,
+                                pointerEvents: "auto",
+                                borderColor: colors.cream,
+                                backgroundColor: colors.cream,
+                                color: colors.brownDark,
+                                cursor: "pointer",
+                              }}
+                              title="Set as primary"
+                              aria-label="Set as primary photo"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void setPrimaryPhoto(rowId);
+                              }}
+                            >
+                              <IconStar />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md border p-1.5 shadow-sm"
+                              style={{
+                                fontFamily: sans,
+                                pointerEvents: "auto",
+                                borderColor: colors.cream,
+                                backgroundColor: colors.cream,
+                                color: "#8B3A3A",
+                                cursor: "pointer",
+                              }}
+                              title="Delete photo"
+                              aria-label="Delete photo"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deletePhoto(row);
+                              }}
+                            >
+                              <IconTrash />
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </li>
                   );
                 })}
@@ -2928,7 +3436,7 @@ export default function PersonProfilePage() {
               is removed after merge.
             </p>
 
-            {!mergeSelectedDup ? (
+            {mergeUiStep === "search" ? (
               <>
                 <label
                   className="mb-1 block text-xs font-bold uppercase tracking-wide"
@@ -3032,65 +3540,89 @@ export default function PersonProfilePage() {
                   </button>
                 </div>
               </>
-            ) : (
+            ) : mergeSelectedDup ? (
               <>
                 <button
                   type="button"
                   className="mb-4 border-none bg-transparent p-0 text-sm font-semibold underline"
                   style={{ fontFamily: sans, color: colors.forest }}
-                  onClick={() => {
-                    setMergeSelectedDup(null);
-                    setMergeFieldChoices({});
-                  }}
+                  onClick={() => backToMergeSearch()}
                 >
                   ← Choose a different person
                 </button>
-                <div className="mb-4 grid grid-cols-2 gap-4 border-b pb-3 text-center">
+                <div
+                  className="mb-4 grid grid-cols-2 gap-3 border-b pb-3"
+                  style={{ borderColor: `${colors.brownBorder}99` }}
+                >
                   <p
-                    className="text-xs font-bold uppercase tracking-wide"
+                    className="text-center text-xs font-bold uppercase tracking-wide"
                     style={{ fontFamily: sans, color: colors.forest }}
                   >
-                    Keep this record
+                    Ancestor 1
                   </p>
                   <p
-                    className="text-xs font-bold uppercase tracking-wide"
+                    className="text-center text-xs font-bold uppercase tracking-wide"
                     style={{ fontFamily: sans, color: "#8B3A3A" }}
                   >
-                    Remove after merge
+                    Ancestor 2
                   </p>
                 </div>
                 <div className="space-y-5">
                   {MERGE_COMPARE_KEYS.map((key) => {
                     const label = MERGE_FIELD_LABELS[key];
-                    const conflict = mergeFieldsConflict(
-                      person,
-                      mergeSelectedDup,
-                      key
-                    );
+                    const dup = mergeSelectedDup;
                     const pv = mergeFieldStr(person, key);
-                    const dv = mergeFieldStr(mergeSelectedDup, key);
-                    if (conflict) {
+                    const dv = mergeFieldStr(dup, key);
+                    const hasConflict =
+                      pv !== "" && dv !== "" && pv !== dv;
+                    const cellBase: React.CSSProperties = {
+                      backgroundColor: colors.cream,
+                      borderColor: colors.brownBorder,
+                      borderWidth: 1,
+                      borderStyle: "solid",
+                      borderRadius: 4,
+                      padding: "0.65rem 0.75rem",
+                      minHeight: "2.75rem",
+                      fontFamily: sans,
+                      fontSize: "0.875rem",
+                      color: colors.brownDark,
+                      alignItems: "flex-start",
+                    };
+                    const labelStyle: React.CSSProperties = {
+                      fontFamily: serif,
+                      fontWeight: 700,
+                      color: colors.brownDark,
+                      fontSize: "0.95rem",
+                      marginBottom: "0.45rem",
+                    };
+                    const dash = (
+                      <span style={{ color: colors.brownMuted }}>—</span>
+                    );
+
+                    if (hasConflict) {
                       const choice = mergeFieldChoices[key] ?? "primary";
                       return (
-                        <div key={key}>
-                          <p
-                            className="mb-2 text-sm font-bold"
-                            style={{
-                              fontFamily: serif,
-                              color: colors.brownDark,
-                            }}
-                          >
-                            {label}
-                          </p>
-                          <div className="grid grid-cols-2 gap-3">
+                        <div
+                          key={key}
+                          className="border-b pb-4 last:border-0 last:pb-0"
+                          style={{
+                            borderColor: `${colors.brownBorder}55`,
+                          }}
+                        >
+                          <p style={labelStyle}>{label}</p>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <label
-                              className="flex cursor-pointer gap-2 rounded-md border p-2"
+                              className="flex cursor-pointer gap-2"
                               style={{
+                                ...cellBase,
                                 borderColor:
                                   choice === "primary"
                                     ? colors.forest
                                     : colors.brownBorder,
-                                backgroundColor: colors.cream,
+                                boxShadow:
+                                  choice === "primary"
+                                    ? `0 0 0 1px ${colors.forest}`
+                                    : "none",
                               }}
                             >
                               <input
@@ -3105,24 +3637,22 @@ export default function PersonProfilePage() {
                                   }))
                                 }
                               />
-                              <span
-                                className="text-sm leading-snug"
-                                style={{
-                                  fontFamily: sans,
-                                  color: colors.brownMid,
-                                }}
-                              >
+                              <span className="leading-snug">
                                 {formatMergeFieldForUi(key, pv)}
                               </span>
                             </label>
                             <label
-                              className="flex cursor-pointer gap-2 rounded-md border p-2"
+                              className="flex cursor-pointer gap-2"
                               style={{
+                                ...cellBase,
                                 borderColor:
                                   choice === "duplicate"
                                     ? colors.brownOutline
                                     : colors.brownBorder,
-                                backgroundColor: colors.cream,
+                                boxShadow:
+                                  choice === "duplicate"
+                                    ? `0 0 0 1px ${colors.brownOutline}`
+                                    : "none",
                               }}
                             >
                               <input
@@ -3137,13 +3667,7 @@ export default function PersonProfilePage() {
                                   }))
                                 }
                               />
-                              <span
-                                className="text-sm leading-snug"
-                                style={{
-                                  fontFamily: sans,
-                                  color: colors.brownMid,
-                                }}
-                              >
+                              <span className="leading-snug">
                                 {formatMergeFieldForUi(key, dv)}
                               </span>
                             </label>
@@ -3151,30 +3675,38 @@ export default function PersonProfilePage() {
                         </div>
                       );
                     }
-                    const single = mergeSingleDisplayValue(
-                      person,
-                      mergeSelectedDup,
-                      key
-                    );
+
                     return (
-                      <div key={key}>
-                        <p
-                          className="mb-1 text-sm font-bold"
-                          style={{
-                            fontFamily: serif,
-                            color: colors.brownDark,
-                          }}
-                        >
-                          {label}
-                        </p>
-                        <p
-                          className="text-sm"
-                          style={{ fontFamily: sans, color: colors.brownMid }}
-                        >
-                          {single
-                            ? formatMergeFieldForUi(key, single)
-                            : "—"}
-                        </p>
+                      <div
+                        key={key}
+                        className="border-b pb-4 last:border-0 last:pb-0"
+                        style={{ borderColor: `${colors.brownBorder}55` }}
+                      >
+                        <p style={labelStyle}>{label}</p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div
+                            className="flex"
+                            style={{
+                              ...cellBase,
+                              color: colors.brownMid,
+                            }}
+                          >
+                            {pv
+                              ? formatMergeFieldForUi(key, pv)
+                              : dash}
+                          </div>
+                          <div
+                            className="flex"
+                            style={{
+                              ...cellBase,
+                              color: colors.brownMid,
+                            }}
+                          >
+                            {dv
+                              ? formatMergeFieldForUi(key, dv)
+                              : dash}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
@@ -3187,7 +3719,10 @@ export default function PersonProfilePage() {
                     {mergeError}
                   </p>
                 ) : null}
-                <div className="mt-6 flex flex-wrap gap-2 border-t pt-4">
+                <div
+                  className="mt-6 flex flex-wrap gap-2 border-t pt-4"
+                  style={{ borderColor: `${colors.brownBorder}99` }}
+                >
                   <button
                     type="button"
                     disabled={mergeSaving}
@@ -3217,7 +3752,152 @@ export default function PersonProfilePage() {
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {cropModalPhoto ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="crop-photo-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCropModalPhoto(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="crop-photo-title"
+              className="mb-6 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Adjust photo
+            </h2>
+            <div
+              className="mx-auto flex justify-center"
+              style={{
+                padding: 10,
+                borderRadius: "50%",
+                backgroundColor: "rgba(42, 24, 16, 0.42)",
+              }}
+            >
+              <div
+                className="select-none"
+                style={{
+                  width: CROP_PREVIEW_PX,
+                  height: CROP_PREVIEW_PX,
+                  borderRadius: "50%",
+                  overflow: "hidden",
+                  touchAction: "none",
+                  cursor: cropDragging ? "grabbing" : "grab",
+                  backgroundColor: colors.avatarBg,
+                }}
+                onMouseDown={handleCropCircleMouseDown}
+                onTouchStart={handleCropCircleTouchStart}
+              >
+                {(() => {
+                  const previewUrl = photoUrlFromRow(cropModalPhoto);
+                  if (!previewUrl) return null;
+                  return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={previewUrl}
+                      alt=""
+                      draggable={false}
+                      className="h-full w-full object-cover"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectPosition: `${cropPos.x}% ${cropPos.y}%`,
+                        transform: `scale(${cropZoom})`,
+                        transformOrigin: "center center",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  );
+                })()}
+              </div>
+            </div>
+            <div
+              className="mx-auto mt-6 flex max-w-[320px] items-center gap-3"
+              style={{ fontFamily: sans }}
+            >
+              <label
+                htmlFor="crop-photo-zoom"
+                className="shrink-0 text-sm font-semibold"
+                style={{ color: colors.brownDark }}
+              >
+                Zoom
+              </label>
+              <input
+                id="crop-photo-zoom"
+                type="range"
+                min={1}
+                max={3}
+                step={0.05}
+                value={cropZoom}
+                onChange={(e) =>
+                  setCropZoom(Number.parseFloat(e.target.value))
+                }
+                className="h-2 min-w-0 flex-1 cursor-pointer"
+                style={{ accentColor: colors.brownOutline }}
+              />
+              <span
+                className="shrink-0 text-sm tabular-nums"
+                style={{ color: colors.brownMuted, minWidth: "2.75rem" }}
+              >
+                {Number(cropZoom.toFixed(2))}×
+              </span>
+            </div>
+            <div className="mt-8 flex flex-wrap gap-2">
+              <button
+                type="button"
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: colors.brownOutline,
+                  color: colors.cream,
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  borderRadius: 2,
+                }}
+                onClick={() => {
+                  const id =
+                    typeof cropModalPhoto.id === "string"
+                      ? cropModalPhoto.id
+                      : null;
+                  if (id)
+                    void saveCropPosition(
+                      id,
+                      cropPos.x,
+                      cropPos.y,
+                      cropZoom
+                    );
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setCropModalPhoto(null)}
+                style={btnOutline}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

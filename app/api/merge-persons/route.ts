@@ -19,7 +19,6 @@ const MERGE_FIELD_KEYS = [
   "birth_place",
   "gender",
   "notes",
-  "photo_url",
 ] as const;
 
 type MergeFieldKey = (typeof MERGE_FIELD_KEYS)[number];

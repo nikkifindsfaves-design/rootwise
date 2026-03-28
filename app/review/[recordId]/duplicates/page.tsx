@@ -38,7 +38,7 @@ type PersonWithMatch = {
   match: DbPerson;
 };
 
-type FieldChoice = "existing" | "record";
+type FieldChoice = "existing" | "record" | "new";
 
 function levenshtein(a: string, b: string): number {
   const m = a.length;
@@ -147,9 +147,11 @@ function displayValue(
   return { record: r || "—", tree: e || "—" };
 }
 
-/** One card-level choice applies to every merge field for the API. */
-function fieldChoicesForCard(mode: FieldChoice): Record<string, FieldChoice> {
-  const out: Record<string, FieldChoice> = {};
+/** One card-level choice applies to every merge field for the API (merge path only). */
+function fieldChoicesForCard(
+  mode: "existing" | "record"
+): Record<string, "existing" | "record"> {
+  const out: Record<string, "existing" | "record"> = {};
   for (const field of MERGE_FIELDS) {
     out[field] = mode;
   }
@@ -331,19 +333,35 @@ export default function ReviewDuplicatesPage() {
 
   const mergeDecisionsPayload = useMemo(() => {
     if (!pendingReview) return [];
-    return peopleWithMatches.map(({ match }) => ({
-      existingPersonId: match.id,
-      fieldChoices: fieldChoicesForCard(cardMergeChoice[match.id] ?? "existing"),
-    }));
+    return peopleWithMatches
+      .filter(({ match }) => {
+        const c = cardMergeChoice[match.id] ?? "existing";
+        return c === "existing" || c === "record";
+      })
+      .map(({ match }) => ({
+        existingPersonId: match.id,
+        fieldChoices: fieldChoicesForCard(
+          (cardMergeChoice[match.id] ?? "existing") as "existing" | "record"
+        ),
+      }));
   }, [pendingReview, peopleWithMatches, cardMergeChoice]);
 
   const pendingPersonsPayload = useMemo(() => {
     if (!pendingReview) return [];
     const matchByIndex = new Map<number, DbPerson>();
+    const addAsNewIndex = new Set<number>();
     for (const row of peopleWithMatches) {
-      matchByIndex.set(row.pendingIndex, row.match);
+      const c = cardMergeChoice[row.match.id] ?? "existing";
+      if (c === "new") {
+        addAsNewIndex.add(row.pendingIndex);
+      } else {
+        matchByIndex.set(row.pendingIndex, row.match);
+      }
     }
     return pendingReview.people.map((person, idx) => {
+      if (addAsNewIndex.has(idx)) {
+        return { ...person };
+      }
       const m = matchByIndex.get(idx);
       if (m) {
         return {
@@ -353,7 +371,7 @@ export default function ReviewDuplicatesPage() {
       }
       return { ...person };
     });
-  }, [pendingReview, peopleWithMatches]);
+  }, [pendingReview, peopleWithMatches, cardMergeChoice]);
 
   async function handleAddToTree() {
     if (!pendingReview || submitting) return;
@@ -389,10 +407,10 @@ export default function ReviewDuplicatesPage() {
   }
 
   function setCardMergeChoiceForPerson(
-    existingPersonId: string,
+    matchPersonId: string,
     choice: FieldChoice
   ) {
-    setCardMergeChoice((prev) => ({ ...prev, [existingPersonId]: choice }));
+    setCardMergeChoice((prev) => ({ ...prev, [matchPersonId]: choice }));
   }
 
   if (loadState === "unauthorized") {
@@ -445,8 +463,9 @@ export default function ReviewDuplicatesPage() {
           </h1>
           <p className="mt-2 text-sm text-zinc-600">
             Compare extracted people with your tree. For each suggested duplicate,
-            choose whether to keep your existing record or update it from this
-            document, then add everything in one step.
+            choose whether to keep your existing record, update it from this
+            document, or add the extracted person as someone new if they are not
+            the same individual—then add everything in one step.
           </p>
         </header>
 
@@ -462,7 +481,10 @@ export default function ReviewDuplicatesPage() {
               Possible duplicates
             </h2>
             {peopleWithMatches.map(
-              ({ pending, match, pendingIndex }) => (
+              ({ pending, match, pendingIndex }) => {
+                const cardChoice = cardMergeChoice[match.id] ?? "existing";
+                const addAsNew = cardChoice === "new";
+                return (
                 <article
                   key={`${pendingIndex}-${match.id}`}
                   className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm"
@@ -476,18 +498,36 @@ export default function ReviewDuplicatesPage() {
                       <span className="font-medium">
                         {fullNameFromPending(pending)}
                       </span>
-                      <span className="mx-2 text-zinc-300">·</span>
-                      Tree:{" "}
-                      <span className="font-medium">
-                        {fullNameFromDbPerson(match)}
-                      </span>
+                      {!addAsNew ? (
+                        <>
+                          <span className="mx-2 text-zinc-300">·</span>
+                          Tree:{" "}
+                          <span className="font-medium">
+                            {fullNameFromDbPerson(match)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="ml-2 text-xs font-normal text-zinc-500">
+                          (adding as new person — tree match ignored)
+                        </span>
+                      )}
                     </p>
                   </div>
 
                   <div className="space-y-1 p-4">
-                    <div className="mb-3 grid grid-cols-2 gap-4 border-b border-zinc-100 pb-2 text-xs font-semibold uppercase tracking-wide">
-                      <span className="text-emerald-700">From record</span>
-                      <span className="text-zinc-600">In your tree</span>
+                    <div
+                      className={`mb-3 grid gap-4 border-b border-zinc-100 pb-2 text-xs font-semibold uppercase tracking-wide ${
+                        addAsNew ? "grid-cols-1" : "grid-cols-2"
+                      }`}
+                    >
+                      <span className="text-emerald-700">
+                        {addAsNew
+                          ? "From record (will be added as new)"
+                          : "From record"}
+                      </span>
+                      {!addAsNew ? (
+                        <span className="text-zinc-600">In your tree</span>
+                      ) : null}
                     </div>
                     {MERGE_FIELDS.map((field) => {
                       const { record: rv, tree: tv } = displayValue(
@@ -503,9 +543,15 @@ export default function ReviewDuplicatesPage() {
                           <p className="text-xs font-medium text-zinc-500">
                             {labelForField(field)}
                           </p>
-                          <div className="mt-1 grid grid-cols-2 gap-4 text-sm">
+                          <div
+                            className={`mt-1 grid gap-4 text-sm ${
+                              addAsNew ? "grid-cols-1" : "grid-cols-2"
+                            }`}
+                          >
                             <p className="text-zinc-900">{rv}</p>
-                            <p className="text-zinc-900">{tv}</p>
+                            {!addAsNew ? (
+                              <p className="text-zinc-900">{tv}</p>
+                            ) : null}
                           </div>
                         </div>
                       );
@@ -516,41 +562,62 @@ export default function ReviewDuplicatesPage() {
                     <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-600">
                       Merge decision
                     </p>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-8">
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
-                        <input
-                          type="radio"
-                          name={`merge-card-${match.id}`}
-                          checked={
-                            (cardMergeChoice[match.id] ?? "existing") ===
-                            "record"
-                          }
-                          onChange={() =>
-                            setCardMergeChoiceForPerson(match.id, "record")
-                          }
-                          className="text-emerald-600"
-                        />
-                        Use from record
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
-                        <input
-                          type="radio"
-                          name={`merge-card-${match.id}`}
-                          checked={
-                            (cardMergeChoice[match.id] ?? "existing") ===
-                            "existing"
-                          }
-                          onChange={() =>
-                            setCardMergeChoiceForPerson(match.id, "existing")
-                          }
-                          className="text-emerald-600"
-                        />
-                        Keep from tree
-                      </label>
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-8">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
+                          <input
+                            type="radio"
+                            name={`merge-card-${match.id}`}
+                            checked={cardChoice === "record"}
+                            onChange={() =>
+                              setCardMergeChoiceForPerson(match.id, "record")
+                            }
+                            className="text-emerald-600"
+                          />
+                          Use from record
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
+                          <input
+                            type="radio"
+                            name={`merge-card-${match.id}`}
+                            checked={cardChoice === "existing"}
+                            onChange={() =>
+                              setCardMergeChoiceForPerson(match.id, "existing")
+                            }
+                            className="text-emerald-600"
+                          />
+                          Keep from tree
+                        </label>
+                      </div>
+                      <div className="border-t border-zinc-200/90 pt-4">
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700">
+                          <input
+                            type="radio"
+                            name={`merge-card-${match.id}`}
+                            checked={cardChoice === "new"}
+                            onChange={() =>
+                              setCardMergeChoiceForPerson(match.id, "new")
+                            }
+                            className="mt-0.5 text-emerald-600"
+                          />
+                          <span>
+                            <span className="font-medium text-zinc-900">
+                              These are different people — add as new person to
+                              my tree
+                            </span>
+                            <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                              The suggested tree match will not be changed. Only
+                              the data from the record will be saved as a new
+                              person.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 </article>
-              )
+              );
+              }
             )}
           </section>
         ) : null}
