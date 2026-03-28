@@ -1,5 +1,6 @@
 "use client";
 
+import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import Link from "next/link";
@@ -29,10 +30,84 @@ type PersonRow = {
   last_name: string;
   birth_date: string | null;
   death_date: string | null;
+  birth_place: string | null;
   photo_url: string | null;
   gender: string | null;
   notes: string | null;
 };
+
+const MERGE_COMPARE_KEYS = [
+  "first_name",
+  "middle_name",
+  "last_name",
+  "birth_date",
+  "death_date",
+  "birth_place",
+  "gender",
+  "notes",
+  "photo_url",
+] as const;
+
+type MergeCompareKey = (typeof MERGE_COMPARE_KEYS)[number];
+
+const MERGE_FIELD_LABELS: Record<MergeCompareKey, string> = {
+  first_name: "First name",
+  middle_name: "Middle name",
+  last_name: "Last name",
+  birth_date: "Birth date",
+  death_date: "Death date",
+  birth_place: "Birth place",
+  gender: "Gender",
+  notes: "Notes",
+  photo_url: "Photo URL",
+};
+
+function mergeFieldStr(
+  p: PersonRow,
+  key: MergeCompareKey
+): string {
+  const v = p[key as keyof PersonRow];
+  if (v == null) return "";
+  return String(v).trim();
+}
+
+function mergeFieldsConflict(
+  primary: PersonRow,
+  dup: PersonRow,
+  key: MergeCompareKey
+): boolean {
+  const a = mergeFieldStr(primary, key);
+  const b = mergeFieldStr(dup, key);
+  return a !== "" && b !== "" && a !== b;
+}
+
+function mergeSingleDisplayValue(
+  primary: PersonRow,
+  dup: PersonRow,
+  key: MergeCompareKey
+): string {
+  const a = mergeFieldStr(primary, key);
+  const b = mergeFieldStr(dup, key);
+  if (a && b && a === b) return a;
+  if (a && !b) return a;
+  if (!a && b) return b;
+  return "";
+}
+
+function formatMergeFieldForUi(key: MergeCompareKey, raw: string): string {
+  if (!raw) return "—";
+  if (key === "birth_date" || key === "death_date") {
+    return formatDateString(raw);
+  }
+  if (key === "photo_url") {
+    if (raw.length > 48) return `${raw.slice(0, 24)}…${raw.slice(-12)}`;
+    return raw;
+  }
+  if (key === "notes" && raw.length > 200) {
+    return `${raw.slice(0, 200)}…`;
+  }
+  return raw;
+}
 
 type EventRow = {
   id: string;
@@ -44,6 +119,7 @@ type EventRow = {
   notes: string | null;
   story_short: string | null;
   story_full: string | null;
+  created_at: string | null;
 };
 
 type RelRow = {
@@ -121,44 +197,6 @@ function recordTypeLabel(row: RecordRow): string {
   return "Record";
 }
 
-/**
- * One timeline row per normalized event_type; legacy duplicate rows (same type)
- * are merged for display.
- */
-function groupTimelineByEventType(events: EventRow[]): EventCluster[] {
-  const byTypeKey = new Map<string, EventRow[]>();
-  for (const ev of events) {
-    const key = (ev.event_type || "other").trim().toLowerCase() || "other";
-    if (!byTypeKey.has(key)) byTypeKey.set(key, []);
-    byTypeKey.get(key)!.push(ev);
-  }
-
-  const clusters: EventCluster[] = [];
-
-  for (const [, list] of byTypeKey) {
-    const sorted = sortEventsChronologically(list);
-    clusters.push({
-      displayType: sorted[0]!.event_type || "Event",
-      events: sorted,
-    });
-  }
-
-  clusters.sort((a, b) => {
-    const da = parseEventDateMs(a.events[0]?.event_date ?? null);
-    const db = parseEventDateMs(b.events[0]?.event_date ?? null);
-    if (da == null && db == null) return 0;
-    if (da == null) return 1;
-    if (db == null) return -1;
-    return da - db;
-  });
-
-  return clusters;
-}
-
-function clusterStableKey(cluster: EventCluster): string {
-  return [...cluster.events].map((e) => e.id).sort().join("|");
-}
-
 function eventsSortedByDate(cluster: EventCluster): EventRow[] {
   return [...cluster.events].sort((a, b) => {
     const ma = parseEventDateMs(a.event_date);
@@ -168,57 +206,6 @@ function eventsSortedByDate(cluster: EventCluster): EventRow[] {
     if (mb == null) return -1;
     return ma - mb;
   });
-}
-
-function clusterPlacesLine(cluster: EventCluster): string {
-  const parts = [
-    ...new Set(
-      cluster.events
-        .map((e) => e.event_place?.trim())
-        .filter(Boolean) as string[]
-    ),
-  ];
-  return parts.join(" · ");
-}
-
-function representativeEventForCluster(cluster: EventCluster): EventRow {
-  return eventsSortedByDate(cluster)[0]!;
-}
-
-/** First chronological row with a non-empty story_short (for heading). */
-function firstStoryShortInCluster(cluster: EventCluster): {
-  text: string;
-  eventId: string;
-} {
-  for (const e of eventsSortedByDate(cluster)) {
-    const s = e.story_short?.trim();
-    if (s) return { text: s, eventId: e.id };
-  }
-  const rep = representativeEventForCluster(cluster);
-  return { text: "", eventId: rep.id };
-}
-
-/** First chronological row with a non-empty story_full (for Read more). */
-function firstStoryFullInCluster(cluster: EventCluster): {
-  text: string;
-  eventId: string;
-} {
-  for (const e of eventsSortedByDate(cluster)) {
-    const s = e.story_full?.trim();
-    if (s) return { text: s, eventId: e.id };
-  }
-  const rep = representativeEventForCluster(cluster);
-  return { text: "", eventId: rep.id };
-}
-
-function clusterDescriptionLines(cluster: EventCluster): string[] {
-  return [
-    ...new Set(
-      cluster.events
-        .map((e) => e.description?.trim())
-        .filter(Boolean) as string[]
-    ),
-  ];
 }
 
 /**
@@ -288,27 +275,10 @@ function clusterLinkedSources(
   return out;
 }
 
-function clusterDateLabel(cluster: EventCluster): string {
-  const msList = cluster.events
-    .map((e) => parseEventDateMs(e.event_date))
-    .filter((m): m is number => m != null)
-    .sort((a, b) => a - b);
-  if (msList.length === 0) {
-    const any = cluster.events.find((e) => e.event_date?.trim());
-    return any?.event_date ? formatDateString(any.event_date) : "Date unknown";
-  }
-  const minMs = msList[0]!;
-  const maxMs = msList[msList.length - 1]!;
-  const minEv = cluster.events.find(
-    (e) => parseEventDateMs(e.event_date) === minMs
-  );
-  const maxEv = cluster.events.find(
-    (e) => parseEventDateMs(e.event_date) === maxMs
-  );
-  const firstStr = formatDateString(minEv?.event_date ?? "");
-  if (minMs === maxMs) return firstStr;
-  const lastStr = formatDateString(maxEv?.event_date ?? "");
-  return `${firstStr} – ${lastStr}`;
+function eventDateLabel(ev: EventRow): string {
+  const d = ev.event_date?.trim();
+  if (!d) return "Date unknown";
+  return formatDateString(d);
 }
 
 function formatResearchNoteTimestamp(iso: string): string {
@@ -389,6 +359,49 @@ function genderBadgeLabel(
   return null;
 }
 
+function IconPencil({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function IconTrash({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
 function formatUploadedAt(iso: string | null): string {
   if (!iso) return "—";
   try {
@@ -413,6 +426,84 @@ function sortEventsChronologically(events: EventRow[]): EventRow[] {
     if (!db) return -1;
     return da.localeCompare(db, undefined, { numeric: true });
   });
+}
+
+function parseCreatedAtMs(s: string | null | undefined): number {
+  if (s == null || String(s).trim() === "") return 0;
+  const t = Date.parse(String(s));
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Same bucket = one timeline row (after dedupe). */
+function timelineDedupeKey(ev: EventRow): string {
+  const typ = (ev.event_type || "other").trim().toLowerCase() || "other";
+  const d = (ev.event_date ?? "").trim();
+  return `${typ}\0${d}`;
+}
+
+function pickRepresentativeForTimelineGroup(group: EventRow[]): EventRow {
+  const withShort = group.filter((e) => (e.story_short ?? "").trim() !== "");
+  const pool = withShort.length > 0 ? withShort : group;
+  return pool.reduce((best, cur) => {
+    const bt = parseCreatedAtMs(best.created_at);
+    const ct = parseCreatedAtMs(cur.created_at);
+    if (ct > bt) return cur;
+    if (ct < bt) return best;
+    return cur.id > best.id ? cur : best;
+  });
+}
+
+/** One row per (event_type, event_date); prefers story_short, else newest created_at. */
+function dedupeTimelineEvents(list: EventRow[]): EventRow[] {
+  const byKey = new Map<string, EventRow[]>();
+  for (const ev of list) {
+    const k = timelineDedupeKey(ev);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(ev);
+  }
+  const out: EventRow[] = [];
+  for (const g of byKey.values()) {
+    out.push(pickRepresentativeForTimelineGroup(g));
+  }
+  return out;
+}
+
+function eventsSharingTimelineDedupeKey(rep: EventRow, all: EventRow[]): EventRow[] {
+  const k = timelineDedupeKey(rep);
+  return all.filter((e) => timelineDedupeKey(e) === k);
+}
+
+function clusterPlacesLine(cluster: EventCluster): string {
+  const parts = [
+    ...new Set(
+      cluster.events
+        .map((e) => e.event_place?.trim())
+        .filter(Boolean) as string[]
+    ),
+  ];
+  return parts.join(" · ");
+}
+
+function clusterDescriptionLines(cluster: EventCluster): string[] {
+  return [
+    ...new Set(
+      cluster.events
+        .map((e) => e.description?.trim())
+        .filter(Boolean) as string[]
+    ),
+  ];
+}
+
+function firstStoryFullInCluster(cluster: EventCluster): {
+  text: string;
+  eventId: string;
+} {
+  for (const e of eventsSortedByDate(cluster)) {
+    const s = e.story_full?.trim();
+    if (s) return { text: s, eventId: e.id };
+  }
+  const sorted = eventsSortedByDate(cluster);
+  return { text: "", eventId: sorted[0]?.id ?? "" };
 }
 
 function FamilyMemberCard({ p }: { p: PersonRow }) {
@@ -555,10 +646,77 @@ export default function PersonProfilePage() {
     string | null
   >(null);
 
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [eventEditDraft, setEventEditDraft] = useState<{
+    event_type: string;
+    event_date: string;
+    event_place: string;
+    story_short: string;
+    story_full: string;
+    notes: string;
+  } | null>(null);
+  const [eventEditSaving, setEventEditSaving] = useState(false);
+  const [eventEditError, setEventEditError] = useState<string | null>(null);
+  const [eventDeleteConfirmId, setEventDeleteConfirmId] = useState<
+    string | null
+  >(null);
+  const [eventDeletingId, setEventDeletingId] = useState<string | null>(null);
+
+  const [editPersonOpen, setEditPersonOpen] = useState(false);
+  const [editPersonDraft, setEditPersonDraft] = useState<{
+    first_name: string;
+    middle_name: string;
+    last_name: string;
+    birth_date: string;
+    death_date: string;
+    birth_place: string;
+    gender: string;
+    notes: string;
+  } | null>(null);
+  const [personEditSaving, setPersonEditSaving] = useState(false);
+  const [personEditError, setPersonEditError] = useState<string | null>(null);
+
+  const [deletePersonOpen, setDeletePersonOpen] = useState(false);
+  const [deletePersonBusy, setDeletePersonBusy] = useState(false);
+
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [mergeSearchQuery, setMergeSearchQuery] = useState("");
+  const [mergeSearchLoading, setMergeSearchLoading] = useState(false);
+  const [mergeSearchResults, setMergeSearchResults] = useState<PersonRow[]>(
+    []
+  );
+  const [mergeSearchError, setMergeSearchError] = useState<string | null>(
+    null
+  );
+  const [mergeSelectedDup, setMergeSelectedDup] = useState<PersonRow | null>(
+    null
+  );
+  const [mergeFieldChoices, setMergeFieldChoices] = useState<
+    Record<string, "primary" | "duplicate">
+  >({});
+  const [mergeSaving, setMergeSaving] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+
   useEffect(() => {
     setExpandedTimelineNotesKeys(new Set());
     setExpandedTimelineSourcesKeys(new Set());
     setExpandedStoryFullIds(new Set());
+    setEditingEventId(null);
+    setEventEditDraft(null);
+    setEventDeleteConfirmId(null);
+    setEventEditError(null);
+    setEditPersonOpen(false);
+    setEditPersonDraft(null);
+    setDeletePersonOpen(false);
+    setMergeModalOpen(false);
+    setMergeSearchQuery("");
+    setMergeSearchResults([]);
+    setMergeSearchError(null);
+    setMergeSelectedDup(null);
+    setMergeFieldChoices({});
+    setMergeError(null);
+    setMergeSaving(false);
+    setMergeSearchLoading(false);
   }, [personId]);
 
   const load = useCallback(async () => {
@@ -589,7 +747,7 @@ export default function PersonProfilePage() {
     const { data: personData, error: personErr } = await supabase
       .from("persons")
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender, notes"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes"
       )
       .eq("id", personId)
       .eq("user_id", user.id)
@@ -606,12 +764,16 @@ export default function PersonProfilePage() {
       return;
     }
 
-    const p = personData as PersonRow;
+    const raw = personData as PersonRow & { birth_place?: string | null };
+    const p: PersonRow = {
+      ...raw,
+      birth_place: raw.birth_place ?? null,
+    };
 
     const { data: eventData, error: eventErr } = await supabase
       .from("events")
       .select(
-        "id, event_type, event_date, event_place, description, record_id, notes, story_short, story_full"
+        "id, event_type, event_date, event_place, description, record_id, notes, story_short, story_full, created_at"
       )
       .eq("person_id", personId)
       .eq("user_id", user.id)
@@ -623,7 +785,13 @@ export default function PersonProfilePage() {
       return;
     }
 
-    const evs = (eventData ?? []) as EventRow[];
+    const evs: EventRow[] = (eventData ?? []).map((row) => {
+      const e = row as EventRow & { created_at?: string | null };
+      return {
+        ...e,
+        created_at: e.created_at ?? null,
+      };
+    });
     const sortedEvents = sortEventsChronologically(evs);
 
     const { data: relData, error: relErr } = await supabase
@@ -775,6 +943,44 @@ export default function PersonProfilePage() {
   }, [load]);
 
   useEffect(() => {
+    if (!mergeModalOpen || !personId) return;
+    const q = mergeSearchQuery.trim();
+    if (q.length < 2) {
+      setMergeSearchResults([]);
+      setMergeSearchError(null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        setMergeSearchLoading(true);
+        setMergeSearchError(null);
+        try {
+          const r = await fetch(
+            `/api/merge-persons?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(personId)}`,
+            { credentials: "include" }
+          );
+          const j = (await r.json()) as {
+            matches?: PersonRow[];
+            error?: string;
+          };
+          if (!r.ok) {
+            throw new Error(j.error ?? "Search failed");
+          }
+          setMergeSearchResults(j.matches ?? []);
+        } catch (e) {
+          setMergeSearchError(
+            e instanceof Error ? e.message : "Search failed"
+          );
+          setMergeSearchResults([]);
+        } finally {
+          setMergeSearchLoading(false);
+        }
+      })();
+    }, 320);
+    return () => window.clearTimeout(handle);
+  }, [mergeSearchQuery, mergeModalOpen, personId]);
+
+  useEffect(() => {
     let cancelled = false;
     async function signRecords() {
       if (recordsById.size === 0) {
@@ -815,8 +1021,8 @@ export default function PersonProfilePage() {
     [person, photoRows]
   );
 
-  const timelineClusters = useMemo(
-    () => groupTimelineByEventType(events),
+  const eventTypeSelectOptions = useMemo(
+    () => buildEventTypeSelectOptions(events),
     [events]
   );
 
@@ -829,23 +1035,10 @@ export default function PersonProfilePage() {
     return m;
   }, [eventSources]);
 
-  function toggleTimelineNotesCluster(clusterKey: string) {
-    setExpandedTimelineNotesKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(clusterKey)) next.delete(clusterKey);
-      else next.add(clusterKey);
-      return next;
-    });
-  }
-
-  function toggleTimelineSourcesCluster(clusterKey: string) {
-    setExpandedTimelineSourcesKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(clusterKey)) next.delete(clusterKey);
-      else next.add(clusterKey);
-      return next;
-    });
-  }
+  const timelineEvents = useMemo(
+    () => sortEventsChronologically(dedupeTimelineEvents(events)),
+    [events]
+  );
 
   function toggleStoryFullExpanded(eventId: string) {
     setExpandedStoryFullIds((prev) => {
@@ -920,25 +1113,291 @@ export default function PersonProfilePage() {
     }
   }
 
-  async function handleDelete() {
-    if (!person || !window.confirm("Permanently delete this person?")) return;
+  function openEditPersonModal() {
+    if (!person) return;
+    const gRaw = (person.gender ?? "").trim();
+    const gLower = gRaw.toLowerCase();
+    let genderVal = gRaw;
+    if (gLower === "male") genderVal = "Male";
+    else if (gLower === "female") genderVal = "Female";
+    else if (gLower === "unknown") genderVal = "Unknown";
+
+    setEditPersonDraft({
+      first_name: person.first_name,
+      middle_name: person.middle_name ?? "",
+      last_name: person.last_name,
+      birth_date: person.birth_date ?? "",
+      death_date: person.death_date ?? "",
+      birth_place: person.birth_place ?? "",
+      gender: genderVal,
+      notes: person.notes ?? "",
+    });
+    setPersonEditError(null);
+    setEditPersonOpen(true);
+  }
+
+  function closeEditPersonModal() {
+    setEditPersonOpen(false);
+    setEditPersonDraft(null);
+    setPersonEditError(null);
+  }
+
+  async function savePersonFromModal() {
+    if (!editPersonDraft || !personId) return;
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    setPersonEditSaving(true);
+    setPersonEditError(null);
+    const d = editPersonDraft;
+    const { data, error } = await supabase
+      .from("persons")
+      .update({
+        first_name: d.first_name.trim(),
+        middle_name: d.middle_name.trim() || null,
+        last_name: d.last_name.trim(),
+        birth_date: d.birth_date.trim() || null,
+        death_date: d.death_date.trim() || null,
+        birth_place: d.birth_place.trim() || null,
+        gender: d.gender.trim() || null,
+        notes: d.notes.trim() || null,
+      })
+      .eq("id", personId)
+      .eq("user_id", user.id)
+      .select(
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes"
+      )
+      .single();
+
+    setPersonEditSaving(false);
+    if (error) {
+      setPersonEditError(error.message);
+      return;
+    }
+    if (data) {
+      const row = data as PersonRow & { birth_place?: string | null };
+      setPerson({
+        ...row,
+        birth_place: row.birth_place ?? null,
+      });
+    }
+    closeEditPersonModal();
+  }
+
+  async function confirmDeletePerson() {
+    if (!person) return;
     const supabase = createClient();
     const {
       data: { user: u },
     } = await supabase.auth.getUser();
     if (!u) return;
+
+    setDeletePersonBusy(true);
     const { error: delErr } = await supabase
       .from("persons")
       .delete()
       .eq("id", person.id)
       .eq("user_id", u.id);
 
+    setDeletePersonBusy(false);
     if (delErr) {
       setError(delErr.message);
+      setDeletePersonOpen(false);
       return;
     }
+    setDeletePersonOpen(false);
     router.push("/dashboard");
     router.refresh();
+  }
+
+  function resetMergeModalState() {
+    setMergeSearchQuery("");
+    setMergeSearchResults([]);
+    setMergeSearchError(null);
+    setMergeSelectedDup(null);
+    setMergeFieldChoices({});
+    setMergeError(null);
+    setMergeSaving(false);
+    setMergeSearchLoading(false);
+  }
+
+  function openMergeModal() {
+    resetMergeModalState();
+    setMergeModalOpen(true);
+  }
+
+  function closeMergeModal() {
+    setMergeModalOpen(false);
+    resetMergeModalState();
+  }
+
+  function selectMergeDuplicate(dup: PersonRow) {
+    if (!person) return;
+    setMergeSelectedDup(dup);
+    const choices: Record<string, "primary" | "duplicate"> = {};
+    for (const k of MERGE_COMPARE_KEYS) {
+      if (mergeFieldsConflict(person, dup, k)) choices[k] = "primary";
+    }
+    setMergeFieldChoices(choices);
+  }
+
+  async function confirmMerge() {
+    if (!person || !mergeSelectedDup) return;
+    setMergeSaving(true);
+    setMergeError(null);
+    try {
+      const r = await fetch("/api/merge-persons", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primaryId: person.id,
+          duplicateId: mergeSelectedDup.id,
+          fieldChoices: mergeFieldChoices,
+        }),
+      });
+      const j = (await r.json()) as { error?: string };
+      if (!r.ok) {
+        throw new Error(j.error ?? "Merge failed");
+      }
+      closeMergeModal();
+      await load();
+    } catch (e) {
+      setMergeError(e instanceof Error ? e.message : "Merge failed");
+    } finally {
+      setMergeSaving(false);
+    }
+  }
+
+  function startEditEvent(ev: EventRow) {
+    setEventEditError(null);
+    setEventDeleteConfirmId(null);
+    setEditingEventId(ev.id);
+    setEventEditDraft({
+      event_type: ev.event_type?.trim() || "other",
+      event_date: ev.event_date?.trim() ?? "",
+      event_place: ev.event_place?.trim() ?? "",
+      story_short: ev.story_short?.trim() ?? "",
+      story_full: ev.story_full?.trim() ?? "",
+      notes: ev.notes?.trim() ?? "",
+    });
+  }
+
+  function cancelEditEvent() {
+    setEditingEventId(null);
+    setEventEditDraft(null);
+    setEventEditError(null);
+  }
+
+  async function saveEditEvent() {
+    const eventId = editingEventId;
+    if (!eventId || !eventEditDraft) return;
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    setEventEditSaving(true);
+    setEventEditError(null);
+    const d = eventEditDraft;
+    // Existing row only — never insert/upsert here.
+    const { data, error } = await supabase
+      .from("events")
+      .update({
+        event_type: d.event_type.trim() || "other",
+        event_date: d.event_date.trim() || null,
+        event_place: d.event_place.trim() || null,
+        story_short: d.story_short.trim() || null,
+        story_full: d.story_full.trim() || null,
+        notes: d.notes.trim() || null,
+      })
+      .eq("id", eventId)
+      .eq("user_id", user.id)
+      .select(
+        "id, event_type, event_date, event_place, description, record_id, notes, story_short, story_full, created_at"
+      )
+      .single();
+
+    setEventEditSaving(false);
+    if (error) {
+      setEventEditError(error.message);
+      return;
+    }
+    if (data) {
+      const row = data as EventRow & { created_at?: string | null };
+      const merged: EventRow = {
+        ...row,
+        created_at: row.created_at ?? null,
+      };
+      setEvents((prev) =>
+        sortEventsChronologically(
+          prev.map((e) => (e.id === eventId ? { ...e, ...merged } : e))
+        )
+      );
+    }
+    cancelEditEvent();
+  }
+
+  async function deleteEventById(eventId: string) {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    setEventDeletingId(eventId);
+    const { error } = await supabase
+      .from("events")
+      .delete()
+      .eq("id", eventId)
+      .eq("user_id", user.id);
+
+    setEventDeletingId(null);
+    setEventDeleteConfirmId(null);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    if (editingEventId === eventId) cancelEditEvent();
+    setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    setEventSources((prev) => prev.filter((s) => s.event_id !== eventId));
+    setExpandedTimelineNotesKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(eventId);
+      return next;
+    });
+    setExpandedTimelineSourcesKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(eventId);
+      return next;
+    });
+    setExpandedStoryFullIds((prev) => {
+      const next = new Set(prev);
+      next.delete(eventId);
+      return next;
+    });
+  }
+
+  function toggleTimelineNotesForEvent(eventId: string) {
+    setExpandedTimelineNotesKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
+  }
+
+  function toggleTimelineSourcesForEvent(eventId: string) {
+    setExpandedTimelineSourcesKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
   }
 
   const btnOutline: React.CSSProperties = {
@@ -996,6 +1455,30 @@ export default function PersonProfilePage() {
   }
   const headerDateSegment = headerDateBits.join("  ·  ");
   const headerNoDates = headerDateBits.length === 0;
+
+  const personFullName = [
+    person.first_name,
+    person.middle_name ?? "",
+    person.last_name,
+  ]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  const modalInputStyle: React.CSSProperties = {
+    fontFamily: sans,
+    color: colors.brownDark,
+    backgroundColor: colors.cream,
+    borderColor: colors.brownBorder,
+    borderWidth: 1,
+    borderStyle: "solid",
+    padding: "0.5rem 0.65rem",
+    fontSize: "0.875rem",
+    borderRadius: 2,
+    width: "100%",
+    boxSizing: "border-box",
+    outlineColor: colors.brownOutline,
+  };
 
   const documentRecordIds = new Set<string>();
   for (const e of events) {
@@ -1110,11 +1593,20 @@ export default function PersonProfilePage() {
               <button
                 type="button"
                 style={btnOutline}
-                title="Coming soon"
-                disabled
-                className="opacity-50"
+                onClick={() => openEditPersonModal()}
               >
                 Edit
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...btnOutline,
+                  borderColor: colors.forest,
+                  color: colors.forest,
+                }}
+                onClick={() => openMergeModal()}
+              >
+                Merge with another person
               </button>
               <button
                 type="button"
@@ -1132,7 +1624,7 @@ export default function PersonProfilePage() {
                   borderColor: "#8B3A3A",
                   color: "#6B2A2A",
                 }}
-                onClick={() => void handleDelete()}
+                onClick={() => setDeletePersonOpen(true)}
               >
                 Delete
               </button>
@@ -1237,7 +1729,7 @@ export default function PersonProfilePage() {
               >
                 Life &amp; records
               </h2>
-              {events.length === 0 ? (
+              {timelineEvents.length === 0 ? (
                 <p
                   className="text-sm italic"
                   style={{ fontFamily: sans, color: colors.brownMuted }}
@@ -1252,33 +1744,41 @@ export default function PersonProfilePage() {
                     aria-hidden
                   />
                   <ul className="space-y-0">
-                    {timelineClusters.map((cluster, cIdx) => {
-                      const cKey = clusterStableKey(cluster);
-                      const rep = representativeEventForCluster(cluster);
-                      const typ = (rep.event_type || "Event").trim();
-                      const storyHead = firstStoryShortInCluster(cluster);
-                      const headline = storyHead.text || typ;
-                      const fullPick = firstStoryFullInCluster(cluster);
+                    {timelineEvents.map((ev) => {
+                      const mergeGroup = eventsSharingTimelineDedupeKey(
+                        ev,
+                        events
+                      );
+                      const mergeCluster: EventCluster = {
+                        displayType: (ev.event_type || "Event").trim(),
+                        events: mergeGroup,
+                      };
+                      const typ = (ev.event_type || "Event").trim();
+                      const headline = ev.story_short?.trim() || typ;
+                      const fullPick = firstStoryFullInCluster(mergeCluster);
                       const full = fullPick.text;
                       const storyOpen = expandedStoryFullIds.has(
                         fullPick.eventId
                       );
-                      const placesLine = clusterPlacesLine(cluster);
+                      const placesLine =
+                        clusterPlacesLine(mergeCluster) || "—";
                       const noteSegments = clusterNotesSegmentsForTimeline(
-                        cluster,
+                        mergeCluster,
                         eventSourcesByEventId
                       );
-                      const notesOpen = expandedTimelineNotesKeys.has(cKey);
+                      const notesOpen = expandedTimelineNotesKeys.has(ev.id);
                       const linkedSources = clusterLinkedSources(
-                        cluster,
+                        mergeCluster,
                         eventSourcesByEventId,
                         recordsById,
                         signedDocUrls
                       );
                       const sourcesOpen =
-                        expandedTimelineSourcesKeys.has(cKey);
-                      const descLines = clusterDescriptionLines(cluster);
-                      const listKey = `${cKey}-${cIdx}`;
+                        expandedTimelineSourcesKeys.has(ev.id);
+                      const descLines =
+                        clusterDescriptionLines(mergeCluster);
+                      const listKey = ev.id;
+                      const isEditing = editingEventId === ev.id;
 
                       return (
                         <li
@@ -1299,7 +1799,7 @@ export default function PersonProfilePage() {
                               className="block text-xs font-bold uppercase tracking-wide"
                               style={{ color: colors.brownMuted }}
                             >
-                              {clusterDateLabel(cluster)}
+                              {eventDateLabel(ev)}
                             </span>
                           </div>
                           <div
@@ -1307,7 +1807,7 @@ export default function PersonProfilePage() {
                             style={{ borderColor: "transparent" }}
                           >
                             <div
-                              className="rounded-md border px-4 py-3"
+                              className="group relative rounded-md border px-4 py-3"
                               style={{
                                 backgroundColor: colors.cream,
                                 borderColor: `${colors.brownBorder}99`,
@@ -1315,193 +1815,520 @@ export default function PersonProfilePage() {
                                   "inset 0 1px 0 rgba(255,255,255,0.6)",
                               }}
                             >
-                              <p
-                                className="text-lg font-bold leading-snug"
-                                style={{
-                                  fontFamily: serif,
-                                  color: colors.brownDark,
-                                }}
-                              >
-                                {headline}
-                              </p>
-                              <p
-                                className="mt-1 text-sm italic"
-                                style={{
-                                  fontFamily: sans,
-                                  color: colors.brownMuted,
-                                }}
-                              >
-                                {placesLine || "—"}
-                              </p>
-                              {full ? (
-                                <div className="mt-2">
-                                  {!storyOpen ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        toggleStoryFullExpanded(
-                                          fullPick.eventId
-                                        )
-                                      }
-                                      className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                              {!isEditing ? (
+                                <div
+                                  className="absolute right-2 top-2 z-20 flex gap-0.5 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                                  role="toolbar"
+                                  aria-label="Event actions"
+                                >
+                                  <button
+                                    type="button"
+                                    title="Edit event"
+                                    className="rounded border border-transparent p-1.5 hover:border-[#A0806099] hover:bg-[#F3EBE0]"
+                                    style={{
+                                      color: colors.brownMid,
+                                      cursor: "pointer",
+                                      backgroundColor: "transparent",
+                                    }}
+                                    onClick={() => {
+                                      setEventDeleteConfirmId(null);
+                                      startEditEvent(ev);
+                                    }}
+                                  >
+                                    <IconPencil />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Delete event"
+                                    className="rounded border border-transparent p-1.5 hover:border-[#A0806099] hover:bg-[#F3EBE0]"
+                                    style={{
+                                      color: "#8B3A3A",
+                                      cursor: "pointer",
+                                      backgroundColor: "transparent",
+                                    }}
+                                    onClick={() => {
+                                      cancelEditEvent();
+                                      setEventDeleteConfirmId(ev.id);
+                                    }}
+                                  >
+                                    <IconTrash />
+                                  </button>
+                                </div>
+                              ) : null}
+                              {isEditing && eventEditDraft ? (
+                                <div className="space-y-3">
+                                  <div>
+                                    <label
+                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
                                       style={{
                                         fontFamily: sans,
-                                        color: colors.forest,
-                                        fontWeight: 600,
-                                        cursor: "pointer",
+                                        color: colors.brownMuted,
                                       }}
-                                      aria-expanded={false}
+                                      htmlFor={`ev-type-${ev.id}`}
                                     >
-                                      Read more
+                                      Event type
+                                    </label>
+                                    <select
+                                      id={`ev-type-${ev.id}`}
+                                      value={eventEditDraft.event_type}
+                                      onChange={(e) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                event_type: e.target.value,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      style={modalInputStyle}
+                                    >
+                                      {eventTypeSelectOptions.map((opt) => (
+                                        <option key={opt} value={opt}>
+                                          {opt}
+                                        </option>
+                                      ))}
+                                      {!eventTypeSelectOptions.includes(
+                                        eventEditDraft.event_type
+                                      ) &&
+                                      eventEditDraft.event_type.trim() ? (
+                                        <option
+                                          value={eventEditDraft.event_type}
+                                        >
+                                          {eventEditDraft.event_type}
+                                        </option>
+                                      ) : null}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                      htmlFor={`ev-date-${ev.id}`}
+                                    >
+                                      Event date
+                                    </label>
+                                    <input
+                                      id={`ev-date-${ev.id}`}
+                                      type="text"
+                                      value={eventEditDraft.event_date}
+                                      onChange={(e) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                event_date: e.target.value,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      style={modalInputStyle}
+                                      placeholder="YYYY-MM-DD or as stored"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label
+                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                      htmlFor={`ev-place-${ev.id}`}
+                                    >
+                                      Event place
+                                    </label>
+                                    <input
+                                      id={`ev-place-${ev.id}`}
+                                      type="text"
+                                      value={eventEditDraft.event_place}
+                                      onChange={(e) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                event_place: e.target.value,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      style={modalInputStyle}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label
+                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                      htmlFor={`ev-short-${ev.id}`}
+                                    >
+                                      Story (short)
+                                    </label>
+                                    <textarea
+                                      id={`ev-short-${ev.id}`}
+                                      rows={2}
+                                      value={eventEditDraft.story_short}
+                                      onChange={(e) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                story_short: e.target.value,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      className="resize-y"
+                                      style={modalInputStyle}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label
+                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                      htmlFor={`ev-full-${ev.id}`}
+                                    >
+                                      Story (full)
+                                    </label>
+                                    <textarea
+                                      id={`ev-full-${ev.id}`}
+                                      rows={4}
+                                      value={eventEditDraft.story_full}
+                                      onChange={(e) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                story_full: e.target.value,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      className="resize-y"
+                                      style={modalInputStyle}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label
+                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                      htmlFor={`ev-notes-${ev.id}`}
+                                    >
+                                      Notes
+                                    </label>
+                                    <textarea
+                                      id={`ev-notes-${ev.id}`}
+                                      rows={3}
+                                      value={eventEditDraft.notes}
+                                      onChange={(e) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                notes: e.target.value,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      className="resize-y"
+                                      style={modalInputStyle}
+                                    />
+                                  </div>
+                                  {eventEditError ? (
+                                    <p
+                                      className="text-sm"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: "#8B3A3A",
+                                      }}
+                                    >
+                                      {eventEditError}
+                                    </p>
+                                  ) : null}
+                                  <div className="flex flex-wrap gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      disabled={eventEditSaving}
+                                      onClick={() => void saveEditEvent()}
+                                      style={{
+                                        fontFamily: sans,
+                                        backgroundColor: colors.brownOutline,
+                                        color: colors.cream,
+                                        border: "none",
+                                        padding: "0.5rem 1rem",
+                                        fontSize: "0.875rem",
+                                        fontWeight: 700,
+                                        cursor: eventEditSaving
+                                          ? "wait"
+                                          : "pointer",
+                                        borderRadius: 2,
+                                        opacity: eventEditSaving ? 0.8 : 1,
+                                      }}
+                                    >
+                                      Save
                                     </button>
-                                  ) : (
-                                    <div>
-                                      <p
-                                        className="whitespace-pre-wrap text-sm leading-relaxed"
-                                        style={{
-                                          fontFamily: sans,
-                                          color: colors.brownMid,
-                                        }}
-                                      >
-                                        {full}
-                                      </p>
+                                    <button
+                                      type="button"
+                                      disabled={eventEditSaving}
+                                      onClick={() => cancelEditEvent()}
+                                      style={btnOutline}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="pr-12 md:pr-14">
+                                  <p
+                                    className="text-lg font-bold leading-snug"
+                                    style={{
+                                      fontFamily: serif,
+                                      color: colors.brownDark,
+                                    }}
+                                  >
+                                    {headline}
+                                  </p>
+                                  <p
+                                    className="mt-1 text-sm italic"
+                                    style={{
+                                      fontFamily: sans,
+                                      color: colors.brownMuted,
+                                    }}
+                                  >
+                                    {placesLine || "—"}
+                                  </p>
+                                  {full ? (
+                                    <div className="mt-2">
+                                      {!storyOpen ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            toggleStoryFullExpanded(
+                                              fullPick.eventId
+                                            )
+                                          }
+                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                          style={{
+                                            fontFamily: sans,
+                                            color: colors.forest,
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                          }}
+                                          aria-expanded={false}
+                                        >
+                                          Read more
+                                        </button>
+                                      ) : (
+                                        <div>
+                                          <p
+                                            className="whitespace-pre-wrap text-sm leading-relaxed"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.brownMid,
+                                            }}
+                                          >
+                                            {full}
+                                          </p>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              toggleStoryFullExpanded(
+                                                fullPick.eventId
+                                              )
+                                            }
+                                            className="mt-2 border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.forest,
+                                              fontWeight: 600,
+                                              cursor: "pointer",
+                                            }}
+                                            aria-expanded={true}
+                                          >
+                                            Show less
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                  {descLines.map((line, di) => (
+                                    <p
+                                      key={`${listKey}-d-${di}`}
+                                      className="mt-2 text-sm leading-relaxed"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                    >
+                                      {line}
+                                    </p>
+                                  ))}
+                                  {noteSegments.length > 0 ? (
+                                    <div className="mt-3">
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          toggleStoryFullExpanded(
-                                            fullPick.eventId
-                                          )
+                                          toggleTimelineNotesForEvent(ev.id)
                                         }
-                                        className="mt-2 border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                        className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
                                         style={{
                                           fontFamily: sans,
                                           color: colors.forest,
                                           fontWeight: 600,
                                           cursor: "pointer",
                                         }}
-                                        aria-expanded={true}
+                                        aria-expanded={notesOpen}
                                       >
-                                        Show less
+                                        {notesOpen ? "Hide notes" : "Notes"}
                                       </button>
+                                      {notesOpen ? (
+                                        <div
+                                          className="mt-2 pl-0.5 text-sm leading-relaxed"
+                                          style={{
+                                            fontFamily: sans,
+                                            color: colors.brownMid,
+                                          }}
+                                        >
+                                          {noteSegments.map((chunk, ni) => (
+                                            <div key={`${listKey}-n-${ni}`}>
+                                              {ni > 0 ? (
+                                                <hr
+                                                  className="my-3 border-0 border-t"
+                                                  style={{
+                                                    borderColor: `${colors.brownBorder}99`,
+                                                  }}
+                                                />
+                                              ) : null}
+                                              <p className="whitespace-pre-wrap">
+                                                {chunk}
+                                              </p>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : null}
                                     </div>
-                                  )}
-                                </div>
-                              ) : null}
-                              {descLines.map((line, di) => (
-                                <p
-                                  key={`${listKey}-d-${di}`}
-                                  className="mt-2 text-sm leading-relaxed"
-                                  style={{
-                                    fontFamily: sans,
-                                    color: colors.brownMuted,
-                                  }}
-                                >
-                                  {line}
-                                </p>
-                              ))}
-                              {noteSegments.length > 0 ? (
-                                <div className="mt-3">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      toggleTimelineNotesCluster(cKey)
-                                    }
-                                    className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                    style={{
-                                      fontFamily: sans,
-                                      color: colors.forest,
-                                      fontWeight: 600,
-                                      cursor: "pointer",
-                                    }}
-                                    aria-expanded={notesOpen}
-                                  >
-                                    {notesOpen ? "Hide notes" : "Notes"}
-                                  </button>
-                                  {notesOpen ? (
+                                  ) : null}
+                                  {linkedSources.length > 0 ? (
+                                    <div className="mt-3">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          toggleTimelineSourcesForEvent(ev.id)
+                                        }
+                                        className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                        style={{
+                                          fontFamily: sans,
+                                          color: colors.forest,
+                                          fontWeight: 600,
+                                          cursor: "pointer",
+                                        }}
+                                        aria-expanded={sourcesOpen}
+                                      >
+                                        {sourcesOpen
+                                          ? "Hide sources"
+                                          : `Sources (${linkedSources.length})`}
+                                      </button>
+                                      {sourcesOpen ? (
+                                        <ul className="mt-2 space-y-1.5 pl-0.5">
+                                          {linkedSources.map((src) => (
+                                            <li key={src.id}>
+                                              {src.url ? (
+                                                <a
+                                                  href={src.url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    color: colors.forest,
+                                                    fontWeight: 600,
+                                                  }}
+                                                >
+                                                  {src.label}
+                                                </a>
+                                              ) : (
+                                                <span
+                                                  className="text-sm"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    color: colors.brownMuted,
+                                                  }}
+                                                >
+                                                  {src.label}
+                                                  <span className="ml-1 text-xs italic">
+                                                    (link unavailable)
+                                                  </span>
+                                                </span>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                  {eventDeleteConfirmId === ev.id ? (
                                     <div
-                                      className="mt-2 pl-0.5 text-sm leading-relaxed"
+                                      className="mt-4 flex flex-wrap items-center gap-2 border-t pt-3"
                                       style={{
-                                        fontFamily: sans,
-                                        color: colors.brownMid,
+                                        borderColor: `${colors.brownBorder}99`,
                                       }}
                                     >
-                                      {noteSegments.map((chunk, ni) => (
-                                        <div key={`${listKey}-n-${ni}`}>
-                                          {ni > 0 ? (
-                                            <hr
-                                              className="my-3 border-0 border-t"
-                                              style={{
-                                                borderColor: `${colors.brownBorder}99`,
-                                              }}
-                                            />
-                                          ) : null}
-                                          <p className="whitespace-pre-wrap">
-                                            {chunk}
-                                          </p>
-                                        </div>
-                                      ))}
+                                      <span
+                                        className="text-sm font-medium"
+                                        style={{
+                                          fontFamily: sans,
+                                          color: colors.brownDark,
+                                        }}
+                                      >
+                                        Delete this event?
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={eventDeletingId === ev.id}
+                                        onClick={() =>
+                                          void deleteEventById(ev.id)
+                                        }
+                                        style={{
+                                          fontFamily: sans,
+                                          backgroundColor: "#8B3A3A",
+                                          color: colors.cream,
+                                          border: "none",
+                                          padding: "0.35rem 0.85rem",
+                                          fontSize: "0.8125rem",
+                                          fontWeight: 700,
+                                          cursor:
+                                            eventDeletingId === ev.id
+                                              ? "wait"
+                                              : "pointer",
+                                          borderRadius: 2,
+                                        }}
+                                      >
+                                        Yes
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={eventDeletingId === ev.id}
+                                        onClick={() =>
+                                          setEventDeleteConfirmId(null)
+                                        }
+                                        style={btnOutline}
+                                      >
+                                        No
+                                      </button>
                                     </div>
                                   ) : null}
                                 </div>
-                              ) : null}
-                              {linkedSources.length > 0 ? (
-                                <div className="mt-3">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      toggleTimelineSourcesCluster(cKey)
-                                    }
-                                    className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                    style={{
-                                      fontFamily: sans,
-                                      color: colors.forest,
-                                      fontWeight: 600,
-                                      cursor: "pointer",
-                                    }}
-                                    aria-expanded={sourcesOpen}
-                                  >
-                                    {sourcesOpen
-                                      ? "Hide sources"
-                                      : `Sources (${linkedSources.length})`}
-                                  </button>
-                                  {sourcesOpen ? (
-                                    <ul className="mt-2 space-y-1.5 pl-0.5">
-                                      {linkedSources.map((src) => (
-                                        <li key={src.id}>
-                                          {src.url ? (
-                                            <a
-                                              href={src.url}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                              style={{
-                                                fontFamily: sans,
-                                                color: colors.forest,
-                                                fontWeight: 600,
-                                              }}
-                                            >
-                                              {src.label}
-                                            </a>
-                                          ) : (
-                                            <span
-                                              className="text-sm"
-                                              style={{
-                                                fontFamily: sans,
-                                                color: colors.brownMuted,
-                                              }}
-                                            >
-                                              {src.label}
-                                              <span className="ml-1 text-xs italic">
-                                                (link unavailable)
-                                              </span>
-                                            </span>
-                                          )}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : null}
-                                </div>
-                              ) : null}
+                              )}
                             </div>
                           </div>
                         </li>
@@ -1745,6 +2572,655 @@ export default function PersonProfilePage() {
         )}
         </div>
       </div>
+
+      {editPersonOpen && editPersonDraft ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-person-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeEditPersonModal();
+          }}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="edit-person-title"
+              className="mb-5 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Edit person
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-fn"
+                >
+                  First name
+                </label>
+                <input
+                  id="edit-fn"
+                  type="text"
+                  value={editPersonDraft.first_name}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, first_name: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-mn"
+                >
+                  Middle name
+                </label>
+                <input
+                  id="edit-mn"
+                  type="text"
+                  value={editPersonDraft.middle_name}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, middle_name: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-ln"
+                >
+                  Last name
+                </label>
+                <input
+                  id="edit-ln"
+                  type="text"
+                  value={editPersonDraft.last_name}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, last_name: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-bd"
+                >
+                  Birth date
+                </label>
+                <input
+                  id="edit-bd"
+                  type="text"
+                  value={editPersonDraft.birth_date}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, birth_date: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                  placeholder="YYYY-MM-DD"
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-dd"
+                >
+                  Death date
+                </label>
+                <input
+                  id="edit-dd"
+                  type="text"
+                  value={editPersonDraft.death_date}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, death_date: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                  placeholder="YYYY-MM-DD"
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-bp"
+                >
+                  Birth place
+                </label>
+                <input
+                  id="edit-bp"
+                  type="text"
+                  value={editPersonDraft.birth_place}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, birth_place: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-gender"
+                >
+                  Gender
+                </label>
+                <select
+                  id="edit-gender"
+                  value={editPersonDraft.gender}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, gender: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                >
+                  <option value="">—</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Unknown">Unknown</option>
+                  {editPersonDraft.gender &&
+                  !["", "Male", "Female", "Unknown"].includes(
+                    editPersonDraft.gender
+                  ) ? (
+                    <option value={editPersonDraft.gender}>
+                      {editPersonDraft.gender}
+                    </option>
+                  ) : null}
+                </select>
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-notes"
+                >
+                  Notes
+                </label>
+                <textarea
+                  id="edit-notes"
+                  rows={4}
+                  value={editPersonDraft.notes}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, notes: e.target.value } : null
+                    )
+                  }
+                  className="resize-y"
+                  style={modalInputStyle}
+                />
+              </div>
+            </div>
+            {personEditError ? (
+              <p
+                className="mt-3 text-sm"
+                style={{ fontFamily: sans, color: "#8B3A3A" }}
+              >
+                {personEditError}
+              </p>
+            ) : null}
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={personEditSaving}
+                onClick={() => void savePersonFromModal()}
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: colors.brownOutline,
+                  color: colors.cream,
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  cursor: personEditSaving ? "wait" : "pointer",
+                  borderRadius: 2,
+                  opacity: personEditSaving ? 0.85 : 1,
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                disabled={personEditSaving}
+                onClick={() => closeEditPersonModal()}
+                style={btnOutline}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deletePersonOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-person-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deletePersonBusy) {
+              setDeletePersonOpen(false);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="delete-person-title"
+              className="mb-3 text-xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Delete person
+            </h2>
+            <p
+              className="text-sm leading-relaxed"
+              style={{ fontFamily: sans, color: colors.brownMid }}
+            >
+              Are you sure you want to delete{" "}
+              <strong style={{ color: colors.brownDark }}>
+                {personFullName || "this person"}
+              </strong>
+              ? This will also delete all their events, relationships and
+              sources.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={deletePersonBusy}
+                onClick={() => void confirmDeletePerson()}
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: "#8B3A3A",
+                  color: colors.cream,
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  cursor: deletePersonBusy ? "wait" : "pointer",
+                  borderRadius: 2,
+                  opacity: deletePersonBusy ? 0.85 : 1,
+                }}
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                disabled={deletePersonBusy}
+                onClick={() => setDeletePersonOpen(false)}
+                style={btnOutline}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {mergeModalOpen && person ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="merge-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !mergeSaving) {
+              closeMergeModal();
+            }
+          }}
+        >
+          <div
+            className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="merge-modal-title"
+              className="mb-1 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Merge with another person
+            </h2>
+            <p
+              className="mb-5 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Search for a duplicate profile. You keep this record; the other
+              is removed after merge.
+            </p>
+
+            {!mergeSelectedDup ? (
+              <>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="merge-search"
+                >
+                  Search by name
+                </label>
+                <input
+                  id="merge-search"
+                  type="search"
+                  value={mergeSearchQuery}
+                  onChange={(e) => setMergeSearchQuery(e.target.value)}
+                  placeholder="First and last name…"
+                  autoComplete="off"
+                  className="mb-3 w-full"
+                  style={modalInputStyle}
+                />
+                {mergeSearchLoading ? (
+                  <p
+                    className="text-sm italic"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    Searching…
+                  </p>
+                ) : null}
+                {mergeSearchError ? (
+                  <p
+                    className="mb-3 text-sm"
+                    style={{ fontFamily: sans, color: "#8B3A3A" }}
+                  >
+                    {mergeSearchError}
+                  </p>
+                ) : null}
+                <ul className="max-h-[42vh] space-y-2 overflow-y-auto pr-1">
+                  {mergeSearchResults.map((c) => {
+                    const line = [
+                      c.first_name,
+                      c.middle_name ?? "",
+                      c.last_name,
+                    ]
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .join(" ");
+                    const dLine = [
+                      c.birth_date
+                        ? `b. ${formatDateString(c.birth_date)}`
+                        : "",
+                      c.death_date
+                        ? `d. ${formatDateString(c.death_date)}`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          className="w-full rounded-lg border p-3 text-left transition hover:opacity-90"
+                          style={{
+                            fontFamily: sans,
+                            borderColor: colors.brownBorder,
+                            backgroundColor: colors.cream,
+                            color: colors.brownDark,
+                            cursor: "pointer",
+                          }}
+                          onClick={() => selectMergeDuplicate(c)}
+                        >
+                          <span className="font-semibold">{line || "—"}</span>
+                          {dLine ? (
+                            <span
+                              className="mt-1 block text-xs italic"
+                              style={{ color: colors.brownMuted }}
+                            >
+                              {dLine}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {mergeSearchQuery.trim().length >= 2 &&
+                !mergeSearchLoading &&
+                mergeSearchResults.length === 0 &&
+                !mergeSearchError ? (
+                  <p
+                    className="mt-2 text-sm italic"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    No matches yet.
+                  </p>
+                ) : null}
+                <div className="mt-6 flex justify-end border-t pt-4">
+                  <button
+                    type="button"
+                    onClick={() => closeMergeModal()}
+                    style={btnOutline}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="mb-4 border-none bg-transparent p-0 text-sm font-semibold underline"
+                  style={{ fontFamily: sans, color: colors.forest }}
+                  onClick={() => {
+                    setMergeSelectedDup(null);
+                    setMergeFieldChoices({});
+                  }}
+                >
+                  ← Choose a different person
+                </button>
+                <div className="mb-4 grid grid-cols-2 gap-4 border-b pb-3 text-center">
+                  <p
+                    className="text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.forest }}
+                  >
+                    Keep this record
+                  </p>
+                  <p
+                    className="text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: "#8B3A3A" }}
+                  >
+                    Remove after merge
+                  </p>
+                </div>
+                <div className="space-y-5">
+                  {MERGE_COMPARE_KEYS.map((key) => {
+                    const label = MERGE_FIELD_LABELS[key];
+                    const conflict = mergeFieldsConflict(
+                      person,
+                      mergeSelectedDup,
+                      key
+                    );
+                    const pv = mergeFieldStr(person, key);
+                    const dv = mergeFieldStr(mergeSelectedDup, key);
+                    if (conflict) {
+                      const choice = mergeFieldChoices[key] ?? "primary";
+                      return (
+                        <div key={key}>
+                          <p
+                            className="mb-2 text-sm font-bold"
+                            style={{
+                              fontFamily: serif,
+                              color: colors.brownDark,
+                            }}
+                          >
+                            {label}
+                          </p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <label
+                              className="flex cursor-pointer gap-2 rounded-md border p-2"
+                              style={{
+                                borderColor:
+                                  choice === "primary"
+                                    ? colors.forest
+                                    : colors.brownBorder,
+                                backgroundColor: colors.cream,
+                              }}
+                            >
+                              <input
+                                type="radio"
+                                className="mt-1 shrink-0"
+                                name={`merge-field-${key}`}
+                                checked={choice === "primary"}
+                                onChange={() =>
+                                  setMergeFieldChoices((prev) => ({
+                                    ...prev,
+                                    [key]: "primary",
+                                  }))
+                                }
+                              />
+                              <span
+                                className="text-sm leading-snug"
+                                style={{
+                                  fontFamily: sans,
+                                  color: colors.brownMid,
+                                }}
+                              >
+                                {formatMergeFieldForUi(key, pv)}
+                              </span>
+                            </label>
+                            <label
+                              className="flex cursor-pointer gap-2 rounded-md border p-2"
+                              style={{
+                                borderColor:
+                                  choice === "duplicate"
+                                    ? colors.brownOutline
+                                    : colors.brownBorder,
+                                backgroundColor: colors.cream,
+                              }}
+                            >
+                              <input
+                                type="radio"
+                                className="mt-1 shrink-0"
+                                name={`merge-field-${key}`}
+                                checked={choice === "duplicate"}
+                                onChange={() =>
+                                  setMergeFieldChoices((prev) => ({
+                                    ...prev,
+                                    [key]: "duplicate",
+                                  }))
+                                }
+                              />
+                              <span
+                                className="text-sm leading-snug"
+                                style={{
+                                  fontFamily: sans,
+                                  color: colors.brownMid,
+                                }}
+                              >
+                                {formatMergeFieldForUi(key, dv)}
+                              </span>
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    }
+                    const single = mergeSingleDisplayValue(
+                      person,
+                      mergeSelectedDup,
+                      key
+                    );
+                    return (
+                      <div key={key}>
+                        <p
+                          className="mb-1 text-sm font-bold"
+                          style={{
+                            fontFamily: serif,
+                            color: colors.brownDark,
+                          }}
+                        >
+                          {label}
+                        </p>
+                        <p
+                          className="text-sm"
+                          style={{ fontFamily: sans, color: colors.brownMid }}
+                        >
+                          {single
+                            ? formatMergeFieldForUi(key, single)
+                            : "—"}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                {mergeError ? (
+                  <p
+                    className="mt-4 text-sm"
+                    style={{ fontFamily: sans, color: "#8B3A3A" }}
+                  >
+                    {mergeError}
+                  </p>
+                ) : null}
+                <div className="mt-6 flex flex-wrap gap-2 border-t pt-4">
+                  <button
+                    type="button"
+                    disabled={mergeSaving}
+                    onClick={() => void confirmMerge()}
+                    style={{
+                      fontFamily: sans,
+                      backgroundColor: colors.brownOutline,
+                      color: colors.cream,
+                      border: "none",
+                      padding: "0.55rem 1.2rem",
+                      fontSize: "0.875rem",
+                      fontWeight: 700,
+                      cursor: mergeSaving ? "wait" : "pointer",
+                      borderRadius: 2,
+                      opacity: mergeSaving ? 0.85 : 1,
+                    }}
+                  >
+                    Confirm merge
+                  </button>
+                  <button
+                    type="button"
+                    disabled={mergeSaving}
+                    onClick={() => closeMergeModal()}
+                    style={btnOutline}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
