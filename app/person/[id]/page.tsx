@@ -1970,6 +1970,28 @@ export default function PersonProfilePage() {
     return "jpg";
   }
 
+  const getNaturalSize = (file: File): Promise<{ w: number; h: number }> => {
+    return new Promise((resolve) => {
+      try {
+        const url = URL.createObjectURL(file);
+        const img = new window.Image();
+        img.onload = () => {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          URL.revokeObjectURL(url);
+          resolve({ w, h });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve({ w: 0, h: 0 });
+        };
+        img.src = url;
+      } catch {
+        resolve({ w: 0, h: 0 });
+      }
+    });
+  };
+
   function photosStoragePathFromFileUrl(fileUrl: string): string | null {
     try {
       const url = new URL(fileUrl);
@@ -2005,27 +2027,7 @@ export default function PersonProfilePage() {
         setPhotoUploadError("Not signed in.");
         return;
       }
-      const objectUrl = URL.createObjectURL(file);
-      let naturalWidth = 0;
-      let naturalHeight = 0;
-      try {
-        const dims = await new Promise<{ w: number; h: number }>(
-          (resolve, reject) => {
-            const img = new Image();
-            img.onload = () =>
-              resolve({ w: img.naturalWidth, h: img.naturalHeight });
-            img.onerror = () => reject(new Error("Could not read image."));
-            img.src = objectUrl;
-          }
-        );
-        naturalWidth = dims.w;
-        naturalHeight = dims.h;
-      } catch {
-        naturalWidth = 0;
-        naturalHeight = 0;
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
+      const { w: naturalWidth, h: naturalHeight } = await getNaturalSize(file);
       const ext = extFromImageFile(file);
       const path = `${user.id}/${personId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
@@ -2047,8 +2049,9 @@ export default function PersonProfilePage() {
           person_id: personId,
           file_url,
           is_primary: false,
-          natural_width: naturalWidth,
-          natural_height: naturalHeight,
+          ...(naturalWidth > 0 && naturalHeight > 0
+            ? { natural_width: naturalWidth, natural_height: naturalHeight }
+            : {}),
         })
         .select("*")
         .single();
@@ -2096,43 +2099,46 @@ export default function PersonProfilePage() {
         (r) => typeof r.id === "string" && r.id === photoRowId
       ) ?? null;
     const saveToTag = rowForPrimary?.__crop_save_to_tag === true;
+
+    const { error: clearPhotosErr } = await supabase
+      .from("photos")
+      .update({ is_primary: false })
+      .eq("person_id", personId)
+      .eq("user_id", user.id);
+    if (clearPhotosErr) {
+      setPhotoUploadError(clearPhotosErr.message);
+      return;
+    }
+    const { error: clearTagsErr } = await supabase
+      .from("photo_tags")
+      .update({ is_primary: false })
+      .eq("person_id", personId)
+      .eq("user_id", user.id);
+    if (clearTagsErr) {
+      setPhotoUploadError(clearTagsErr.message);
+      return;
+    }
+
     if (saveToTag) {
-      const { error: e1 } = await supabase
-        .from("photo_tags")
-        .update({ is_primary: false })
-        .eq("person_id", personId)
-        .eq("user_id", user.id);
-      if (e1) {
-        setPhotoUploadError(e1.message);
-        return;
-      }
-      const { error: e2 } = await supabase
+      const { error: setTagErr } = await supabase
         .from("photo_tags")
         .update({ is_primary: true })
         .eq("photo_id", photoRowId)
         .eq("person_id", personId)
         .eq("user_id", user.id);
-      if (e2) {
-        setPhotoUploadError(e2.message);
+      if (setTagErr) {
+        setPhotoUploadError(setTagErr.message);
         return;
       }
     } else {
-      const { error: e1 } = await supabase
-        .from("photos")
-        .update({ is_primary: false })
-        .eq("person_id", personId)
-        .eq("user_id", user.id);
-      if (e1) {
-        setPhotoUploadError(e1.message);
-        return;
-      }
-      const { error: e2 } = await supabase
+      const { error: setPhotoErr } = await supabase
         .from("photos")
         .update({ is_primary: true })
         .eq("id", photoRowId)
+        .eq("person_id", personId)
         .eq("user_id", user.id);
-      if (e2) {
-        setPhotoUploadError(e2.message);
+      if (setPhotoErr) {
+        setPhotoUploadError(setPhotoErr.message);
         return;
       }
     }

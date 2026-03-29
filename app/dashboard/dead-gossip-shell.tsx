@@ -48,6 +48,28 @@ function extFromImageFile(file: File): string {
   return "jpg";
 }
 
+const getNaturalSize = (file: File): Promise<{ w: number; h: number }> => {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new window.Image();
+      img.onload = () => {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        URL.revokeObjectURL(url);
+        resolve({ w, h });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({ w: 0, h: 0 });
+      };
+      img.src = url;
+    } catch {
+      resolve({ w: 0, h: 0 });
+    }
+  });
+};
+
 function displayTagName(p: UploadTagPerson): string {
   return [p.first_name, p.middle_name ?? "", p.last_name]
     .map((s) => s.trim())
@@ -224,27 +246,8 @@ export default function DeadGossipShell({
       }
 
       const firstTagId = photoUploadTags[0].id;
-      const objectUrl = URL.createObjectURL(photoUploadFile);
-      let naturalWidth = 0;
-      let naturalHeight = 0;
-      try {
-        const dims = await new Promise<{ w: number; h: number }>(
-          (resolve, reject) => {
-            const img = new Image();
-            img.onload = () =>
-              resolve({ w: img.naturalWidth, h: img.naturalHeight });
-            img.onerror = () => reject(new Error("Could not read image."));
-            img.src = objectUrl;
-          }
-        );
-        naturalWidth = dims.w;
-        naturalHeight = dims.h;
-      } catch {
-        naturalWidth = 0;
-        naturalHeight = 0;
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
+      const { w: naturalWidth, h: naturalHeight } =
+        await getNaturalSize(photoUploadFile);
 
       const ext = extFromImageFile(photoUploadFile);
       const path = `${user.id}/${firstTagId}/${crypto.randomUUID()}.${ext}`;
@@ -269,8 +272,9 @@ export default function DeadGossipShell({
           file_url,
           is_primary: false,
           photo_date: dateTrim === "" ? null : dateTrim,
-          natural_width: naturalWidth,
-          natural_height: naturalHeight,
+          ...(naturalWidth > 0 && naturalHeight > 0
+            ? { natural_width: naturalWidth, natural_height: naturalHeight }
+            : {}),
         })
         .select("id")
         .single();
