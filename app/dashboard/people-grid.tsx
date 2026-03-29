@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
 export type PersonGridRow = {
   id: string;
@@ -11,7 +11,61 @@ export type PersonGridRow = {
   birth_date: string | null;
   death_date: string | null;
   photo_url: string | null;
+  crop_x?: number;
+  crop_y?: number;
+  crop_zoom?: number;
+  natural_width?: number;
+  natural_height?: number;
 };
+
+const DASHBOARD_GRID_AVATAR_VP = 56;
+
+function cropCoverRenderedSize(
+  naturalW: number,
+  naturalH: number,
+  viewportPx: number,
+  zoom: number
+): { w: number; h: number } {
+  const scale = Math.max(viewportPx / naturalW, viewportPx / naturalH);
+  return {
+    w: naturalW * scale * zoom,
+    h: naturalH * scale * zoom,
+  };
+}
+
+function clampCropOffsetCover(
+  offset: { x: number; y: number },
+  renderedW: number,
+  renderedH: number,
+  viewportPx: number
+): { x: number; y: number } {
+  const spanX = renderedW - viewportPx;
+  const spanY = renderedH - viewportPx;
+  return {
+    x: spanX > 0 ? Math.min(0, Math.max(-spanX, offset.x)) : 0,
+    y: spanY > 0 ? Math.min(0, Math.max(-spanY, offset.y)) : 0,
+  };
+}
+
+function cropPercentToOffsetCover(
+  cropX: number,
+  cropY: number,
+  renderedW: number,
+  renderedH: number,
+  viewportPx: number
+): { x: number; y: number } {
+  const spanX = renderedW - viewportPx;
+  const spanY = renderedH - viewportPx;
+  return clampCropOffsetCover(
+    {
+      x: spanX > 0 ? -(cropX / 100) * spanX : 0,
+      y: spanY > 0 ? -(cropY / 100) * spanY : 0,
+    },
+    renderedW,
+    renderedH,
+    viewportPx
+  );
+}
 
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 const sans = "var(--font-dg-body), Lato, sans-serif";
@@ -37,6 +91,71 @@ function matchesSearch(p: PersonGridRow, q: string): boolean {
     p.first_name.toLowerCase().includes(n) ||
     p.last_name.toLowerCase().includes(n) ||
     (p.middle_name ?? "").toLowerCase().includes(n)
+  );
+}
+
+function DashboardGridAvatarImg({ p }: { p: PersonGridRow }) {
+  const {
+    crop_x: cropX,
+    crop_y: cropY,
+    crop_zoom: cropZoom,
+    natural_width: nw,
+    natural_height: nh,
+  } = p;
+  const hasPixelCrop =
+    typeof nw === "number" &&
+    nw > 0 &&
+    typeof nh === "number" &&
+    nh > 0 &&
+    typeof cropX === "number" &&
+    Number.isFinite(cropX) &&
+    typeof cropY === "number" &&
+    Number.isFinite(cropY) &&
+    typeof cropZoom === "number" &&
+    Number.isFinite(cropZoom);
+
+  let pixelStyle: CSSProperties | null = null;
+  if (hasPixelCrop) {
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      nw,
+      nh,
+      DASHBOARD_GRID_AVATAR_VP,
+      cropZoom
+    );
+    const offset = cropPercentToOffsetCover(
+      cropX,
+      cropY,
+      rw,
+      rh,
+      DASHBOARD_GRID_AVATAR_VP
+    );
+    pixelStyle = {
+      position: "absolute",
+      left: offset.x,
+      top: offset.y,
+      width: rw,
+      height: rh,
+      maxWidth: "none",
+    };
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={p.photo_url ?? ""}
+      alt=""
+      className={hasPixelCrop ? undefined : "h-full w-full"}
+      style={
+        hasPixelCrop
+          ? pixelStyle ?? undefined
+          : {
+              objectFit: "cover",
+              objectPosition: `${p.crop_x ?? 50}% ${p.crop_y ?? 50}%`,
+              width: "100%",
+              height: "100%",
+            }
+      }
+    />
   );
 }
 
@@ -159,18 +278,14 @@ export default function PeopleGrid({
                 >
                   <div className="flex gap-3">
                     <div
-                      className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full ring-2 ring-[color-mix(in_srgb,var(--dg-brown-border)_25%,transparent)] transition group-hover:ring-[3px] group-hover:ring-[color-mix(in_srgb,var(--dg-brown-border)_40%,transparent)]"
+                      className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2 ring-[color-mix(in_srgb,var(--dg-brown-border)_25%,transparent)] transition group-hover:ring-[3px] group-hover:ring-[color-mix(in_srgb,var(--dg-brown-border)_40%,transparent)]"
                       style={{
+                        position: "relative",
                         backgroundColor: avatarBg,
                       }}
                     >
                       {p.photo_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={p.photo_url}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
+                        <DashboardGridAvatarImg p={p} />
                       ) : (
                         <span
                           className="flex h-full w-full items-center justify-center text-sm font-bold"

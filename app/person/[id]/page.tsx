@@ -5,7 +5,14 @@ import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 const serif =
   "var(--font-dg-display), 'Playfair Display', Georgia, serif";
@@ -32,6 +39,11 @@ type PersonRow = {
   death_date: string | null;
   birth_place: string | null;
   photo_url: string | null;
+  crop_x?: number | null;
+  crop_y?: number | null;
+  crop_zoom?: number | null;
+  natural_width?: number | null;
+  natural_height?: number | null;
   gender: string | null;
   notes: string | null;
 };
@@ -273,7 +285,41 @@ function clusterLinkedSources(
 function eventDateLabel(ev: EventRow): string {
   const d = ev.event_date?.trim();
   if (!d) return "Date unknown";
-  return formatDateString(d);
+  try {
+    const parsed = new Date(d.replace(/-/g, '/'));
+    if (isNaN(parsed.getTime())) return formatDateString(d);
+    const month = parsed.toLocaleDateString("en-US", { month: "long" });
+    const day = parsed.getDate();
+    const year = parsed.getFullYear();
+    return `${month.charAt(0).toUpperCase()}${month.slice(1).toLowerCase()} ${day}, ${year}`;
+  } catch {
+    return formatDateString(d);
+  }
+}
+
+function autoFormatDateInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function normalizeDateToMMDDYYYY(raw: string | null): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "";
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  try {
+    const parsed = new Date(s.replace(/-/g, "/"));
+    if (isNaN(parsed.getTime())) return "";
+    const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+    const dd = String(parsed.getDate()).padStart(2, "0");
+    const yyyy = String(parsed.getFullYear());
+    return `${mm}/${dd}/${yyyy}`;
+  } catch {
+    return "";
+  }
 }
 
 function formatResearchNoteTimestamp(iso: string): string {
@@ -317,13 +363,18 @@ function photoUrlFromRow(row: Record<string, unknown>): string | null {
   return typeof u === "string" && u.trim() !== "" ? u : null;
 }
 
+function rowIsPrimaryForDisplay(p: Record<string, unknown>): boolean {
+  if (p.__crop_save_to_tag === true) {
+    return p.__tag_is_primary === true;
+  }
+  return p.is_primary === true || p.primary === true;
+}
+
 function pickPrimaryPhotoUrl(
   photoRows: Record<string, unknown>[],
   personPhotoUrl: string | null
 ): string | null {
-  const primary = photoRows.find(
-    (p) => p.is_primary === true || p.primary === true
-  );
+  const primary = photoRows.find((p) => rowIsPrimaryForDisplay(p));
   const fromPrimary = primary ? photoUrlFromRow(primary) : null;
   if (fromPrimary) return fromPrimary;
   for (const row of photoRows) {
@@ -337,9 +388,7 @@ function pickPrimaryPhotoUrl(
 function pickHeaderPhotoCropRow(
   photoRows: Record<string, unknown>[]
 ): Record<string, unknown> | null {
-  const primary = photoRows.find(
-    (p) => p.is_primary === true || p.primary === true
-  );
+  const primary = photoRows.find((p) => rowIsPrimaryForDisplay(p));
   if (primary && photoUrlFromRow(primary)) return primary;
   for (const row of photoRows) {
     if (photoUrlFromRow(row)) return row;
@@ -667,14 +716,67 @@ function firstStoryFullInCluster(cluster: EventCluster): {
   return { text: "", eventId: sorted[0]?.id ?? "" };
 }
 
-function FamilyMemberCard({ p }: { p: PersonRow }) {
+const FAMILY_MEMBER_AVATAR_VP = 40;
+
+function FamilyMemberCard({
+  p,
+  crop_x,
+  crop_y,
+  crop_zoom,
+  natural_width,
+  natural_height,
+}: {
+  p: PersonRow;
+  crop_x?: number | null;
+  crop_y?: number | null;
+  crop_zoom?: number | null;
+  natural_width?: number | null;
+  natural_height?: number | null;
+}) {
   const last = p.last_name.trim() || "—";
-  const rest = [p.first_name, p.middle_name ?? ""]
+  const firstMiddle = [p.first_name, p.middle_name ?? ""]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" ");
   const photo =
     (p as { photo_url?: string | null }).photo_url ?? null;
+
+  const hasPixelCrop =
+    typeof natural_width === "number" &&
+    natural_width > 0 &&
+    typeof natural_height === "number" &&
+    natural_height > 0 &&
+    typeof crop_x === "number" &&
+    Number.isFinite(crop_x) &&
+    typeof crop_y === "number" &&
+    Number.isFinite(crop_y) &&
+    typeof crop_zoom === "number" &&
+    Number.isFinite(crop_zoom);
+
+  let pixelAvatarStyle: CSSProperties | null = null;
+  if (hasPixelCrop) {
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      natural_width,
+      natural_height,
+      FAMILY_MEMBER_AVATAR_VP,
+      crop_zoom
+    );
+    const offset = cropPercentToOffsetCover(
+      crop_x,
+      crop_y,
+      rw,
+      rh,
+      FAMILY_MEMBER_AVATAR_VP
+    );
+    pixelAvatarStyle = {
+      position: "absolute",
+      left: offset.x,
+      top: offset.y,
+      width: rw,
+      height: rh,
+      maxWidth: "none",
+    };
+  }
 
   return (
     <Link
@@ -691,13 +793,28 @@ function FamilyMemberCard({ p }: { p: PersonRow }) {
       <div
         className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-1"
         style={{
+          position: "relative",
           backgroundColor: colors.avatarBg,
           borderColor: colors.brownBorder,
         }}
       >
         {photo ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={photo} alt="" className="h-full w-full object-cover" />
+          <img
+            src={photo}
+            alt=""
+            className={hasPixelCrop ? undefined : "h-full w-full"}
+            style={
+              hasPixelCrop
+                ? pixelAvatarStyle ?? undefined
+                : {
+                    objectFit: "cover",
+                    objectPosition: `${p.crop_x ?? 50}% ${p.crop_y ?? 50}%`,
+                    width: "100%",
+                    height: "100%",
+                  }
+            }
+          />
         ) : (
           <span
             className="flex h-full w-full items-center justify-center text-xs font-bold"
@@ -710,21 +827,21 @@ function FamilyMemberCard({ p }: { p: PersonRow }) {
       <div className="min-w-0 flex-1">
         <p
           className="truncate text-sm font-bold leading-tight"
-          style={{ fontFamily: serif, color: colors.brownDark }}
+          style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
         >
-          {last}
+          {firstMiddle || last}
         </p>
-        {rest ? (
+        {firstMiddle ? (
           <p
-            className="truncate text-xs"
-            style={{ fontFamily: serif, color: colors.brownMid }}
+            className="truncate text-xs leading-tight"
+            style={{ fontFamily: serif, color: "var(--dg-brown-muted)" }}
           >
-            {rest}
+            {last}
           </p>
         ) : null}
         <p
-          className="mt-0.5 text-[10px] italic leading-tight"
-          style={{ fontFamily: sans, color: colors.brownMuted }}
+          className="mt-0.5 text-xs italic leading-tight"
+          style={{ fontFamily: sans, color: colors.brownMid }}
         >
           {p.birth_date
             ? `b. ${formatDateString(p.birth_date)}`
@@ -756,7 +873,14 @@ function FamilyGroup({
       <ul className="space-y-2">
         {members.map((p) => (
           <li key={p.id}>
-            <FamilyMemberCard p={p} />
+            <FamilyMemberCard
+              p={p}
+              crop_x={p.crop_x}
+              crop_y={p.crop_y}
+              crop_zoom={p.crop_zoom}
+              natural_width={p.natural_width}
+              natural_height={p.natural_height}
+            />
           </li>
         ))}
       </ul>
@@ -884,6 +1008,9 @@ export default function PersonProfilePage() {
 
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const headerActionsDropdownRef = useRef<HTMLDivElement>(null);
+  const headerPhotoFileInputRef = useRef<HTMLInputElement>(null);
 
   const [cropModalPhoto, setCropModalPhoto] = useState<Record<
     string,
@@ -997,7 +1124,19 @@ export default function PersonProfilePage() {
     setTagModalResults([]);
     setTagModalSaving(false);
     setTagModalError(null);
+    setHeaderMenuOpen(false);
   }, [personId]);
+
+  useEffect(() => {
+    if (!headerMenuOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const root = headerActionsDropdownRef.current;
+      if (!root || root.contains(e.target as Node)) return;
+      setHeaderMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [headerMenuOpen]);
 
   useEffect(() => {
     if (cropModalPhoto) return;
@@ -1223,10 +1362,20 @@ export default function PersonProfilePage() {
         return;
       }
 
-      const primaryPhotoByPersonId = new Map<string, string>();
+      type RelPrimaryPhotoPick = {
+        file_url: string;
+        crop_x?: number;
+        crop_y?: number;
+        crop_zoom?: number;
+        natural_width?: number;
+        natural_height?: number;
+      };
+
       const { data: relPhotos, error: relPhErr } = await supabase
         .from("photos")
-        .select("person_id, file_url, is_primary")
+        .select(
+          "person_id, file_url, is_primary, crop_x, crop_y, crop_zoom, natural_width, natural_height"
+        )
         .eq("user_id", user.id)
         .in("person_id", relatedIds)
         .order("created_at", { ascending: true });
@@ -1237,37 +1386,178 @@ export default function PersonProfilePage() {
         return;
       }
 
-      const preferredByPerson = new Map<string, string>();
-      const firstByPerson = new Map<string, string>();
+      const preferredByPerson = new Map<string, RelPrimaryPhotoPick>();
+      const firstByPerson = new Map<string, RelPrimaryPhotoPick>();
       for (const row of relPhotos ?? []) {
         const r = row as {
           person_id?: string;
           file_url?: string | null;
           is_primary?: boolean;
+          crop_x?: number | null;
+          crop_y?: number | null;
+          crop_zoom?: number | null;
+          natural_width?: number | null;
+          natural_height?: number | null;
         };
         const pid = r.person_id;
         const url = typeof r.file_url === "string" ? r.file_url.trim() : "";
         if (typeof pid !== "string" || pid === "" || url === "") continue;
-        if (!firstByPerson.has(pid)) firstByPerson.set(pid, url);
+        const pick: RelPrimaryPhotoPick = {
+          file_url: url,
+          ...(typeof r.crop_x === "number" ? { crop_x: r.crop_x } : {}),
+          ...(typeof r.crop_y === "number" ? { crop_y: r.crop_y } : {}),
+          ...(typeof r.crop_zoom === "number" ? { crop_zoom: r.crop_zoom } : {}),
+          ...(typeof r.natural_width === "number" && r.natural_width > 0
+            ? { natural_width: r.natural_width }
+            : {}),
+          ...(typeof r.natural_height === "number" && r.natural_height > 0
+            ? { natural_height: r.natural_height }
+            : {}),
+        };
+        if (!firstByPerson.has(pid)) firstByPerson.set(pid, pick);
         if (r.is_primary === true && !preferredByPerson.has(pid)) {
-          preferredByPerson.set(pid, url);
+          preferredByPerson.set(pid, pick);
         }
       }
-      for (const pid of new Set([
-        ...preferredByPerson.keys(),
-        ...firstByPerson.keys(),
-      ])) {
-        primaryPhotoByPersonId.set(
-          pid,
-          preferredByPerson.get(pid) ?? firstByPerson.get(pid)!
-        );
+
+      const idsNeedingTags = relatedIds.filter(
+        (id) => !preferredByPerson.has(id)
+      );
+
+      const tagPrimaryByPerson = new Map<string, RelPrimaryPhotoPick>();
+      const tagFirstByPerson = new Map<string, RelPrimaryPhotoPick>();
+
+      if (idsNeedingTags.length > 0) {
+        const { data: relTagRows, error: relTagErr } = await supabase
+          .from("photo_tags")
+          .select("person_id, photo_id, crop_x, crop_y, crop_zoom, is_primary")
+          .eq("user_id", user.id)
+          .in("person_id", idsNeedingTags)
+          .order("person_id", { ascending: true })
+          .order("photo_id", { ascending: true });
+
+        if (relTagErr) {
+          setError(relTagErr.message);
+          setLoading(false);
+          return;
+        }
+
+        const relTagPhotoIds = [
+          ...new Set(
+            (relTagRows ?? [])
+              .map((r) => (r as { photo_id?: string }).photo_id)
+              .filter(
+                (id): id is string => typeof id === "string" && id !== ""
+              )
+          ),
+        ];
+
+        if (relTagPhotoIds.length > 0) {
+          const { data: relTagPhotos, error: relTagPhErr } = await supabase
+            .from("photos")
+            .select("id, file_url, natural_width, natural_height")
+            .eq("user_id", user.id)
+            .in("id", relTagPhotoIds);
+
+          if (relTagPhErr) {
+            setError(relTagPhErr.message);
+            setLoading(false);
+            return;
+          }
+
+          const relPhotoMetaById = new Map<
+            string,
+            {
+              file_url: string;
+              natural_width?: number;
+              natural_height?: number;
+            }
+          >();
+          for (const pr of relTagPhotos ?? []) {
+            const rec = pr as {
+              id?: string;
+              file_url?: string | null;
+              natural_width?: number | null;
+              natural_height?: number | null;
+            };
+            const id = rec.id;
+            const u =
+              typeof rec.file_url === "string" ? rec.file_url.trim() : "";
+            if (typeof id === "string" && id !== "" && u !== "") {
+              relPhotoMetaById.set(id, {
+                file_url: u,
+                ...(typeof rec.natural_width === "number" && rec.natural_width > 0
+                  ? { natural_width: rec.natural_width }
+                  : {}),
+                ...(typeof rec.natural_height === "number" &&
+                rec.natural_height > 0
+                  ? { natural_height: rec.natural_height }
+                  : {}),
+              });
+            }
+          }
+
+          for (const row of relTagRows ?? []) {
+            const r = row as {
+              person_id?: string;
+              photo_id?: string;
+              crop_x?: number | null;
+              crop_y?: number | null;
+              crop_zoom?: number | null;
+              is_primary?: boolean | null;
+            };
+            const pid = r.person_id;
+            const phid = r.photo_id;
+            if (typeof pid !== "string" || pid === "") continue;
+            if (typeof phid !== "string" || phid === "") continue;
+            const meta = relPhotoMetaById.get(phid);
+            if (!meta) continue;
+            const pick: RelPrimaryPhotoPick = {
+              file_url: meta.file_url,
+              ...(typeof r.crop_x === "number" ? { crop_x: r.crop_x } : {}),
+              ...(typeof r.crop_y === "number" ? { crop_y: r.crop_y } : {}),
+              ...(typeof r.crop_zoom === "number"
+                ? { crop_zoom: r.crop_zoom }
+                : {}),
+              ...(meta.natural_width !== undefined
+                ? { natural_width: meta.natural_width }
+                : {}),
+              ...(meta.natural_height !== undefined
+                ? { natural_height: meta.natural_height }
+                : {}),
+            };
+            if (!tagFirstByPerson.has(pid)) tagFirstByPerson.set(pid, pick);
+            if (r.is_primary === true && !tagPrimaryByPerson.has(pid)) {
+              tagPrimaryByPerson.set(pid, pick);
+            }
+          }
+        }
+      }
+
+      const primaryPhotoByPersonId = new Map<string, RelPrimaryPhotoPick>();
+      for (const pid of relatedIds) {
+        let pick: RelPrimaryPhotoPick | undefined;
+        if (preferredByPerson.has(pid)) {
+          pick = preferredByPerson.get(pid) ?? firstByPerson.get(pid);
+        } else {
+          pick =
+            tagPrimaryByPerson.get(pid) ??
+            firstByPerson.get(pid) ??
+            tagFirstByPerson.get(pid);
+        }
+        if (pick) primaryPhotoByPersonId.set(pid, pick);
       }
 
       for (const row of (relPeople ?? []) as PersonRow[]) {
-        const fromPhotos = primaryPhotoByPersonId.get(row.id);
+        const pick = primaryPhotoByPersonId.get(row.id);
         relativesMap.set(row.id, {
           ...row,
-          photo_url: fromPhotos ?? row.photo_url ?? null,
+          photo_url: pick?.file_url ?? row.photo_url ?? null,
+          crop_x: pick?.crop_x ?? null,
+          crop_y: pick?.crop_y ?? null,
+          crop_zoom: pick?.crop_zoom ?? null,
+          natural_width: pick?.natural_width ?? null,
+          natural_height: pick?.natural_height ?? null,
         });
       }
     }
@@ -1278,7 +1568,7 @@ export default function PersonProfilePage() {
     let photosParsed: Record<string, unknown>[] = [];
     const { data: tagLinkRows, error: tagLinkErr } = await supabase
       .from("photo_tags")
-      .select("photo_id, crop_x, crop_y, crop_zoom")
+      .select("photo_id, crop_x, crop_y, crop_zoom, is_primary")
       .eq("person_id", personId)
       .eq("user_id", user.id);
 
@@ -1342,7 +1632,12 @@ export default function PersonProfilePage() {
 
     const tagCropByPhotoId = new Map<
       string,
-      { crop_x: unknown; crop_y: unknown; crop_zoom: unknown }
+      {
+        crop_x: unknown;
+        crop_y: unknown;
+        crop_zoom: unknown;
+        is_primary: unknown;
+      }
     >();
     for (const tr of tagLinkRows ?? []) {
       const r = tr as {
@@ -1350,12 +1645,14 @@ export default function PersonProfilePage() {
         crop_x?: unknown;
         crop_y?: unknown;
         crop_zoom?: unknown;
+        is_primary?: unknown;
       };
       if (typeof r.photo_id === "string" && r.photo_id !== "") {
         tagCropByPhotoId.set(r.photo_id, {
           crop_x: r.crop_x,
           crop_y: r.crop_y,
           crop_zoom: r.crop_zoom,
+          is_primary: r.is_primary,
         });
       }
     }
@@ -1387,6 +1684,7 @@ export default function PersonProfilePage() {
           return {
             ...rec,
             __crop_save_to_tag: true,
+            __tag_is_primary: tagCrop.is_primary === true,
             __person_crop_x: cropPercentFromUnknown(
               tagCrop.crop_x ?? rec.crop_x,
               50
@@ -1582,10 +1880,6 @@ export default function PersonProfilePage() {
     [person, photoRows]
   );
 
-  useEffect(() => {
-    setAvatarNaturalSize(null);
-  }, [headerPhotoUrl]);
-
   const headerPhotoCrop = useMemo(() => {
     const row = pickHeaderPhotoCropRow(photoRows);
     if (!row) return { x: 50, y: 50, zoom: 1 };
@@ -1594,7 +1888,7 @@ export default function PersonProfilePage() {
 
   const primaryPhotoRow = useMemo(
     () =>
-      photoRows.find((r) => r.is_primary === true) ?? photoRows[0] ?? null,
+      photoRows.find((r) => rowIsPrimaryForDisplay(r)) ?? photoRows[0] ?? null,
     [photoRows]
   );
 
@@ -1711,6 +2005,27 @@ export default function PersonProfilePage() {
         setPhotoUploadError("Not signed in.");
         return;
       }
+      const objectUrl = URL.createObjectURL(file);
+      let naturalWidth = 0;
+      let naturalHeight = 0;
+      try {
+        const dims = await new Promise<{ w: number; h: number }>(
+          (resolve, reject) => {
+            const img = new Image();
+            img.onload = () =>
+              resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => reject(new Error("Could not read image."));
+            img.src = objectUrl;
+          }
+        );
+        naturalWidth = dims.w;
+        naturalHeight = dims.h;
+      } catch {
+        naturalWidth = 0;
+        naturalHeight = 0;
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
       const ext = extFromImageFile(file);
       const path = `${user.id}/${personId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
@@ -1732,6 +2047,8 @@ export default function PersonProfilePage() {
           person_id: personId,
           file_url,
           is_primary: false,
+          natural_width: naturalWidth,
+          natural_height: naturalHeight,
         })
         .select("*")
         .single();
@@ -1774,23 +2091,50 @@ export default function PersonProfilePage() {
       setPhotoUploadError("Not signed in.");
       return;
     }
-    const { error: e1 } = await supabase
-      .from("photos")
-      .update({ is_primary: false })
-      .eq("person_id", personId)
-      .eq("user_id", user.id);
-    if (e1) {
-      setPhotoUploadError(e1.message);
-      return;
-    }
-    const { error: e2 } = await supabase
-      .from("photos")
-      .update({ is_primary: true })
-      .eq("id", photoRowId)
-      .eq("user_id", user.id);
-    if (e2) {
-      setPhotoUploadError(e2.message);
-      return;
+    const rowForPrimary =
+      photoRows.find(
+        (r) => typeof r.id === "string" && r.id === photoRowId
+      ) ?? null;
+    const saveToTag = rowForPrimary?.__crop_save_to_tag === true;
+    if (saveToTag) {
+      const { error: e1 } = await supabase
+        .from("photo_tags")
+        .update({ is_primary: false })
+        .eq("person_id", personId)
+        .eq("user_id", user.id);
+      if (e1) {
+        setPhotoUploadError(e1.message);
+        return;
+      }
+      const { error: e2 } = await supabase
+        .from("photo_tags")
+        .update({ is_primary: true })
+        .eq("photo_id", photoRowId)
+        .eq("person_id", personId)
+        .eq("user_id", user.id);
+      if (e2) {
+        setPhotoUploadError(e2.message);
+        return;
+      }
+    } else {
+      const { error: e1 } = await supabase
+        .from("photos")
+        .update({ is_primary: false })
+        .eq("person_id", personId)
+        .eq("user_id", user.id);
+      if (e1) {
+        setPhotoUploadError(e1.message);
+        return;
+      }
+      const { error: e2 } = await supabase
+        .from("photos")
+        .update({ is_primary: true })
+        .eq("id", photoRowId)
+        .eq("user_id", user.id);
+      if (e2) {
+        setPhotoUploadError(e2.message);
+        return;
+      }
     }
     await load();
   }
@@ -2527,8 +2871,8 @@ export default function PersonProfilePage() {
       first_name: person.first_name,
       middle_name: person.middle_name ?? "",
       last_name: person.last_name,
-      birth_date: person.birth_date ?? "",
-      death_date: person.death_date ?? "",
+      birth_date: normalizeDateToMMDDYYYY(person.birth_date),
+      death_date: normalizeDateToMMDDYYYY(person.death_date),
       birth_place: person.birth_place ?? "",
       gender: genderVal,
       notes: person.notes ?? "",
@@ -2702,7 +3046,7 @@ export default function PersonProfilePage() {
     setEditingEventId(ev.id);
     setEventEditDraft({
       event_type: ev.event_type?.trim() || "other",
-      event_date: ev.event_date?.trim() ?? "",
+      event_date: normalizeDateToMMDDYYYY(ev.event_date),
       event_place: ev.event_place?.trim() ?? "",
       story_short: ev.story_short?.trim() ?? "",
       story_full: ev.story_full?.trim() ?? "",
@@ -2838,6 +3182,18 @@ export default function PersonProfilePage() {
     cursor: "pointer",
   };
 
+  const headerMenuItemBaseStyle: CSSProperties = {
+    fontFamily: sans,
+    fontSize: "0.875rem",
+    padding: "0.5rem 1rem",
+    width: "100%",
+    textAlign: "left",
+    border: "none",
+    cursor: "pointer",
+    backgroundColor: "transparent",
+    boxSizing: "border-box",
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center px-4">
@@ -2968,10 +3324,12 @@ export default function PersonProfilePage() {
           borderColor: `${colors.brownBorder}44`,
         }}
       >
-        <div className="mx-auto flex max-w-5xl flex-col items-center text-center sm:flex-row sm:items-start sm:gap-10 sm:text-left">
+        <div className="relative mx-auto flex max-w-5xl flex-col items-center text-center sm:flex-row sm:items-start sm:gap-10 sm:text-left">
           <div
-            className="relative h-36 w-36 shrink-0 overflow-hidden rounded-full ring-4"
+            className="relative h-48 w-48 shrink-0 overflow-hidden rounded-full ring-4"
             style={{
+              position: "relative",
+              overflow: "hidden",
               backgroundColor: colors.avatarBg,
               borderColor: colors.cream,
               boxShadow: "0 8px 28px rgb(var(--dg-shadow-rgb) / 0.12)",
@@ -2990,46 +3348,50 @@ export default function PersonProfilePage() {
                     h: el.naturalHeight,
                   });
                 }}
-                style={
-                  avatarNaturalSize &&
-                  avatarNaturalSize.w > 0 &&
-                  avatarNaturalSize.h > 0
-                    ? (() => {
-                        const avatarViewportPx = 144;
-                        const { w: rw, h: rh } = cropCoverRenderedSize(
-                          avatarNaturalSize.w,
-                          avatarNaturalSize.h,
-                          avatarViewportPx,
-                          avatarCropZoom
-                        );
-                        const { x: ox, y: oy } = cropPercentToOffsetCover(
-                          avatarCropX,
-                          avatarCropY,
-                          rw,
-                          rh,
-                          avatarViewportPx
-                        );
-                        return {
-                          position: "absolute" as const,
-                          left: ox,
-                          top: oy,
-                          width: rw,
-                          height: rh,
-                          pointerEvents: "none" as const,
-                          maxWidth: "none",
-                        };
-                      })()
-                    : {
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover" as const,
-                        objectPosition: `${avatarCropX}% ${avatarCropY}%`,
-                      }
-                }
+                style={(() => {
+                  if (
+                    !avatarNaturalSize ||
+                    avatarNaturalSize.w <= 0 ||
+                    avatarNaturalSize.h <= 0
+                  ) {
+                    return {
+                      position: "absolute" as const,
+                      left: 0,
+                      top: 0,
+                      width: "100%",
+                      height: "100%",
+                      opacity: 0,
+                    };
+                  }
+                  const { w: avatarRenderedW, h: avatarRenderedH } =
+                    cropCoverRenderedSize(
+                      avatarNaturalSize.w,
+                      avatarNaturalSize.h,
+                      192,
+                      avatarCropZoom
+                    );
+                  const avatarOffset = cropPercentToOffsetCover(
+                    avatarCropX,
+                    avatarCropY,
+                    avatarRenderedW,
+                    avatarRenderedH,
+                    192
+                  );
+                  return {
+                    position: "absolute" as const,
+                    left: avatarOffset.x,
+                    top: avatarOffset.y,
+                    width: avatarRenderedW,
+                    height: avatarRenderedH,
+                    opacity: 1,
+                    pointerEvents: "none" as const,
+                    maxWidth: "none",
+                  };
+                })()}
               />
             ) : (
               <span
-                className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                className="flex h-full w-full items-center justify-center text-5xl font-bold"
                 style={{ fontFamily: serif, color: colors.brownMid }}
               >
                 {initials(person)}
@@ -3077,46 +3439,138 @@ export default function PersonProfilePage() {
               {headerDateSegment ? headerDateSegment : null}
               {headerNoDates ? "Dates unknown" : null}
             </p>
-            <div className="mt-6 flex flex-wrap justify-center gap-3 sm:justify-start">
+          </div>
+          <div
+            ref={headerActionsDropdownRef}
+            className="relative z-[100]"
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+            }}
+          >
+          <input
+            ref={headerPhotoFileInputRef}
+            id="person-profile-photo-upload-header"
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            disabled={photoUploading}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void uploadPhoto(f);
+            }}
+          />
+          <button
+            type="button"
+            style={btnOutline}
+            aria-expanded={headerMenuOpen}
+            aria-haspopup="menu"
+            aria-controls="person-header-actions-menu"
+            id="person-header-actions-trigger"
+            onClick={() => setHeaderMenuOpen((o) => !o)}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              Actions
+              <span aria-hidden>▾</span>
+            </span>
+          </button>
+          {headerMenuOpen ? (
+            <div
+              id="person-header-actions-menu"
+              role="menu"
+              aria-labelledby="person-header-actions-trigger"
+              className="absolute left-0 top-full z-[100] mt-1"
+              style={{
+                minWidth: 200,
+                backgroundColor: colors.cream,
+                borderWidth: 1,
+                borderStyle: "solid",
+                borderColor: colors.brownBorder,
+                borderRadius: 6,
+                boxShadow:
+                  "0 4px 16px rgb(var(--dg-shadow-rgb) / 0.14)",
+                overflow: "hidden",
+              }}
+            >
               <button
                 type="button"
-                style={btnOutline}
-                onClick={() => openEditPersonModal()}
+                role="menuitem"
+                style={headerMenuItemBaseStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.parchment;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  openEditPersonModal();
+                }}
               >
                 Edit
               </button>
               <button
                 type="button"
-                style={{
-                  ...btnOutline,
-                  borderColor: colors.forest,
-                  color: colors.forest,
+                role="menuitem"
+                style={headerMenuItemBaseStyle}
+                disabled={photoUploading}
+                onMouseEnter={(e) => {
+                  if (!e.currentTarget.disabled) {
+                    e.currentTarget.style.backgroundColor =
+                      colors.parchment;
+                  }
                 }}
-                onClick={() => openMergeModal()}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  headerPhotoFileInputRef.current?.click();
+                }}
+              >
+                Upload photo
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                style={headerMenuItemBaseStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.parchment;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  openMergeModal();
+                }}
               >
                 Merge with another person
               </button>
               <button
                 type="button"
-                style={btnOutline}
-                title="Coming soon"
-                disabled
-                className="opacity-50"
-              >
-                Add Photo
-              </button>
-              <button
-                type="button"
+                role="menuitem"
                 style={{
-                  ...btnOutline,
-                  borderColor: "var(--dg-danger)",
-                  color: "var(--dg-danger-mid)",
+                  ...headerMenuItemBaseStyle,
+                  color: "#8B3A3A",
                 }}
-                onClick={() => setDeletePersonOpen(true)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.parchment;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  setDeletePersonOpen(true);
+                }}
               >
                 Delete
               </button>
             </div>
+          ) : null}
           </div>
         </div>
       </header>
@@ -3225,9 +3679,9 @@ export default function PersonProfilePage() {
                   No events recorded yet.
                 </p>
               ) : (
-                <div className="relative pl-6 sm:pl-8">
+                <div className="relative pl-6">
                   <div
-                    className="absolute bottom-0 left-[0.6rem] top-0 w-px sm:left-[0.85rem]"
+                    className="absolute bottom-0 left-[0.75rem] top-0 w-px"
                     style={{ backgroundColor: colors.brownBorder }}
                     aria-hidden
                   />
@@ -3271,20 +3725,20 @@ export default function PersonProfilePage() {
                       return (
                         <li
                           key={listKey}
-                          className="relative flex gap-4 pb-10 sm:gap-6"
+                          className="flex items-start gap-3 pb-8"
                         >
                           <div
-                            className="absolute left-0 top-1 z-10 h-2.5 w-2.5 rounded-full ring-4 ring-[var(--dg-parchment)] sm:left-[0.35rem]"
+                            className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
                             style={{
                               backgroundColor: colors.brownDark,
                             }}
                           />
                           <div
-                            className="min-w-[5.5rem] shrink-0 text-right sm:min-w-[6.5rem]"
+                            className="min-w-[7rem] shrink-0 sm:min-w-[8rem]"
                             style={{ fontFamily: serif }}
                           >
                             <span
-                              className="block text-xs font-bold uppercase tracking-wide"
+                              className="block text-sm font-bold tracking-wide"
                               style={{ color: colors.brownMuted }}
                             >
                               {eventDateLabel(ev)}
@@ -3408,13 +3862,15 @@ export default function PersonProfilePage() {
                                           prev
                                             ? {
                                                 ...prev,
-                                                event_date: e.target.value,
+                                                event_date: autoFormatDateInput(
+                                                  e.target.value
+                                                ),
                                               }
                                             : null
                                         )
                                       }
                                       style={modalInputStyle}
-                                      placeholder="YYYY-MM-DD or as stored"
+                                      placeholder="MM/DD/YYYY"
                                     />
                                   </div>
                                   <div>
@@ -4005,8 +4461,7 @@ export default function PersonProfilePage() {
                   const pid =
                     typeof row.id === "string" ? row.id : `photo-${i}`;
                   const rowId = typeof row.id === "string" ? row.id : null;
-                  const isPrimary =
-                    row.is_primary === true || row.primary === true;
+                  const isPrimary = rowIsPrimaryForDisplay(row);
                   if (!url) return null;
                   const thumbCrop = personPhotoCropForRow(row);
                   const openCropModal = () => {
@@ -4332,11 +4787,16 @@ export default function PersonProfilePage() {
                   value={editPersonDraft.birth_date}
                   onChange={(e) =>
                     setEditPersonDraft((d) =>
-                      d ? { ...d, birth_date: e.target.value } : null
+                      d
+                        ? {
+                            ...d,
+                            birth_date: autoFormatDateInput(e.target.value),
+                          }
+                        : null
                     )
                   }
                   style={modalInputStyle}
-                  placeholder="YYYY-MM-DD"
+                  placeholder="MM/DD/YYYY"
                 />
               </div>
               <div>
@@ -4353,11 +4813,16 @@ export default function PersonProfilePage() {
                   value={editPersonDraft.death_date}
                   onChange={(e) =>
                     setEditPersonDraft((d) =>
-                      d ? { ...d, death_date: e.target.value } : null
+                      d
+                        ? {
+                            ...d,
+                            death_date: autoFormatDateInput(e.target.value),
+                          }
+                        : null
                     )
                   }
                   style={modalInputStyle}
-                  placeholder="YYYY-MM-DD"
+                  placeholder="MM/DD/YYYY"
                 />
               </div>
               <div>
@@ -5219,7 +5684,19 @@ export default function PersonProfilePage() {
                     id="photo-setup-date"
                     type="text"
                     value={photoSetupDate}
-                    onChange={(e) => setPhotoSetupDate(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                        .replace(/\D/g, "")
+                        .slice(0, 8);
+                      let formatted = raw;
+                      if (raw.length > 2) {
+                        formatted = `${raw.slice(0, 2)}/${raw.slice(2)}`;
+                      }
+                      if (raw.length > 4) {
+                        formatted = `${raw.slice(0, 2)}/${raw.slice(2, 4)}/${raw.slice(4)}`;
+                      }
+                      setPhotoSetupDate(formatted);
+                    }}
                     placeholder="e.g. 1943 or 06/1943 or 06/15/1943"
                     autoComplete="off"
                     style={modalInputStyle}
