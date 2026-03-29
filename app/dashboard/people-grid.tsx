@@ -139,7 +139,7 @@ export default function PeopleGrid({
               <li key={p.id}>
                 <Link
                   href={`/person/${p.id}`}
-                  className="group block h-full rounded-xl border p-4 transition duration-200 ease-out hover:-translate-y-1"
+                  className="group block h-full rounded-xl border p-3 transition duration-200 ease-out hover:-translate-y-1"
                   style={{
                     backgroundColor: cream,
                     borderColor: paperBorder,
@@ -159,7 +159,7 @@ export default function PeopleGrid({
                 >
                   <div className="flex gap-3">
                     <div
-                      className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2 ring-[color-mix(in_srgb,var(--dg-brown-border)_25%,transparent)] transition group-hover:ring-[3px] group-hover:ring-[color-mix(in_srgb,var(--dg-brown-border)_40%,transparent)]"
+                      className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full ring-2 ring-[color-mix(in_srgb,var(--dg-brown-border)_25%,transparent)] transition group-hover:ring-[3px] group-hover:ring-[color-mix(in_srgb,var(--dg-brown-border)_40%,transparent)]"
                       style={{
                         backgroundColor: avatarBg,
                       }}
@@ -192,18 +192,18 @@ export default function PeopleGrid({
                       </p>
                       {firstMid ? (
                         <p
-                          className="mt-0.5 text-sm leading-snug"
-                          style={{ fontFamily: serif, color: brownMid }}
+                          className="mt-0.5 text-base leading-snug"
+                          style={{ fontFamily: serif, color: brownDark }}
                         >
                           {firstMid}
                         </p>
                       ) : null}
                       {p.birth_date ? (
                         <p
-                          className="mt-2 text-xs italic"
+                          className="mt-1 text-sm italic"
                           style={{
                             fontFamily: sans,
-                            color: brownMuted,
+                            color: brownMid,
                           }}
                         >
                           b. {p.birth_date}
@@ -211,10 +211,10 @@ export default function PeopleGrid({
                       ) : null}
                       {p.death_date ? (
                         <p
-                          className="mt-0.5 text-xs italic"
+                          className="mt-0.5 text-sm italic"
                           style={{
                             fontFamily: sans,
-                            color: brownMuted,
+                            color: brownMid,
                           }}
                         >
                           d. {p.death_date}

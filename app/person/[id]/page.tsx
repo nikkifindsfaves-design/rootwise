@@ -1222,8 +1222,53 @@ export default function PersonProfilePage() {
         setLoading(false);
         return;
       }
+
+      const primaryPhotoByPersonId = new Map<string, string>();
+      const { data: relPhotos, error: relPhErr } = await supabase
+        .from("photos")
+        .select("person_id, file_url, is_primary")
+        .eq("user_id", user.id)
+        .in("person_id", relatedIds)
+        .order("created_at", { ascending: true });
+
+      if (relPhErr) {
+        setError(relPhErr.message);
+        setLoading(false);
+        return;
+      }
+
+      const preferredByPerson = new Map<string, string>();
+      const firstByPerson = new Map<string, string>();
+      for (const row of relPhotos ?? []) {
+        const r = row as {
+          person_id?: string;
+          file_url?: string | null;
+          is_primary?: boolean;
+        };
+        const pid = r.person_id;
+        const url = typeof r.file_url === "string" ? r.file_url.trim() : "";
+        if (typeof pid !== "string" || pid === "" || url === "") continue;
+        if (!firstByPerson.has(pid)) firstByPerson.set(pid, url);
+        if (r.is_primary === true && !preferredByPerson.has(pid)) {
+          preferredByPerson.set(pid, url);
+        }
+      }
+      for (const pid of new Set([
+        ...preferredByPerson.keys(),
+        ...firstByPerson.keys(),
+      ])) {
+        primaryPhotoByPersonId.set(
+          pid,
+          preferredByPerson.get(pid) ?? firstByPerson.get(pid)!
+        );
+      }
+
       for (const row of (relPeople ?? []) as PersonRow[]) {
-        relativesMap.set(row.id, row);
+        const fromPhotos = primaryPhotoByPersonId.get(row.id);
+        relativesMap.set(row.id, {
+          ...row,
+          photo_url: fromPhotos ?? row.photo_url ?? null,
+        });
       }
     }
 
