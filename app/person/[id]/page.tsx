@@ -36,6 +36,20 @@ type PersonRow = {
   notes: string | null;
 };
 
+type PhotoSetupTagPerson = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  middle_name: string | null;
+};
+
+function photoSetupTagDisplayName(t: PhotoSetupTagPerson): string {
+  return [t.first_name, t.middle_name ?? "", t.last_name]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 const MERGE_COMPARE_KEYS = [
   "first_name",
   "middle_name",
@@ -347,10 +361,101 @@ function cropZoomFromUnknown(v: unknown, fallback: number): number {
   return fallback;
 }
 
+/** Per-profile crop for display (from photo_tags when linked, else photos row). */
+function personPhotoCropForRow(row: Record<string, unknown>): {
+  x: number;
+  y: number;
+  zoom: number;
+} {
+  if (typeof row.__person_crop_x === "number") {
+    return {
+      x: row.__person_crop_x,
+      y:
+        typeof row.__person_crop_y === "number"
+          ? row.__person_crop_y
+          : cropPercentFromUnknown(row.crop_y, 50),
+      zoom:
+        typeof row.__person_crop_zoom === "number"
+          ? row.__person_crop_zoom
+          : cropZoomFromUnknown(row.crop_zoom, 1),
+    };
+  }
+  return {
+    x: cropPercentFromUnknown(row.crop_x, 50),
+    y: cropPercentFromUnknown(row.crop_y, 50),
+    zoom: cropZoomFromUnknown(row.crop_zoom, 1),
+  };
+}
+
 const CROP_PREVIEW_PX = 280;
-/** Pixel delta → % change: (delta / 1.5) / 280 * 100 */
-function cropDragDeltaToPercent(deltaPx: number): number {
-  return ((deltaPx / 1.5) / CROP_PREVIEW_PX) * 100;
+
+/** Cover-fit rendered size inside a square viewport; zoom scales both axes. */
+function cropCoverRenderedSize(
+  naturalW: number,
+  naturalH: number,
+  viewportPx: number,
+  zoom: number
+): { w: number; h: number } {
+  const scale = Math.max(viewportPx / naturalW, viewportPx / naturalH);
+  return {
+    w: naturalW * scale * zoom,
+    h: naturalH * scale * zoom,
+  };
+}
+
+function clampCropOffsetCover(
+  offset: { x: number; y: number },
+  renderedW: number,
+  renderedH: number,
+  viewportPx: number
+): { x: number; y: number } {
+  const spanX = renderedW - viewportPx;
+  const spanY = renderedH - viewportPx;
+  return {
+    x: spanX > 0 ? Math.min(0, Math.max(-spanX, offset.x)) : 0,
+    y: spanY > 0 ? Math.min(0, Math.max(-spanY, offset.y)) : 0,
+  };
+}
+
+/** Persisted crop_x / crop_y (0–100) from pixel offset (cover-fit rendered image). */
+function offsetToCropPercentCover(
+  offset: { x: number; y: number },
+  renderedW: number,
+  renderedH: number,
+  viewportPx: number
+): { x: number; y: number } {
+  const spanX = renderedW - viewportPx;
+  const spanY = renderedH - viewportPx;
+  return {
+    x:
+      spanX > 0
+        ? Math.min(100, Math.max(0, (-offset.x / spanX) * 100))
+        : 50,
+    y:
+      spanY > 0
+        ? Math.min(100, Math.max(0, (-offset.y / spanY) * 100))
+        : 50,
+  };
+}
+
+function cropPercentToOffsetCover(
+  cropX: number,
+  cropY: number,
+  renderedW: number,
+  renderedH: number,
+  viewportPx: number
+): { x: number; y: number } {
+  const spanX = renderedW - viewportPx;
+  const spanY = renderedH - viewportPx;
+  return clampCropOffsetCover(
+    {
+      x: spanX > 0 ? -(cropX / 100) * spanX : 0,
+      y: spanY > 0 ? -(cropY / 100) * spanY : 0,
+    },
+    renderedW,
+    renderedH,
+    viewportPx
+  );
 }
 
 function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
@@ -433,6 +538,27 @@ function IconStar({ className }: { className?: string }) {
       aria-hidden
     >
       <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    </svg>
+  );
+}
+
+function IconTag({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
     </svg>
   );
 }
@@ -648,6 +774,10 @@ export default function PersonProfilePage() {
   const [person, setPerson] = useState<PersonRow | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [photoRows, setPhotoRows] = useState<Record<string, unknown>[]>([]);
+  const [avatarNaturalSize, setAvatarNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
   const [recordsById, setRecordsById] = useState<Map<string, RecordRow>>(
     new Map()
   );
@@ -741,11 +871,70 @@ export default function PersonProfilePage() {
     string,
     unknown
   > | null>(null);
-  const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
+  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1.0);
+  const [cropNaturalSize, setCropNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
   const [cropDragging, setCropDragging] = useState(false);
   const cropMouseDragCleanupRef = useRef<(() => void) | null>(null);
   const cropTouchDragCleanupRef = useRef<(() => void) | null>(null);
+  const cropOffsetHydratedRef = useRef(false);
+
+  const [photoSetupModal, setPhotoSetupModal] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [photoSetupOffset, setPhotoSetupOffset] = useState({ x: 0, y: 0 });
+  const [photoSetupNaturalSize, setPhotoSetupNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
+  const [photoSetupZoom, setPhotoSetupZoom] = useState(1.0);
+  const [photoSetupDate, setPhotoSetupDate] = useState("");
+  const [photoSetupTags, setPhotoSetupTags] = useState<PhotoSetupTagPerson[]>(
+    []
+  );
+  const [photoSetupTagSearch, setPhotoSetupTagSearch] = useState("");
+  const [photoSetupTagResults, setPhotoSetupTagResults] = useState<
+    PhotoSetupTagPerson[]
+  >([]);
+  const [photoSetupTagSearching, setPhotoSetupTagSearching] = useState(false);
+  const [photoSetupSaving, setPhotoSetupSaving] = useState(false);
+  const [photoSetupError, setPhotoSetupError] = useState<string | null>(null);
+
+  const [photoSetupDragging, setPhotoSetupDragging] = useState(false);
+  const photoSetupMouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const photoSetupTouchDragCleanupRef = useRef<(() => void) | null>(null);
+  const photoSetupTagsRef = useRef<PhotoSetupTagPerson[]>([]);
+  photoSetupTagsRef.current = photoSetupTags;
+  const photoSetupSearchSeqRef = useRef(0);
+  const photoSetupOffsetHydratedRef = useRef(false);
+
+  const [tagModalPhoto, setTagModalPhoto] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [tagModalTags, setTagModalTags] = useState<PhotoSetupTagPerson[]>([]);
+  const [tagModalSearch, setTagModalSearch] = useState("");
+  const [tagModalResults, setTagModalResults] = useState<PhotoSetupTagPerson[]>(
+    []
+  );
+  const [tagModalSaving, setTagModalSaving] = useState(false);
+  const [tagModalError, setTagModalError] = useState<string | null>(null);
+  const tagModalTagsRef = useRef<PhotoSetupTagPerson[]>([]);
+  tagModalTagsRef.current = tagModalTags;
+  const tagModalSearchSeqRef = useRef(0);
+
+  const cropModalPhotoId =
+    cropModalPhoto && typeof cropModalPhoto.id === "string"
+      ? cropModalPhoto.id
+      : null;
+  const photoSetupModalId =
+    photoSetupModal && typeof photoSetupModal.id === "string"
+      ? photoSetupModal.id
+      : null;
 
   useEffect(() => {
     setExpandedTimelineNotesKeys(new Set());
@@ -769,6 +958,27 @@ export default function PersonProfilePage() {
     setMergeSearchLoading(false);
     setMergeUiStep("search");
     setCropModalPhoto(null);
+    setPhotoSetupModal(null);
+    setCropOffset({ x: 0, y: 0 });
+    setCropNaturalSize(null);
+    cropOffsetHydratedRef.current = false;
+    setPhotoSetupOffset({ x: 0, y: 0 });
+    setPhotoSetupNaturalSize(null);
+    photoSetupOffsetHydratedRef.current = false;
+    setPhotoSetupZoom(1.0);
+    setPhotoSetupDate("");
+    setPhotoSetupTags([]);
+    setPhotoSetupTagSearch("");
+    setPhotoSetupTagResults([]);
+    setPhotoSetupTagSearching(false);
+    setPhotoSetupSaving(false);
+    setPhotoSetupError(null);
+    setTagModalPhoto(null);
+    setTagModalTags([]);
+    setTagModalSearch("");
+    setTagModalResults([]);
+    setTagModalSaving(false);
+    setTagModalError(null);
   }, [personId]);
 
   useEffect(() => {
@@ -779,6 +989,100 @@ export default function PersonProfilePage() {
     cropTouchDragCleanupRef.current = null;
     setCropDragging(false);
   }, [cropModalPhoto]);
+
+  useEffect(() => {
+    if (photoSetupModal) return;
+    photoSetupMouseDragCleanupRef.current?.();
+    photoSetupMouseDragCleanupRef.current = null;
+    photoSetupTouchDragCleanupRef.current?.();
+    photoSetupTouchDragCleanupRef.current = null;
+    setPhotoSetupDragging(false);
+  }, [photoSetupModal]);
+
+  useEffect(() => {
+    if (!cropModalPhotoId) {
+      setCropNaturalSize(null);
+      return;
+    }
+    setCropNaturalSize(null);
+    setCropOffset({ x: 0, y: 0 });
+    cropOffsetHydratedRef.current = false;
+  }, [cropModalPhotoId]);
+
+  useEffect(() => {
+    if (!photoSetupModalId) {
+      setPhotoSetupNaturalSize(null);
+      return;
+    }
+    setPhotoSetupNaturalSize(null);
+    setPhotoSetupOffset({ x: 0, y: 0 });
+    photoSetupOffsetHydratedRef.current = false;
+  }, [photoSetupModalId]);
+
+  useEffect(() => {
+    if (!cropModalPhoto || !cropNaturalSize || cropOffsetHydratedRef.current) {
+      return;
+    }
+    const nw = cropNaturalSize.w;
+    const nh = cropNaturalSize.h;
+    if (nw <= 0 || nh <= 0) return;
+    const thumb = personPhotoCropForRow(cropModalPhoto);
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      nw,
+      nh,
+      CROP_PREVIEW_PX,
+      cropZoom
+    );
+    setCropOffset(
+      cropPercentToOffsetCover(thumb.x, thumb.y, rw, rh, CROP_PREVIEW_PX)
+    );
+    cropOffsetHydratedRef.current = true;
+  }, [cropModalPhoto, cropNaturalSize]);
+
+  useEffect(() => {
+    if (!photoSetupModal || !photoSetupNaturalSize) {
+      return;
+    }
+    if (photoSetupOffsetHydratedRef.current) return;
+    const nw = photoSetupNaturalSize.w;
+    const nh = photoSetupNaturalSize.h;
+    if (nw <= 0 || nh <= 0) return;
+    const thumb = personPhotoCropForRow(photoSetupModal);
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      nw,
+      nh,
+      CROP_PREVIEW_PX,
+      photoSetupZoom
+    );
+    setPhotoSetupOffset(
+      cropPercentToOffsetCover(thumb.x, thumb.y, rw, rh, CROP_PREVIEW_PX)
+    );
+    photoSetupOffsetHydratedRef.current = true;
+  }, [photoSetupModal, photoSetupNaturalSize]);
+
+  useEffect(() => {
+    if (!cropNaturalSize) return;
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      cropNaturalSize.w,
+      cropNaturalSize.h,
+      CROP_PREVIEW_PX,
+      cropZoom
+    );
+    setCropOffset((o) => clampCropOffsetCover(o, rw, rh, CROP_PREVIEW_PX));
+  }, [cropZoom, cropNaturalSize]);
+
+  useEffect(() => {
+    if (!photoSetupNaturalSize) return;
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      photoSetupNaturalSize.w,
+      photoSetupNaturalSize.h,
+      CROP_PREVIEW_PX,
+      photoSetupZoom
+    );
+    setPhotoSetupOffset((o) =>
+      clampCropOffsetCover(o, rw, rh, CROP_PREVIEW_PX)
+    );
+  }, [photoSetupZoom, photoSetupNaturalSize]);
 
   const load = useCallback(async () => {
     if (!personId) {
@@ -909,15 +1213,148 @@ export default function PersonProfilePage() {
       [...ids].map((id) => relativesMap.get(id)).filter(Boolean) as PersonRow[];
 
     let photosParsed: Record<string, unknown>[] = [];
+    const { data: tagLinkRows, error: tagLinkErr } = await supabase
+      .from("photo_tags")
+      .select("photo_id, crop_x, crop_y, crop_zoom")
+      .eq("person_id", personId)
+      .eq("user_id", user.id);
+
+    if (tagLinkErr) {
+      setError(tagLinkErr.message);
+      setLoading(false);
+      return;
+    }
+
+    const tagPhotoIds = [
+      ...new Set(
+        (tagLinkRows ?? [])
+          .map((r) => (r as { photo_id?: string }).photo_id)
+          .filter((id): id is string => typeof id === "string" && id !== "")
+      ),
+    ];
+
     const { data: photosData, error: photosErr } = await supabase
       .from("photos")
       .select("*")
       .eq("person_id", personId)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (!photosErr && photosData) {
-      photosParsed = photosData as Record<string, unknown>[];
+    if (photosErr) {
+      setError(photosErr.message);
+      setLoading(false);
+      return;
     }
+
+    const photosById = new Map<string, Record<string, unknown>>();
+    const directPhotoIds = new Set<string>();
+    for (const row of photosData ?? []) {
+      const rec = row as Record<string, unknown>;
+      const pid = rec.id;
+      if (typeof pid === "string") {
+        photosById.set(pid, rec);
+        directPhotoIds.add(pid);
+      }
+    }
+
+    const extraTagIds = tagPhotoIds.filter((id) => !photosById.has(id));
+    if (extraTagIds.length > 0) {
+      const { data: taggedPhotos, error: taggedErr } = await supabase
+        .from("photos")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("id", extraTagIds);
+
+      if (taggedErr) {
+        setError(taggedErr.message);
+        setLoading(false);
+        return;
+      }
+      for (const row of taggedPhotos ?? []) {
+        const rec = row as Record<string, unknown>;
+        const pid = rec.id;
+        if (typeof pid === "string") photosById.set(pid, rec);
+      }
+    }
+
+    const tagCropByPhotoId = new Map<
+      string,
+      { crop_x: unknown; crop_y: unknown; crop_zoom: unknown }
+    >();
+    for (const tr of tagLinkRows ?? []) {
+      const r = tr as {
+        photo_id?: string;
+        crop_x?: unknown;
+        crop_y?: unknown;
+        crop_zoom?: unknown;
+      };
+      if (typeof r.photo_id === "string" && r.photo_id !== "") {
+        tagCropByPhotoId.set(r.photo_id, {
+          crop_x: r.crop_x,
+          crop_y: r.crop_y,
+          crop_zoom: r.crop_zoom,
+        });
+      }
+    }
+
+    photosParsed = [...photosById.values()]
+      .map((rec): Record<string, unknown> => {
+        const pid = rec.id;
+        if (typeof pid !== "string") {
+          return {
+            ...rec,
+            __crop_save_to_tag: false,
+            __person_crop_x: cropPercentFromUnknown(rec.crop_x, 50),
+            __person_crop_y: cropPercentFromUnknown(rec.crop_y, 50),
+            __person_crop_zoom: cropZoomFromUnknown(rec.crop_zoom, 1),
+          };
+        }
+        const tagCrop = tagCropByPhotoId.get(pid);
+        const ownedByThisPerson = directPhotoIds.has(pid);
+        if (ownedByThisPerson) {
+          return {
+            ...rec,
+            __crop_save_to_tag: false,
+            __person_crop_x: cropPercentFromUnknown(rec.crop_x, 50),
+            __person_crop_y: cropPercentFromUnknown(rec.crop_y, 50),
+            __person_crop_zoom: cropZoomFromUnknown(rec.crop_zoom, 1),
+          };
+        }
+        if (tagCrop) {
+          return {
+            ...rec,
+            __crop_save_to_tag: true,
+            __person_crop_x: cropPercentFromUnknown(
+              tagCrop.crop_x ?? rec.crop_x,
+              50
+            ),
+            __person_crop_y: cropPercentFromUnknown(
+              tagCrop.crop_y ?? rec.crop_y,
+              50
+            ),
+            __person_crop_zoom: cropZoomFromUnknown(
+              tagCrop.crop_zoom ?? rec.crop_zoom,
+              1
+            ),
+          };
+        }
+        return {
+          ...rec,
+          __crop_save_to_tag: false,
+          __person_crop_x: cropPercentFromUnknown(rec.crop_x, 50),
+          __person_crop_y: cropPercentFromUnknown(rec.crop_y, 50),
+          __person_crop_zoom: cropZoomFromUnknown(rec.crop_zoom, 1),
+        };
+      })
+      .sort((a, b) => {
+        const ca = a.created_at;
+        const cb = b.created_at;
+        const ta =
+          typeof ca === "string" ? Date.parse(ca) : Number.NEGATIVE_INFINITY;
+        const tb =
+          typeof cb === "string" ? Date.parse(cb) : Number.NEGATIVE_INFINITY;
+        return tb - ta;
+      });
 
     let sourceRows: EventSourceRow[] = [];
     const eventIds = sortedEvents.map((e) => e.id);
@@ -1082,15 +1519,57 @@ export default function PersonProfilePage() {
     [person, photoRows]
   );
 
+  useEffect(() => {
+    setAvatarNaturalSize(null);
+  }, [headerPhotoUrl]);
+
   const headerPhotoCrop = useMemo(() => {
     const row = pickHeaderPhotoCropRow(photoRows);
     if (!row) return { x: 50, y: 50, zoom: 1 };
-    return {
-      x: cropPercentFromUnknown(row.crop_x, 50),
-      y: cropPercentFromUnknown(row.crop_y, 50),
-      zoom: cropZoomFromUnknown(row.crop_zoom, 1),
-    };
+    return personPhotoCropForRow(row);
   }, [photoRows]);
+
+  const primaryPhotoRow = useMemo(
+    () =>
+      photoRows.find((r) => r.is_primary === true) ?? photoRows[0] ?? null,
+    [photoRows]
+  );
+
+  const avatarCropX = useMemo(() => {
+    if (!primaryPhotoRow) return 50;
+    if (primaryPhotoRow.__crop_save_to_tag === true) {
+      return typeof primaryPhotoRow.__person_crop_x === "number"
+        ? primaryPhotoRow.__person_crop_x
+        : 50;
+    }
+    return typeof primaryPhotoRow.crop_x === "number"
+      ? primaryPhotoRow.crop_x
+      : 50;
+  }, [primaryPhotoRow]);
+
+  const avatarCropY = useMemo(() => {
+    if (!primaryPhotoRow) return 50;
+    if (primaryPhotoRow.__crop_save_to_tag === true) {
+      return typeof primaryPhotoRow.__person_crop_y === "number"
+        ? primaryPhotoRow.__person_crop_y
+        : 50;
+    }
+    return typeof primaryPhotoRow.crop_y === "number"
+      ? primaryPhotoRow.crop_y
+      : 50;
+  }, [primaryPhotoRow]);
+
+  const avatarCropZoom = useMemo(() => {
+    if (!primaryPhotoRow) return 1;
+    if (primaryPhotoRow.__crop_save_to_tag === true) {
+      return typeof primaryPhotoRow.__person_crop_zoom === "number"
+        ? primaryPhotoRow.__person_crop_zoom
+        : 1;
+    }
+    return typeof primaryPhotoRow.crop_zoom === "number"
+      ? primaryPhotoRow.crop_zoom
+      : 1;
+  }, [primaryPhotoRow]);
 
   const eventTypeSelectOptions = useMemo(
     () => buildEventTypeSelectOptions(events),
@@ -1183,17 +1662,39 @@ export default function PersonProfilePage() {
       }
       const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
       const file_url = pub.publicUrl;
-      const { error: insErr } = await supabase.from("photos").insert({
-        user_id: user.id,
-        person_id: personId,
-        file_url,
-        is_primary: false,
-      });
-      if (insErr) {
-        setPhotoUploadError(insErr.message);
+      const { data: newRow, error: insErr } = await supabase
+        .from("photos")
+        .insert({
+          user_id: user.id,
+          person_id: personId,
+          file_url,
+          is_primary: false,
+        })
+        .select("*")
+        .single();
+      if (insErr || !newRow) {
+        setPhotoUploadError(insErr?.message ?? "Could not save photo.");
         return;
       }
-      await load();
+      const inserted = newRow as Record<string, unknown>;
+      setPhotoSetupModal(inserted);
+      setPhotoSetupZoom(1.0);
+      setPhotoSetupDate("");
+      setPhotoSetupTagSearch("");
+      setPhotoSetupTagResults([]);
+      setPhotoSetupError(null);
+      setPhotoSetupTags(
+        person
+          ? [
+              {
+                id: person.id,
+                first_name: person.first_name,
+                last_name: person.last_name,
+                middle_name: person.middle_name ?? null,
+              },
+            ]
+          : []
+      );
     } finally {
       setPhotoUploading(false);
     }
@@ -1274,7 +1775,7 @@ export default function PersonProfilePage() {
     y: number,
     zoom: number
   ) {
-    // requires crop_zoom column on photos table
+    // requires crop_zoom on photos; crop_x, crop_y, crop_zoom on photo_tags for tagged rows
     const supabase = createClient();
     const {
       data: { user },
@@ -1283,35 +1784,56 @@ export default function PersonProfilePage() {
     const cx = Math.min(100, Math.max(0, x));
     const cy = Math.min(100, Math.max(0, y));
     const cz = Math.min(3, Math.max(1, zoom));
-    const { error } = await supabase
-      .from("photos")
-      .update({ crop_x: cx, crop_y: cy, crop_zoom: cz })
-      .eq("id", photoRowId)
-      .eq("user_id", user.id);
+    const rowForCropSave =
+      photoRows.find(
+        (r) => typeof r.id === "string" && r.id === photoRowId
+      ) ??
+      (cropModalPhoto &&
+      typeof cropModalPhoto.id === "string" &&
+      cropModalPhoto.id === photoRowId
+        ? cropModalPhoto
+        : null);
+    const saveToPhotoTags = rowForCropSave?.__crop_save_to_tag === true;
+    const { error } = saveToPhotoTags
+      ? await supabase
+          .from("photo_tags")
+          .update({ crop_x: cx, crop_y: cy, crop_zoom: cz })
+          .eq("photo_id", photoRowId)
+          .eq("person_id", personId)
+          .eq("user_id", user.id)
+      : await supabase
+          .from("photos")
+          .update({ crop_x: cx, crop_y: cy, crop_zoom: cz })
+          .eq("id", photoRowId)
+          .eq("user_id", user.id);
     if (error) {
       setPhotoUploadError(error.message);
       return;
     }
-    setCropModalPhoto(null);
     await load();
+    setCropModalPhoto(null);
   }
 
-  function attachCropMouseDrag(startX: number, startY: number) {
+  function attachCropMouseDrag(
+    startClientX: number,
+    startClientY: number,
+    startOffset: { x: number; y: number },
+    renderedW: number,
+    renderedH: number
+  ) {
     cropMouseDragCleanupRef.current?.();
     setCropDragging(true);
-    let lastX = startX;
-    let lastY = startY;
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - lastX;
-      const dy = ev.clientY - lastY;
-      lastX = ev.clientX;
-      lastY = ev.clientY;
-      const dxp = cropDragDeltaToPercent(dx);
-      const dyp = cropDragDeltaToPercent(dy);
-      setCropPos((p) => ({
-        x: Math.min(100, Math.max(0, p.x + dxp)),
-        y: Math.min(100, Math.max(0, p.y + dyp)),
-      }));
+      const newX = startOffset.x + (ev.clientX - startClientX);
+      const newY = startOffset.y + (ev.clientY - startClientY);
+      setCropOffset(
+        clampCropOffsetCover(
+          { x: newX, y: newY },
+          renderedW,
+          renderedH,
+          CROP_PREVIEW_PX
+        )
+      );
     };
     const onUp = () => {
       setCropDragging(false);
@@ -1331,28 +1853,39 @@ export default function PersonProfilePage() {
   function handleCropCircleMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     if (e.button !== 0) return;
     e.preventDefault();
-    attachCropMouseDrag(e.clientX, e.clientY);
+    if (!cropNaturalSize) return;
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      cropNaturalSize.w,
+      cropNaturalSize.h,
+      CROP_PREVIEW_PX,
+      cropZoom
+    );
+    attachCropMouseDrag(e.clientX, e.clientY, { ...cropOffset }, rw, rh);
   }
 
-  function attachCropTouchDrag(startClientX: number, startClientY: number) {
+  function attachCropTouchDrag(
+    startClientX: number,
+    startClientY: number,
+    startOffset: { x: number; y: number },
+    renderedW: number,
+    renderedH: number
+  ) {
     cropTouchDragCleanupRef.current?.();
     setCropDragging(true);
-    let lastX = startClientX;
-    let lastY = startClientY;
     const onMove = (ev: TouchEvent) => {
       if (ev.touches.length !== 1) return;
       ev.preventDefault();
       const t = ev.touches[0]!;
-      const dx = t.clientX - lastX;
-      const dy = t.clientY - lastY;
-      lastX = t.clientX;
-      lastY = t.clientY;
-      const dxp = cropDragDeltaToPercent(dx);
-      const dyp = cropDragDeltaToPercent(dy);
-      setCropPos((p) => ({
-        x: Math.min(100, Math.max(0, p.x + dxp)),
-        y: Math.min(100, Math.max(0, p.y + dyp)),
-      }));
+      const newX = startOffset.x + (t.clientX - startClientX);
+      const newY = startOffset.y + (t.clientY - startClientY);
+      setCropOffset(
+        clampCropOffsetCover(
+          { x: newX, y: newY },
+          renderedW,
+          renderedH,
+          CROP_PREVIEW_PX
+        )
+      );
     };
     const onEnd = () => {
       setCropDragging(false);
@@ -1375,8 +1908,483 @@ export default function PersonProfilePage() {
   function handleCropCircleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
     if (e.touches.length !== 1) return;
     e.preventDefault();
+    if (!cropNaturalSize) return;
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      cropNaturalSize.w,
+      cropNaturalSize.h,
+      CROP_PREVIEW_PX,
+      cropZoom
+    );
     const t = e.touches[0]!;
-    attachCropTouchDrag(t.clientX, t.clientY);
+    attachCropTouchDrag(t.clientX, t.clientY, { ...cropOffset }, rw, rh);
+  }
+
+  function attachPhotoSetupMouseDrag(
+    startClientX: number,
+    startClientY: number,
+    startOffset: { x: number; y: number },
+    renderedW: number,
+    renderedH: number
+  ) {
+    photoSetupMouseDragCleanupRef.current?.();
+    setPhotoSetupDragging(true);
+    const onMove = (ev: MouseEvent) => {
+      const newX = startOffset.x + (ev.clientX - startClientX);
+      const newY = startOffset.y + (ev.clientY - startClientY);
+      setPhotoSetupOffset(
+        clampCropOffsetCover(
+          { x: newX, y: newY },
+          renderedW,
+          renderedH,
+          CROP_PREVIEW_PX
+        )
+      );
+    };
+    const onUp = () => {
+      setPhotoSetupDragging(false);
+      photoSetupMouseDragCleanupRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    photoSetupMouseDragCleanupRef.current = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setPhotoSetupDragging(false);
+    };
+  }
+
+  function handlePhotoSetupCircleMouseDown(
+    e: React.MouseEvent<HTMLDivElement>
+  ) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    if (!photoSetupNaturalSize) return;
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      photoSetupNaturalSize.w,
+      photoSetupNaturalSize.h,
+      CROP_PREVIEW_PX,
+      photoSetupZoom
+    );
+    attachPhotoSetupMouseDrag(
+      e.clientX,
+      e.clientY,
+      { ...photoSetupOffset },
+      rw,
+      rh
+    );
+  }
+
+  function attachPhotoSetupTouchDrag(
+    startClientX: number,
+    startClientY: number,
+    startOffset: { x: number; y: number },
+    renderedW: number,
+    renderedH: number
+  ) {
+    photoSetupTouchDragCleanupRef.current?.();
+    setPhotoSetupDragging(true);
+    const onMove = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1) return;
+      ev.preventDefault();
+      const t = ev.touches[0]!;
+      const newX = startOffset.x + (t.clientX - startClientX);
+      const newY = startOffset.y + (t.clientY - startClientY);
+      setPhotoSetupOffset(
+        clampCropOffsetCover(
+          { x: newX, y: newY },
+          renderedW,
+          renderedH,
+          CROP_PREVIEW_PX
+        )
+      );
+    };
+    const onEnd = () => {
+      setPhotoSetupDragging(false);
+      photoSetupTouchDragCleanupRef.current = null;
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
+    };
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
+    window.addEventListener("touchcancel", onEnd);
+    photoSetupTouchDragCleanupRef.current = () => {
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
+      setPhotoSetupDragging(false);
+    };
+  }
+
+  function handlePhotoSetupCircleTouchStart(
+    e: React.TouchEvent<HTMLDivElement>
+  ) {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    if (!photoSetupNaturalSize) return;
+    const { w: rw, h: rh } = cropCoverRenderedSize(
+      photoSetupNaturalSize.w,
+      photoSetupNaturalSize.h,
+      CROP_PREVIEW_PX,
+      photoSetupZoom
+    );
+    const t = e.touches[0]!;
+    attachPhotoSetupTouchDrag(
+      t.clientX,
+      t.clientY,
+      { ...photoSetupOffset },
+      rw,
+      rh
+    );
+  }
+
+  const searchPhotoTagPersons = useCallback(async (query: string) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setPhotoSetupTagResults([]);
+      return;
+    }
+    const seq = ++photoSetupSearchSeqRef.current;
+    setPhotoSetupTagSearching(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        if (seq === photoSetupSearchSeqRef.current) {
+          setPhotoSetupTagResults([]);
+        }
+        return;
+      }
+      const pattern = `%${q}%`;
+      const { data: d1, error: e1 } = await supabase
+        .from("persons")
+        .select("id, first_name, middle_name, last_name")
+        .eq("user_id", user.id)
+        .ilike("first_name", pattern)
+        .limit(10);
+      const { data: d2, error: e2 } = await supabase
+        .from("persons")
+        .select("id, first_name, middle_name, last_name")
+        .eq("user_id", user.id)
+        .ilike("last_name", pattern)
+        .limit(10);
+      if (e1 || e2) {
+        if (seq === photoSetupSearchSeqRef.current) {
+          setPhotoSetupTagResults([]);
+        }
+        return;
+      }
+      if (seq !== photoSetupSearchSeqRef.current) return;
+      const seen = new Set<string>();
+      const merged: PhotoSetupTagPerson[] = [];
+      for (const row of [...(d1 ?? []), ...(d2 ?? [])]) {
+        const r = row as PhotoSetupTagPerson;
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        merged.push({
+          id: r.id,
+          first_name: r.first_name,
+          last_name: r.last_name,
+          middle_name: r.middle_name ?? null,
+        });
+      }
+      const taggedIds = new Set(photoSetupTagsRef.current.map((t) => t.id));
+      setPhotoSetupTagResults(
+        merged.filter((p) => !taggedIds.has(p.id)).slice(0, 10)
+      );
+    } finally {
+      if (seq === photoSetupSearchSeqRef.current) {
+        setPhotoSetupTagSearching(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!photoSetupModal) return;
+    const q = photoSetupTagSearch.trim();
+    if (q.length < 2) {
+      setPhotoSetupTagResults([]);
+      setPhotoSetupTagSearching(false);
+      return;
+    }
+    const h = window.setTimeout(() => {
+      void searchPhotoTagPersons(q);
+    }, 300);
+    return () => window.clearTimeout(h);
+  }, [photoSetupTagSearch, photoSetupModal, searchPhotoTagPersons]);
+
+  const searchTagPersons = useCallback(async (query: string) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setTagModalResults([]);
+      return;
+    }
+    const seq = ++tagModalSearchSeqRef.current;
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        if (seq === tagModalSearchSeqRef.current) {
+          setTagModalResults([]);
+        }
+        return;
+      }
+      const pattern = `%${q}%`;
+      const { data: d1, error: e1 } = await supabase
+        .from("persons")
+        .select("id, first_name, middle_name, last_name")
+        .eq("user_id", user.id)
+        .ilike("first_name", pattern)
+        .limit(10);
+      const { data: d2, error: e2 } = await supabase
+        .from("persons")
+        .select("id, first_name, middle_name, last_name")
+        .eq("user_id", user.id)
+        .ilike("last_name", pattern)
+        .limit(10);
+      if (e1 || e2) {
+        if (seq === tagModalSearchSeqRef.current) {
+          setTagModalResults([]);
+        }
+        return;
+      }
+      if (seq !== tagModalSearchSeqRef.current) return;
+      const seen = new Set<string>();
+      const merged: PhotoSetupTagPerson[] = [];
+      for (const row of [...(d1 ?? []), ...(d2 ?? [])]) {
+        const r = row as PhotoSetupTagPerson;
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        merged.push({
+          id: r.id,
+          first_name: r.first_name,
+          last_name: r.last_name,
+          middle_name: r.middle_name ?? null,
+        });
+      }
+      const taggedIds = new Set(tagModalTagsRef.current.map((t) => t.id));
+      setTagModalResults(
+        merged.filter((p) => !taggedIds.has(p.id)).slice(0, 10)
+      );
+    } catch {
+      if (seq === tagModalSearchSeqRef.current) {
+        setTagModalResults([]);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!tagModalPhoto) return;
+    const q = tagModalSearch.trim();
+    if (q.length < 2) {
+      setTagModalResults([]);
+      return;
+    }
+    const h = window.setTimeout(() => {
+      void searchTagPersons(q);
+    }, 300);
+    return () => window.clearTimeout(h);
+  }, [tagModalSearch, tagModalPhoto, searchTagPersons]);
+
+  async function openTagModal(photoRow: Record<string, unknown>) {
+    setTagModalError(null);
+    tagModalSearchSeqRef.current += 1;
+    const photoId = typeof photoRow.id === "string" ? photoRow.id : null;
+    if (!photoId) return;
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setTagModalError("Not signed in.");
+      return;
+    }
+    const { data: tagRows, error: tagErr } = await supabase
+      .from("photo_tags")
+      .select("person_id")
+      .eq("photo_id", photoId)
+      .eq("user_id", user.id);
+    if (tagErr) {
+      setTagModalError(tagErr.message);
+      return;
+    }
+    const personIds = [
+      ...new Set(
+        (tagRows ?? [])
+          .map((r) => (r as { person_id?: string }).person_id)
+          .filter((id): id is string => typeof id === "string" && id !== "")
+      ),
+    ];
+    let tags: PhotoSetupTagPerson[] = [];
+    if (personIds.length > 0) {
+      const { data: people, error: pErr } = await supabase
+        .from("persons")
+        .select("id, first_name, middle_name, last_name")
+        .eq("user_id", user.id)
+        .in("id", personIds);
+      if (pErr) {
+        setTagModalError(pErr.message);
+        return;
+      }
+      tags = (people ?? []).map((row) => {
+        const r = row as PhotoSetupTagPerson;
+        return {
+          id: r.id,
+          first_name: r.first_name,
+          last_name: r.last_name,
+          middle_name: r.middle_name ?? null,
+        };
+      });
+    }
+    setTagModalTags(tags);
+    setTagModalPhoto(photoRow);
+    setTagModalSearch("");
+    setTagModalResults([]);
+  }
+
+  async function saveTagModal() {
+    if (!tagModalPhoto) return;
+    const photoId =
+      typeof tagModalPhoto.id === "string" ? tagModalPhoto.id : null;
+    if (!photoId) return;
+    setTagModalSaving(true);
+    setTagModalError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setTagModalError("Not signed in.");
+        return;
+      }
+      const { error: delErr } = await supabase
+        .from("photo_tags")
+        .delete()
+        .eq("photo_id", photoId)
+        .eq("user_id", user.id);
+      if (delErr) {
+        setTagModalError(delErr.message);
+        return;
+      }
+      const rows = tagModalTags.map((t) => ({
+        photo_id: photoId,
+        person_id: t.id,
+        user_id: user.id,
+      }));
+      if (rows.length > 0) {
+        const { error: insErr } = await supabase.from("photo_tags").insert(rows);
+        if (insErr) {
+          setTagModalError(insErr.message);
+          return;
+        }
+      }
+      tagModalSearchSeqRef.current += 1;
+      setTagModalPhoto(null);
+      setTagModalSearch("");
+      setTagModalResults([]);
+      setTagModalTags([]);
+      await load();
+    } finally {
+      setTagModalSaving(false);
+    }
+  }
+
+  function closeTagModal() {
+    if (tagModalSaving) return;
+    tagModalSearchSeqRef.current += 1;
+    setTagModalPhoto(null);
+    setTagModalError(null);
+    setTagModalSearch("");
+    setTagModalResults([]);
+    setTagModalTags([]);
+  }
+
+  async function savePhotoSetup() {
+    if (!photoSetupModal) return;
+    const photoId =
+      typeof photoSetupModal.id === "string" ? photoSetupModal.id : null;
+    if (!photoId) return;
+    setPhotoSetupSaving(true);
+    setPhotoSetupError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setPhotoSetupError("Not signed in.");
+        return;
+      }
+      if (!photoSetupNaturalSize) {
+        setPhotoSetupError("Photo is still loading.");
+        return;
+      }
+      const { w: setupRw, h: setupRh } = cropCoverRenderedSize(
+        photoSetupNaturalSize.w,
+        photoSetupNaturalSize.h,
+        CROP_PREVIEW_PX,
+        photoSetupZoom
+      );
+      const { x: cx, y: cy } = offsetToCropPercentCover(
+        photoSetupOffset,
+        setupRw,
+        setupRh,
+        CROP_PREVIEW_PX
+      );
+      const cz = Math.min(3, Math.max(1, photoSetupZoom));
+      const dateTrim = photoSetupDate.trim();
+      const { error: upErr } = await supabase
+        .from("photos")
+        .update({
+          crop_x: cx,
+          crop_y: cy,
+          crop_zoom: cz,
+          photo_date: dateTrim === "" ? null : dateTrim,
+        })
+        .eq("id", photoId)
+        .eq("user_id", user.id);
+      if (upErr) {
+        setPhotoSetupError(upErr.message);
+        return;
+      }
+      const tagRows = photoSetupTags.map((t) => ({
+        photo_id: photoId,
+        person_id: t.id,
+        user_id: user.id,
+      }));
+      if (tagRows.length > 0) {
+        const { error: tagErr } = await supabase.from("photo_tags").upsert(
+          tagRows,
+          {
+            onConflict: "photo_id,person_id",
+            ignoreDuplicates: true,
+          }
+        );
+        if (tagErr) {
+          setPhotoSetupError(tagErr.message);
+          return;
+        }
+      }
+      photoSetupSearchSeqRef.current += 1;
+      setPhotoSetupModal(null);
+      await load();
+    } finally {
+      setPhotoSetupSaving(false);
+    }
+  }
+
+  function skipPhotoSetup() {
+    photoSetupSearchSeqRef.current += 1;
+    setPhotoSetupModal(null);
+    setPhotoSetupError(null);
+    void load();
   }
 
   async function saveResearchNotes() {
@@ -1886,19 +2894,55 @@ export default function PersonProfilePage() {
             }}
           >
             {headerPhotoUrl ? (
-              <div className="h-full w-full overflow-hidden">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={headerPhotoUrl}
-                  alt=""
-                  className="h-full w-full object-cover"
-                  style={{
-                    objectPosition: `${headerPhotoCrop.x}% ${headerPhotoCrop.y}%`,
-                    transform: `scale(${headerPhotoCrop.zoom})`,
-                    transformOrigin: "center center",
-                  }}
-                />
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={headerPhotoUrl}
+                alt=""
+                draggable={false}
+                onLoad={(e) => {
+                  const el = e.currentTarget;
+                  setAvatarNaturalSize({
+                    w: el.naturalWidth,
+                    h: el.naturalHeight,
+                  });
+                }}
+                style={
+                  avatarNaturalSize &&
+                  avatarNaturalSize.w > 0 &&
+                  avatarNaturalSize.h > 0
+                    ? (() => {
+                        const avatarViewportPx = 144;
+                        const { w: rw, h: rh } = cropCoverRenderedSize(
+                          avatarNaturalSize.w,
+                          avatarNaturalSize.h,
+                          avatarViewportPx,
+                          avatarCropZoom
+                        );
+                        const { x: ox, y: oy } = cropPercentToOffsetCover(
+                          avatarCropX,
+                          avatarCropY,
+                          rw,
+                          rh,
+                          avatarViewportPx
+                        );
+                        return {
+                          position: "absolute" as const,
+                          left: ox,
+                          top: oy,
+                          width: rw,
+                          height: rh,
+                          pointerEvents: "none" as const,
+                          maxWidth: "none",
+                        };
+                      })()
+                    : {
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover" as const,
+                        objectPosition: `${avatarCropX}% ${avatarCropY}%`,
+                      }
+                }
+              />
             ) : (
               <span
                 className="flex h-full w-full items-center justify-center text-4xl font-bold"
@@ -2880,13 +3924,10 @@ export default function PersonProfilePage() {
                   const isPrimary =
                     row.is_primary === true || row.primary === true;
                   if (!url) return null;
+                  const thumbCrop = personPhotoCropForRow(row);
                   const openCropModal = () => {
                     setCropModalPhoto(row);
-                    setCropPos({
-                      x: cropPercentFromUnknown(row.crop_x, 50),
-                      y: cropPercentFromUnknown(row.crop_y, 50),
-                    });
-                    setCropZoom(cropZoomFromUnknown(row.crop_zoom, 1));
+                    setCropZoom(thumbCrop.zoom);
                   };
                   return (
                     <li key={pid}>
@@ -2969,6 +4010,26 @@ export default function PersonProfilePage() {
                               }}
                             >
                               <IconStar />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md border p-1.5 shadow-sm"
+                              style={{
+                                fontFamily: sans,
+                                pointerEvents: "auto",
+                                borderColor: colors.cream,
+                                backgroundColor: colors.cream,
+                                color: colors.brownDark,
+                                cursor: "pointer",
+                              }}
+                              title="Tag people"
+                              aria-label="Tag people"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openTagModal(row);
+                              }}
+                            >
+                              <IconTag />
                             </button>
                             <button
                               type="button"
@@ -3795,6 +4856,7 @@ export default function PersonProfilePage() {
               <div
                 className="select-none"
                 style={{
+                  position: "relative",
                   width: CROP_PREVIEW_PX,
                   height: CROP_PREVIEW_PX,
                   borderRadius: "50%",
@@ -3809,20 +4871,38 @@ export default function PersonProfilePage() {
                 {(() => {
                   const previewUrl = photoUrlFromRow(cropModalPhoto);
                   if (!previewUrl) return null;
+                  const nw = cropNaturalSize?.w ?? 0;
+                  const nh = cropNaturalSize?.h ?? 0;
+                  const { w: cropRw, h: cropRh } =
+                    nw > 0 && nh > 0
+                      ? cropCoverRenderedSize(
+                          nw,
+                          nh,
+                          CROP_PREVIEW_PX,
+                          cropZoom
+                        )
+                      : { w: CROP_PREVIEW_PX * cropZoom, h: CROP_PREVIEW_PX * cropZoom };
                   return (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={previewUrl}
                       alt=""
                       draggable={false}
-                      className="h-full w-full object-cover"
+                      onLoad={(e) => {
+                        const el = e.currentTarget;
+                        setCropNaturalSize({
+                          w: el.naturalWidth,
+                          h: el.naturalHeight,
+                        });
+                      }}
                       style={{
-                        width: "100%",
-                        height: "100%",
-                        objectPosition: `${cropPos.x}% ${cropPos.y}%`,
-                        transform: `scale(${cropZoom})`,
-                        transformOrigin: "center center",
+                        position: "absolute",
+                        left: cropOffset.x,
+                        top: cropOffset.y,
+                        width: cropRw,
+                        height: cropRh,
                         pointerEvents: "none",
+                        maxWidth: "none",
                       }}
                     />
                   );
@@ -3879,13 +4959,20 @@ export default function PersonProfilePage() {
                     typeof cropModalPhoto.id === "string"
                       ? cropModalPhoto.id
                       : null;
-                  if (id)
-                    void saveCropPosition(
-                      id,
-                      cropPos.x,
-                      cropPos.y,
-                      cropZoom
-                    );
+                  if (!id || !cropNaturalSize) return;
+                  const { w: saveRw, h: saveRh } = cropCoverRenderedSize(
+                    cropNaturalSize.w,
+                    cropNaturalSize.h,
+                    CROP_PREVIEW_PX,
+                    cropZoom
+                  );
+                  const { x: cx, y: cy } = offsetToCropPercentCover(
+                    cropOffset,
+                    saveRw,
+                    saveRh,
+                    CROP_PREVIEW_PX
+                  );
+                  void saveCropPosition(id, cx, cy, cropZoom);
                 }}
               >
                 Save
@@ -3893,6 +4980,463 @@ export default function PersonProfilePage() {
               <button
                 type="button"
                 onClick={() => setCropModalPhoto(null)}
+                style={btnOutline}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {photoSetupModal ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4"
+          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="photo-setup-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !photoSetupSaving) {
+              skipPhotoSetup();
+            }
+          }}
+        >
+          <div
+            className="my-4 w-full max-w-4xl rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="photo-setup-title"
+              className="mb-6 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Set up photo
+            </h2>
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+              <div>
+                <p
+                  className="mb-3 text-sm"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Drag to reposition · Zoom to fit
+                </p>
+                <div
+                  className="mx-auto flex w-fit justify-center"
+                  style={{
+                    padding: 10,
+                    borderRadius: "50%",
+                    backgroundColor: "rgba(42, 24, 16, 0.42)",
+                  }}
+                >
+                  <div
+                    className="select-none"
+                    style={{
+                      position: "relative",
+                      width: CROP_PREVIEW_PX,
+                      height: CROP_PREVIEW_PX,
+                      borderRadius: "50%",
+                      overflow: "hidden",
+                      touchAction: "none",
+                      cursor: photoSetupDragging ? "grabbing" : "grab",
+                      backgroundColor: colors.avatarBg,
+                    }}
+                    onMouseDown={handlePhotoSetupCircleMouseDown}
+                    onTouchStart={handlePhotoSetupCircleTouchStart}
+                  >
+                    {(() => {
+                      const previewUrl = photoUrlFromRow(photoSetupModal);
+                      if (!previewUrl) return null;
+                      const snw = photoSetupNaturalSize?.w ?? 0;
+                      const snh = photoSetupNaturalSize?.h ?? 0;
+                      const { w: setupImgRw, h: setupImgRh } =
+                        snw > 0 && snh > 0
+                          ? cropCoverRenderedSize(
+                              snw,
+                              snh,
+                              CROP_PREVIEW_PX,
+                              photoSetupZoom
+                            )
+                          : {
+                              w: CROP_PREVIEW_PX * photoSetupZoom,
+                              h: CROP_PREVIEW_PX * photoSetupZoom,
+                            };
+                      return (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={previewUrl}
+                          alt=""
+                          draggable={false}
+                          onLoad={(e) => {
+                            const el = e.currentTarget;
+                            setPhotoSetupNaturalSize({
+                              w: el.naturalWidth,
+                              h: el.naturalHeight,
+                            });
+                          }}
+                          style={{
+                            position: "absolute",
+                            left: photoSetupOffset.x,
+                            top: photoSetupOffset.y,
+                            width: setupImgRw,
+                            height: setupImgRh,
+                            pointerEvents: "none",
+                            maxWidth: "none",
+                          }}
+                        />
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div
+                  className="mx-auto mt-5 flex max-w-[320px] items-center gap-3"
+                  style={{ fontFamily: sans }}
+                >
+                  <input
+                    type="range"
+                    min={1}
+                    max={3}
+                    step={0.05}
+                    value={photoSetupZoom}
+                    onChange={(e) =>
+                      setPhotoSetupZoom(Number.parseFloat(e.target.value))
+                    }
+                    className="h-2 min-w-0 w-full flex-1 cursor-pointer"
+                    style={{ accentColor: colors.brownOutline }}
+                    aria-label="Zoom"
+                  />
+                  <span
+                    className="shrink-0 text-sm tabular-nums"
+                    style={{ color: colors.brownMuted, minWidth: "2.75rem" }}
+                  >
+                    {Number(photoSetupZoom.toFixed(2))}×
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-5">
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="photo-setup-date"
+                  >
+                    Date
+                  </label>
+                  <input
+                    id="photo-setup-date"
+                    type="text"
+                    value={photoSetupDate}
+                    onChange={(e) => setPhotoSetupDate(e.target.value)}
+                    placeholder="e.g. 1943 or 06/1943 or 06/15/1943"
+                    autoComplete="off"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <p
+                    className="mb-1 text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    Tag people
+                  </p>
+                  <input
+                    type="search"
+                    value={photoSetupTagSearch}
+                    onChange={(e) => setPhotoSetupTagSearch(e.target.value)}
+                    placeholder="Search by name…"
+                    autoComplete="off"
+                    className="mb-2 w-full"
+                    style={modalInputStyle}
+                  />
+                  {photoSetupTagSearching ? (
+                    <p
+                      className="mb-2 text-sm italic"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      Searching…
+                    </p>
+                  ) : null}
+                  {photoSetupTagResults.length > 0 ? (
+                    <ul className="mb-3 max-h-36 space-y-1 overflow-y-auto pr-1">
+                      {photoSetupTagResults.map((p) => (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            className="w-full rounded border px-2 py-1.5 text-left text-sm transition hover:opacity-90"
+                            style={{
+                              fontFamily: sans,
+                              borderColor: colors.brownBorder,
+                              backgroundColor: colors.cream,
+                              color: colors.brownDark,
+                              cursor: "pointer",
+                            }}
+                            onClick={() => {
+                              setPhotoSetupTags((prev) => [...prev, p]);
+                              setPhotoSetupTagSearch("");
+                              setPhotoSetupTagResults([]);
+                            }}
+                          >
+                            {photoSetupTagDisplayName(p)}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {photoSetupTags.map((t) => {
+                      const locked = t.id === personId;
+                      return (
+                        <span
+                          key={t.id}
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+                          style={{
+                            fontFamily: sans,
+                            borderColor: colors.brownBorder,
+                            backgroundColor: colors.cream,
+                            color: colors.brownDark,
+                          }}
+                        >
+                          {photoSetupTagDisplayName(t)}
+                          {locked ? null : (
+                            <button
+                              type="button"
+                              className="border-none bg-transparent p-0 leading-none"
+                              style={{
+                                color: "#8B3A3A",
+                                cursor: "pointer",
+                                fontSize: "1rem",
+                                lineHeight: 1,
+                              }}
+                              aria-label={`Remove ${photoSetupTagDisplayName(t)}`}
+                              onClick={() =>
+                                setPhotoSetupTags((prev) =>
+                                  prev.filter((x) => x.id !== t.id)
+                                )
+                              }
+                            >
+                              ×
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {photoSetupError ? (
+              <p
+                className="mt-4 text-sm"
+                style={{ fontFamily: sans, color: "#8B3A3A" }}
+              >
+                {photoSetupError}
+              </p>
+            ) : null}
+            <div className="mt-8 flex flex-wrap gap-2 border-t pt-4">
+              <button
+                type="button"
+                disabled={photoSetupSaving}
+                onClick={() => void savePhotoSetup()}
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: colors.brownOutline,
+                  color: colors.cream,
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  cursor: photoSetupSaving ? "wait" : "pointer",
+                  borderRadius: 2,
+                  opacity: photoSetupSaving ? 0.85 : 1,
+                }}
+              >
+                {photoSetupSaving ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={photoSetupSaving}
+                onClick={() => skipPhotoSetup()}
+                style={btnOutline}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tagModalPhoto ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4"
+          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tag-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !tagModalSaving) {
+              closeTagModal();
+            }
+          }}
+        >
+          <div
+            className="my-4 w-full max-w-lg rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="tag-modal-title"
+              className="mb-4 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Tag people
+            </h2>
+            <div
+              className="mb-5 overflow-hidden rounded border shadow-sm"
+              style={{
+                width: 120,
+                height: 120,
+                borderColor: colors.brownBorder,
+                backgroundColor: colors.avatarBg,
+              }}
+            >
+              {(() => {
+                const thumbUrl = photoUrlFromRow(tagModalPhoto);
+                if (!thumbUrl) return null;
+                return (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={thumbUrl}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                );
+              })()}
+            </div>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {tagModalTags.map((t) => {
+                const locked = t.id === personId;
+                return (
+                  <span
+                    key={t.id}
+                    className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+                    style={{
+                      fontFamily: sans,
+                      borderColor: colors.brownBorder,
+                      backgroundColor: colors.cream,
+                      color: colors.brownDark,
+                    }}
+                  >
+                    {photoSetupTagDisplayName(t)}
+                    {locked ? null : (
+                      <button
+                        type="button"
+                        className="border-none bg-transparent p-0 leading-none"
+                        style={{
+                          color: "#8B3A3A",
+                          cursor: "pointer",
+                          fontSize: "1rem",
+                          lineHeight: 1,
+                        }}
+                        aria-label={`Remove ${photoSetupTagDisplayName(t)}`}
+                        onClick={() =>
+                          setTagModalTags((prev) =>
+                            prev.filter((x) => x.id !== t.id)
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="mb-1">
+              <label
+                className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                style={{ fontFamily: sans, color: colors.brownMuted }}
+                htmlFor="tag-modal-search"
+              >
+                Add person
+              </label>
+              <input
+                id="tag-modal-search"
+                type="search"
+                value={tagModalSearch}
+                onChange={(e) => setTagModalSearch(e.target.value)}
+                placeholder="Search by name…"
+                autoComplete="off"
+                className="mb-2 w-full"
+                style={modalInputStyle}
+              />
+            </div>
+            {tagModalResults.length > 0 ? (
+              <ul className="mb-4 max-h-36 space-y-1 overflow-y-auto pr-1">
+                {tagModalResults.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded border px-2 py-1.5 text-left text-sm transition hover:opacity-90"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.cream,
+                        color: colors.brownDark,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => {
+                        setTagModalTags((prev) => [...prev, p]);
+                        setTagModalSearch("");
+                        setTagModalResults([]);
+                      }}
+                    >
+                      {photoSetupTagDisplayName(p)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {tagModalError ? (
+              <p
+                className="mb-4 text-sm"
+                style={{ fontFamily: sans, color: "#8B3A3A" }}
+              >
+                {tagModalError}
+              </p>
+            ) : null}
+            <div className="mt-2 flex flex-wrap gap-2 border-t pt-4">
+              <button
+                type="button"
+                disabled={tagModalSaving}
+                onClick={() => void saveTagModal()}
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: colors.brownOutline,
+                  color: colors.cream,
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  cursor: tagModalSaving ? "wait" : "pointer",
+                  borderRadius: 2,
+                  opacity: tagModalSaving ? 0.85 : 1,
+                }}
+              >
+                {tagModalSaving ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={tagModalSaving}
+                onClick={() => closeTagModal()}
                 style={btnOutline}
               >
                 Cancel
