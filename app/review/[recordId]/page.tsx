@@ -61,7 +61,7 @@ export default async function ReviewRecordPage({
 
   const { data: record, error } = await supabase
     .from("records")
-    .select("id, file_url, file_type, ai_response, record_type")
+    .select("id, file_url, file_type, ai_response, record_type, tree_id")
     .eq("id", recordId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -89,6 +89,12 @@ export default async function ReviewRecordPage({
     }
   }
 
+  const recordTreeId =
+    (record as { tree_id?: string | null }).tree_id != null &&
+    String((record as { tree_id?: string | null }).tree_id).trim() !== ""
+      ? String((record as { tree_id?: string | null }).tree_id).trim()
+      : null;
+
   return (
     <ReviewRecordClient
       recordId={record.id}
@@ -96,6 +102,7 @@ export default async function ReviewRecordPage({
       fileType={(record.file_type as string | null) ?? null}
       recordTypeLabel={label}
       aiResponse={record.ai_response}
+      recordTreeId={recordTreeId}
     />
   );
 }

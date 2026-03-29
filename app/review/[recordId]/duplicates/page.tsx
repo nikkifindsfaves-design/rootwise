@@ -244,10 +244,16 @@ export default function ReviewDuplicatesPage() {
         return;
       }
 
+      const returnTreeId =
+        typeof pr.returnTreeId === "string" && pr.returnTreeId.trim() !== ""
+          ? pr.returnTreeId.trim()
+          : null;
+
       const payload: PendingReviewPayload = {
         recordId: pr.recordId,
         recordTypeLabel:
           typeof pr.recordTypeLabel === "string" ? pr.recordTypeLabel : "",
+        ...(returnTreeId ? { returnTreeId } : {}),
         people: pr.people as PendingPerson[],
       };
 
@@ -281,12 +287,16 @@ export default function ReviewDuplicatesPage() {
         return;
       }
 
-      const { data: persons, error: personsError } = await supabase
+      let personsQuery = supabase
         .from("persons")
         .select(
           "id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
         )
         .eq("user_id", user.id);
+      if (returnTreeId) {
+        personsQuery = personsQuery.eq("tree_id", returnTreeId);
+      }
+      const { data: persons, error: personsError } = await personsQuery;
 
       if (cancelled) return;
 
@@ -398,7 +408,12 @@ export default function ReviewDuplicatesPage() {
       } catch {
         // still redirect
       }
-      router.push("/dashboard");
+      const dest =
+        pendingReview.returnTreeId &&
+        pendingReview.returnTreeId.trim() !== ""
+          ? `/dashboard/${pendingReview.returnTreeId.trim()}`
+          : "/dashboard";
+      router.push(dest);
     } catch {
       setSubmitError("Network error. Try again.");
     } finally {

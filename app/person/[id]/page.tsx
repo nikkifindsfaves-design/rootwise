@@ -46,7 +46,96 @@ type PersonRow = {
   natural_height?: number | null;
   gender: string | null;
   notes: string | null;
+  tree_id?: string | null;
 };
+
+type FamilyRelationshipChoice = "parent" | "child" | "spouse" | "sibling";
+
+type TreePersonSearchRow = {
+  id: string;
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  birth_date: string | null;
+};
+
+/**
+ * Maps UI relationship choice (how the other person relates to the profile) to
+ * two directed rows matching `classifyRelationship` / tree canvas semantics.
+ */
+function bidirectionalRelationshipRows(
+  choice: FamilyRelationshipChoice,
+  profilePersonId: string,
+  otherPersonId: string
+): RelRow[] {
+  switch (choice) {
+    case "parent":
+      return [
+        {
+          person_a_id: otherPersonId,
+          person_b_id: profilePersonId,
+          relationship_type: "parent",
+        },
+        {
+          person_a_id: profilePersonId,
+          person_b_id: otherPersonId,
+          relationship_type: "child",
+        },
+      ];
+    case "child":
+      return [
+        {
+          person_a_id: profilePersonId,
+          person_b_id: otherPersonId,
+          relationship_type: "parent",
+        },
+        {
+          person_a_id: otherPersonId,
+          person_b_id: profilePersonId,
+          relationship_type: "child",
+        },
+      ];
+    case "spouse":
+    case "sibling":
+      return [
+        {
+          person_a_id: profilePersonId,
+          person_b_id: otherPersonId,
+          relationship_type: choice,
+        },
+        {
+          person_a_id: otherPersonId,
+          person_b_id: profilePersonId,
+          relationship_type: choice,
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+function birthYearLabel(dateStr: string | null | undefined): string | null {
+  if (dateStr == null) return null;
+  const s = String(dateStr).trim();
+  if (!s) return null;
+  const y = /^(\d{4})/.exec(s);
+  if (y) return y[1]!;
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return null;
+  return String(new Date(t).getFullYear());
+}
+
+function personMatchesNameTokens(
+  p: TreePersonSearchRow,
+  tokens: string[]
+): boolean {
+  if (tokens.length === 0) return true;
+  const hay = [p.first_name, p.middle_name ?? "", p.last_name]
+    .map((x) => String(x ?? "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  return tokens.every((t) => hay.includes(t));
+}
 
 type PhotoSetupTagPerson = {
   id: string;
@@ -891,7 +980,19 @@ function FamilyGroup({
 export default function PersonProfilePage() {
   const params = useParams();
   const router = useRouter();
-  const personId = typeof params.id === "string" ? params.id : "";
+  const raw = params as { id?: string; personId?: string; treeId?: string };
+  const personId =
+    typeof raw.id === "string"
+      ? raw.id
+      : typeof raw.personId === "string"
+        ? raw.personId
+        : "";
+  const treeId =
+    typeof raw.treeId === "string" && raw.treeId.trim() !== ""
+      ? raw.treeId.trim()
+      : "";
+  const backToTreeHref = treeId !== "" ? `/dashboard/${treeId}` : "/dashboard";
+  const backToTreeLabel = treeId !== "" ? "Back to tree" : "Back to My Trees";
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
@@ -1006,6 +1107,38 @@ export default function PersonProfilePage() {
   const [mergeSaving, setMergeSaving] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
 
+  const [addFamilyModalOpen, setAddFamilyModalOpen] = useState(false);
+  const [addFamilyTab, setAddFamilyTab] = useState<"find" | "create">("find");
+  const [addFamilyFindQuery, setAddFamilyFindQuery] = useState("");
+  const [addFamilyTreePeople, setAddFamilyTreePeople] = useState<
+    TreePersonSearchRow[]
+  >([]);
+  const [addFamilyTreePeopleLoading, setAddFamilyTreePeopleLoading] =
+    useState(false);
+  const [addFamilyTreePeopleError, setAddFamilyTreePeopleError] = useState<
+    string | null
+  >(null);
+  const [addFamilySelectedOther, setAddFamilySelectedOther] =
+    useState<TreePersonSearchRow | null>(null);
+  const [addFamilyFindRel, setAddFamilyFindRel] =
+    useState<FamilyRelationshipChoice>("parent");
+  const [addFamilyFindBusy, setAddFamilyFindBusy] = useState(false);
+  const [addFamilyFindError, setAddFamilyFindError] = useState<string | null>(
+    null
+  );
+  const [addFamilyCreateFirst, setAddFamilyCreateFirst] = useState("");
+  const [addFamilyCreateMiddle, setAddFamilyCreateMiddle] = useState("");
+  const [addFamilyCreateLast, setAddFamilyCreateLast] = useState("");
+  const [addFamilyCreateBirth, setAddFamilyCreateBirth] = useState("");
+  const [addFamilyCreateDeath, setAddFamilyCreateDeath] = useState("");
+  const [addFamilyCreateGender, setAddFamilyCreateGender] = useState("");
+  const [addFamilyCreateRel, setAddFamilyCreateRel] =
+    useState<FamilyRelationshipChoice>("parent");
+  const [addFamilyCreateBusy, setAddFamilyCreateBusy] = useState(false);
+  const [addFamilyCreateError, setAddFamilyCreateError] = useState<
+    string | null
+  >(null);
+
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -1102,6 +1235,25 @@ export default function PersonProfilePage() {
     setMergeSaving(false);
     setMergeSearchLoading(false);
     setMergeUiStep("search");
+    setAddFamilyModalOpen(false);
+    setAddFamilyTab("find");
+    setAddFamilyFindQuery("");
+    setAddFamilyTreePeople([]);
+    setAddFamilyTreePeopleLoading(false);
+    setAddFamilyTreePeopleError(null);
+    setAddFamilySelectedOther(null);
+    setAddFamilyFindRel("parent");
+    setAddFamilyFindBusy(false);
+    setAddFamilyFindError(null);
+    setAddFamilyCreateFirst("");
+    setAddFamilyCreateMiddle("");
+    setAddFamilyCreateLast("");
+    setAddFamilyCreateBirth("");
+    setAddFamilyCreateDeath("");
+    setAddFamilyCreateGender("");
+    setAddFamilyCreateRel("parent");
+    setAddFamilyCreateBusy(false);
+    setAddFamilyCreateError(null);
     setCropModalPhoto(null);
     setPhotoSetupModal(null);
     setCropOffset({ x: 0, y: 0 });
@@ -1269,7 +1421,7 @@ export default function PersonProfilePage() {
     const { data: personData, error: personErr } = await supabase
       .from("persons")
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes, tree_id"
       )
       .eq("id", personId)
       .eq("user_id", user.id)
@@ -1286,10 +1438,20 @@ export default function PersonProfilePage() {
       return;
     }
 
-    const raw = personData as PersonRow & { birth_place?: string | null };
+    const raw = personData as PersonRow & {
+      birth_place?: string | null;
+      tree_id?: string | null;
+    };
+    const personTreeId =
+      raw.tree_id != null && String(raw.tree_id).trim() !== ""
+        ? String(raw.tree_id).trim()
+        : "";
+    const effectiveTreeForRels = treeId || personTreeId;
+
     const p: PersonRow = {
       ...raw,
       birth_place: raw.birth_place ?? null,
+      tree_id: raw.tree_id ?? null,
     };
 
     const { data: eventData, error: eventErr } = await supabase
@@ -1316,11 +1478,15 @@ export default function PersonProfilePage() {
     });
     const sortedEvents = sortEventsChronologically(evs);
 
-    const { data: relData, error: relErr } = await supabase
+    let relQuery = supabase
       .from("relationships")
       .select("person_a_id, person_b_id, relationship_type")
       .eq("user_id", user.id)
       .or(`person_a_id.eq.${personId},person_b_id.eq.${personId}`);
+    if (effectiveTreeForRels !== "") {
+      relQuery = relQuery.eq("tree_id", effectiveTreeForRels);
+    }
+    const { data: relData, error: relErr } = await relQuery;
 
     if (relErr) {
       setError(relErr.message);
@@ -1795,11 +1961,78 @@ export default function PersonProfilePage() {
     setResearchNoteText(pnContent);
     setResearchNoteUpdatedAt(pnUpdated);
     setLoading(false);
-  }, [personId, router]);
+  }, [personId, router, treeId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const effectiveTreeIdForFamily = useMemo(() => {
+    const fromPerson = (person?.tree_id ?? "").trim();
+    return treeId || fromPerson;
+  }, [treeId, person?.tree_id]);
+
+  useEffect(() => {
+    if (!addFamilyModalOpen || !personId || effectiveTreeIdForFamily === "") {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      setAddFamilyTreePeopleLoading(true);
+      setAddFamilyTreePeopleError(null);
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          if (!cancelled) {
+            setAddFamilyTreePeopleError("Not signed in.");
+            setAddFamilyTreePeople([]);
+          }
+          return;
+        }
+        const { data, error } = await supabase
+          .from("persons")
+          .select("id, first_name, middle_name, last_name, birth_date")
+          .eq("user_id", user.id)
+          .eq("tree_id", effectiveTreeIdForFamily)
+          .neq("id", personId);
+        if (cancelled) return;
+        if (error) {
+          setAddFamilyTreePeopleError(error.message);
+          setAddFamilyTreePeople([]);
+          return;
+        }
+        const rows = (data ?? []) as TreePersonSearchRow[];
+        setAddFamilyTreePeople(rows);
+      } catch (e) {
+        if (!cancelled) {
+          setAddFamilyTreePeopleError(
+            e instanceof Error ? e.message : "Could not load people."
+          );
+          setAddFamilyTreePeople([]);
+        }
+      } finally {
+        if (!cancelled) setAddFamilyTreePeopleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [addFamilyModalOpen, personId, effectiveTreeIdForFamily]);
+
+  const addFamilyFindTokens = useMemo(() => {
+    const q = addFamilyFindQuery.trim().toLowerCase();
+    if (!q) return [] as string[];
+    return q.split(/\s+/).filter(Boolean);
+  }, [addFamilyFindQuery]);
+
+  const addFamilyFilteredPeople = useMemo(() => {
+    return addFamilyTreePeople.filter((p) =>
+      personMatchesNameTokens(p, addFamilyFindTokens)
+    );
+  }, [addFamilyTreePeople, addFamilyFindTokens]);
 
   useEffect(() => {
     if (!mergeModalOpen || !personId) return;
@@ -2042,13 +2275,34 @@ export default function PersonProfilePage() {
       }
       const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
       const file_url = pub.publicUrl;
+      const { data: photoSample } = await supabase
+        .from("photos")
+        .select("id")
+        .eq("person_id", personId)
+        .limit(1);
+      const { data: tagSample } = await supabase
+        .from("photo_tags")
+        .select("id")
+        .eq("person_id", personId)
+        .limit(1);
+      const isPrimary =
+        (!photoSample || photoSample.length === 0) &&
+        (!tagSample || tagSample.length === 0);
+
+      console.log(
+        "photo insert isPrimary:",
+        isPrimary,
+        "existingPhotos:",
+        { photoSample, tagSample }
+      );
+
       const { data: newRow, error: insErr } = await supabase
         .from("photos")
         .insert({
           user_id: user.id,
           person_id: personId,
           file_url,
-          is_primary: false,
+          is_primary: isPrimary,
           ...(naturalWidth > 0 && naturalHeight > 0
             ? { natural_width: naturalWidth, natural_height: naturalHeight }
             : {}),
@@ -2686,11 +2940,36 @@ export default function PersonProfilePage() {
         setTagModalError(delErr.message);
         return;
       }
-      const rows = tagModalTags.map((t) => ({
-        photo_id: photoId,
-        person_id: t.id,
-        user_id: user.id,
-      }));
+      const tagPersonIds = tagModalTags.map((t) => t.id);
+      const withPhotos = new Set<string>();
+      const withTags = new Set<string>();
+      if (tagPersonIds.length > 0) {
+        const { data: ph } = await supabase
+          .from("photos")
+          .select("person_id")
+          .in("person_id", tagPersonIds);
+        const { data: tg } = await supabase
+          .from("photo_tags")
+          .select("person_id")
+          .in("person_id", tagPersonIds);
+        for (const r of ph ?? []) {
+          const pid = (r as { person_id?: string }).person_id;
+          if (typeof pid === "string") withPhotos.add(pid);
+        }
+        for (const r of tg ?? []) {
+          const pid = (r as { person_id?: string }).person_id;
+          if (typeof pid === "string") withTags.add(pid);
+        }
+      }
+      const rows = tagModalTags.map((t) => {
+        const is_primary = !withPhotos.has(t.id) && !withTags.has(t.id);
+        return {
+          photo_id: photoId,
+          person_id: t.id,
+          user_id: user.id,
+          is_primary,
+        };
+      });
       if (rows.length > 0) {
         const { error: insErr } = await supabase.from("photo_tags").insert(rows);
         if (insErr) {
@@ -2767,11 +3046,38 @@ export default function PersonProfilePage() {
         setPhotoSetupError(upErr.message);
         return;
       }
-      const tagRows = photoSetupTags.map((t) => ({
-        photo_id: photoId,
-        person_id: t.id,
-        user_id: user.id,
-      }));
+      const setupTagPersonIds = photoSetupTags.map((t) => t.id);
+      const setupWithPhotos = new Set<string>();
+      const setupWithTags = new Set<string>();
+      if (setupTagPersonIds.length > 0) {
+        const { data: ph } = await supabase
+          .from("photos")
+          .select("person_id")
+          .in("person_id", setupTagPersonIds);
+        const { data: tg } = await supabase
+          .from("photo_tags")
+          .select("person_id")
+          .in("person_id", setupTagPersonIds);
+        for (const r of ph ?? []) {
+          const pid = (r as { person_id?: string }).person_id;
+          if (typeof pid === "string") setupWithPhotos.add(pid);
+        }
+        for (const r of tg ?? []) {
+          const pid = (r as { person_id?: string }).person_id;
+          if (typeof pid === "string") setupWithTags.add(pid);
+        }
+      }
+      const tagRows = photoSetupTags.map((t) => {
+        const is_primary =
+          !setupWithPhotos.has(t.id) && !setupWithTags.has(t.id);
+        return {
+          photo_id: photoId,
+          person_id: t.id,
+          user_id: user.id,
+          is_primary,
+          ...(is_primary ? { crop_x: cx, crop_y: cy, crop_zoom: cz } : {}),
+        };
+      });
       if (tagRows.length > 0) {
         const { error: tagErr } = await supabase.from("photo_tags").upsert(
           tagRows,
@@ -2960,7 +3266,7 @@ export default function PersonProfilePage() {
       return;
     }
     setDeletePersonOpen(false);
-    router.push("/dashboard");
+    router.push(backToTreeHref);
     router.refresh();
   }
 
@@ -3043,6 +3349,209 @@ export default function PersonProfilePage() {
       setMergeError(e instanceof Error ? e.message : "Merge failed");
     } finally {
       setMergeSaving(false);
+    }
+  }
+
+  function resetAddFamilyModalFormState() {
+    setAddFamilyTab("find");
+    setAddFamilyFindQuery("");
+    setAddFamilySelectedOther(null);
+    setAddFamilyFindRel("parent");
+    setAddFamilyFindBusy(false);
+    setAddFamilyFindError(null);
+    setAddFamilyCreateFirst("");
+    setAddFamilyCreateMiddle("");
+    setAddFamilyCreateLast("");
+    setAddFamilyCreateBirth("");
+    setAddFamilyCreateDeath("");
+    setAddFamilyCreateGender("");
+    setAddFamilyCreateRel("parent");
+    setAddFamilyCreateBusy(false);
+    setAddFamilyCreateError(null);
+    setAddFamilyTreePeopleError(null);
+  }
+
+  function openAddFamilyModal() {
+    resetAddFamilyModalFormState();
+    setAddFamilyModalOpen(true);
+  }
+
+  function closeAddFamilyModal() {
+    if (addFamilyFindBusy || addFamilyCreateBusy) return;
+    setAddFamilyModalOpen(false);
+    resetAddFamilyModalFormState();
+  }
+
+  async function submitAddFamilyLinkExisting() {
+    if (
+      !personId ||
+      !addFamilySelectedOther ||
+      effectiveTreeIdForFamily === ""
+    ) {
+      return;
+    }
+    const otherId = addFamilySelectedOther.id.trim();
+    if (!otherId || otherId === personId) {
+      setAddFamilyFindError("Pick someone else in this tree.");
+      return;
+    }
+    setAddFamilyFindBusy(true);
+    setAddFamilyFindError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setAddFamilyFindError("Not signed in.");
+        return;
+      }
+      const rows = bidirectionalRelationshipRows(
+        addFamilyFindRel,
+        personId,
+        otherId
+      );
+      const base = {
+        user_id: user.id,
+        tree_id: effectiveTreeIdForFamily,
+      };
+      const { error: e1 } = await supabase.from("relationships").insert({
+        ...base,
+        person_a_id: rows[0]!.person_a_id,
+        person_b_id: rows[0]!.person_b_id,
+        relationship_type: rows[0]!.relationship_type,
+      });
+      if (e1) {
+        setAddFamilyFindError(e1.message);
+        return;
+      }
+      const { error: e2 } = await supabase.from("relationships").insert({
+        ...base,
+        person_a_id: rows[1]!.person_a_id,
+        person_b_id: rows[1]!.person_b_id,
+        relationship_type: rows[1]!.relationship_type,
+      });
+      if (e2) {
+        await supabase
+          .from("relationships")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("tree_id", effectiveTreeIdForFamily)
+          .eq("person_a_id", rows[0]!.person_a_id)
+          .eq("person_b_id", rows[0]!.person_b_id)
+          .eq("relationship_type", rows[0]!.relationship_type);
+        setAddFamilyFindError(e2.message);
+        return;
+      }
+      setAddFamilyModalOpen(false);
+      resetAddFamilyModalFormState();
+      await load();
+    } finally {
+      setAddFamilyFindBusy(false);
+    }
+  }
+
+  async function submitAddFamilyCreateAndLink() {
+    if (!personId || effectiveTreeIdForFamily === "") return;
+    const first_name = addFamilyCreateFirst.trim();
+    const last_name = addFamilyCreateLast.trim();
+    if (!first_name || !last_name) {
+      setAddFamilyCreateError("First and last name are required.");
+      return;
+    }
+    setAddFamilyCreateBusy(true);
+    setAddFamilyCreateError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setAddFamilyCreateError("Not signed in.");
+        return;
+      }
+      const middle_name =
+        addFamilyCreateMiddle.trim() === ""
+          ? null
+          : addFamilyCreateMiddle.trim();
+      const birth_date =
+        addFamilyCreateBirth.trim() === ""
+          ? null
+          : addFamilyCreateBirth.trim();
+      const death_date =
+        addFamilyCreateDeath.trim() === ""
+          ? null
+          : addFamilyCreateDeath.trim();
+      const genderTrim = addFamilyCreateGender.trim();
+      const gender = genderTrim === "" ? "Unknown" : genderTrim;
+
+      const { data: newPerson, error: insP } = await supabase
+        .from("persons")
+        .insert({
+          user_id: user.id,
+          tree_id: effectiveTreeIdForFamily,
+          first_name,
+          middle_name,
+          last_name,
+          birth_date,
+          death_date,
+          gender,
+          notes: null,
+          photo_url: null,
+        })
+        .select("id")
+        .single();
+
+      if (insP || !newPerson) {
+        setAddFamilyCreateError(insP?.message ?? "Could not create person.");
+        return;
+      }
+      const otherId = String((newPerson as { id: string }).id);
+
+      const rows = bidirectionalRelationshipRows(
+        addFamilyCreateRel,
+        personId,
+        otherId
+      );
+      const base = {
+        user_id: user.id,
+        tree_id: effectiveTreeIdForFamily,
+      };
+      const { error: e1 } = await supabase.from("relationships").insert({
+        ...base,
+        person_a_id: rows[0]!.person_a_id,
+        person_b_id: rows[0]!.person_b_id,
+        relationship_type: rows[0]!.relationship_type,
+      });
+      if (e1) {
+        await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
+        setAddFamilyCreateError(e1.message);
+        return;
+      }
+      const { error: e2 } = await supabase.from("relationships").insert({
+        ...base,
+        person_a_id: rows[1]!.person_a_id,
+        person_b_id: rows[1]!.person_b_id,
+        relationship_type: rows[1]!.relationship_type,
+      });
+      if (e2) {
+        await supabase
+          .from("relationships")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("tree_id", effectiveTreeIdForFamily)
+          .eq("person_a_id", rows[0]!.person_a_id)
+          .eq("person_b_id", rows[0]!.person_b_id)
+          .eq("relationship_type", rows[0]!.relationship_type);
+        await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
+        setAddFamilyCreateError(e2.message);
+        return;
+      }
+      setAddFamilyModalOpen(false);
+      resetAddFamilyModalFormState();
+      await load();
+    } finally {
+      setAddFamilyCreateBusy(false);
     }
   }
 
@@ -3202,25 +3711,153 @@ export default function PersonProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center px-4">
-        <p style={{ fontFamily: sans, color: colors.brownMuted }}>
-          Opening profile…
-        </p>
+      <div className="min-h-[50vh]">
+        <nav
+          className="border-b px-4 py-3 sm:px-6"
+          style={{
+            backgroundColor: colors.cream,
+            borderColor: `${colors.brownBorder}55`,
+          }}
+        >
+          <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+              <div className="min-w-0 shrink-0">
+                <p
+                  className="text-xl font-bold tracking-tight sm:text-2xl"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Dead Gossip
+                </p>
+                <p
+                  className="mt-0.5 text-xs sm:text-sm"
+                  style={{
+                    fontFamily: sans,
+                    fontStyle: "italic",
+                    fontSize: "1rem",
+                    color: colors.brownMuted,
+                  }}
+                >
+                  The good, the bad, the buried.
+                </p>
+              </div>
+              <div
+                className="min-w-0 border-l pl-3 sm:pl-4"
+                style={{ borderColor: `${colors.brownBorder}99` }}
+              >
+                <Link
+                  href={backToTreeHref}
+                  className="mt-1 inline-block text-xs underline sm:text-sm"
+                  style={{ color: "#C4A882" }}
+                >
+                  {backToTreeLabel}
+                </Link>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0"
+              aria-label={
+                theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+              }
+              style={{
+                fontFamily: sans,
+                fontSize: "1.2rem",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "0.4rem 0.6rem",
+                borderRadius: 4,
+              }}
+              onClick={toggleTheme}
+            >
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+          </div>
+        </nav>
+        <div className="flex items-center justify-center px-4 py-16">
+          <p style={{ fontFamily: sans, color: colors.brownMuted }}>
+            Opening profile…
+          </p>
+        </div>
       </div>
     );
   }
 
   if (error || !person) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <p style={{ fontFamily: sans, color: colors.brownDark }}>{error}</p>
-        <Link
-          href="/dashboard"
-          className="mt-6 inline-block text-sm font-semibold underline"
-          style={{ color: colors.forest }}
+      <div className="min-h-[50vh]">
+        <nav
+          className="border-b px-4 py-3 sm:px-6"
+          style={{
+            backgroundColor: colors.cream,
+            borderColor: `${colors.brownBorder}55`,
+          }}
         >
-          Back to dashboard
-        </Link>
+          <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+              <div className="min-w-0 shrink-0">
+                <p
+                  className="text-xl font-bold tracking-tight sm:text-2xl"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Dead Gossip
+                </p>
+                <p
+                  className="mt-0.5 text-xs sm:text-sm"
+                  style={{
+                    fontFamily: sans,
+                    fontStyle: "italic",
+                    fontSize: "1rem",
+                    color: colors.brownMuted,
+                  }}
+                >
+                  The good, the bad, the buried.
+                </p>
+              </div>
+              <div
+                className="min-w-0 border-l pl-3 sm:pl-4"
+                style={{ borderColor: `${colors.brownBorder}99` }}
+              >
+                <Link
+                  href={backToTreeHref}
+                  className="mt-1 inline-block text-xs underline sm:text-sm"
+                  style={{ color: "#C4A882" }}
+                >
+                  {backToTreeLabel}
+                </Link>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0"
+              aria-label={
+                theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+              }
+              style={{
+                fontFamily: sans,
+                fontSize: "1.2rem",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "0.4rem 0.6rem",
+                borderRadius: 4,
+              }}
+              onClick={toggleTheme}
+            >
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+          </div>
+        </nav>
+        <div className="mx-auto max-w-lg px-4 py-16 text-center">
+          <p style={{ fontFamily: sans, color: colors.brownDark }}>{error}</p>
+          <Link
+            href={backToTreeHref}
+            className="mt-6 inline-block text-sm underline"
+            style={{ color: "#C4A882" }}
+          >
+            {backToTreeLabel}
+          </Link>
+        </div>
       </div>
     );
   }
@@ -3292,17 +3929,43 @@ export default function PersonProfilePage() {
           borderColor: `${colors.brownBorder}55`,
         }}
       >
-        <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
-          <Link
-            href="/dashboard"
-            className="text-sm font-semibold"
-            style={{ fontFamily: sans, color: colors.forest }}
-          >
-            ← Dashboard
-          </Link>
+        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+            <div className="min-w-0 shrink-0">
+              <p
+                className="text-xl font-bold tracking-tight sm:text-2xl"
+                style={{ fontFamily: serif, color: colors.brownDark }}
+              >
+                Dead Gossip
+              </p>
+              <p
+                className="mt-0.5 text-xs sm:text-sm"
+                style={{
+                  fontFamily: sans,
+                  fontStyle: "italic",
+                  fontSize: "1rem",
+                  color: colors.brownMuted,
+                }}
+              >
+                The good, the bad, the buried.
+              </p>
+            </div>
+            <div
+              className="min-w-0 border-l pl-3 sm:pl-4"
+              style={{ borderColor: `${colors.brownBorder}99` }}
+            >
+              <Link
+                href={backToTreeHref}
+                className="mt-1 inline-block text-xs underline sm:text-sm"
+                style={{ color: "#C4A882" }}
+              >
+                {backToTreeLabel}
+              </Link>
+            </div>
+          </div>
           <button
             type="button"
-            className="ml-auto"
+            className="shrink-0"
             aria-label={
               theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
             }
@@ -4318,6 +4981,34 @@ export default function PersonProfilePage() {
                   No relationships linked yet.
                 </p>
               ) : null}
+              <div
+                className="mt-4 border-t pt-3"
+                style={{ borderColor: `${colors.brownBorder}99` }}
+              >
+                <button
+                  type="button"
+                  onClick={() => openAddFamilyModal()}
+                  disabled={effectiveTreeIdForFamily === ""}
+                  className="border-none bg-transparent p-0 text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline disabled:cursor-not-allowed disabled:no-underline"
+                  style={{
+                    fontFamily: sans,
+                    color:
+                      effectiveTreeIdForFamily === ""
+                        ? colors.brownMuted
+                        : colors.forest,
+                  }}
+                >
+                  + Add family member
+                </button>
+                {effectiveTreeIdForFamily === "" ? (
+                  <p
+                    className="mt-2 text-xs leading-snug"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    Open this profile from your tree to add relatives here.
+                  </p>
+                ) : null}
+              </div>
             </aside>
           </div>
         ) : activeTab === "documents" ? (
@@ -5015,6 +5706,440 @@ export default function PersonProfilePage() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {addFamilyModalOpen && person ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-family-modal-title"
+          onClick={(e) => {
+            if (
+              e.target === e.currentTarget &&
+              !addFamilyFindBusy &&
+              !addFamilyCreateBusy
+            ) {
+              closeAddFamilyModal();
+            }
+          }}
+        >
+          <div
+            className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="add-family-modal-title"
+              className="mb-1 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Add family member
+            </h2>
+            <p
+              className="mb-4 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Link someone in this tree or create a new person and connect them.
+            </p>
+
+            <div
+              className="mb-5 flex gap-1 rounded-md border p-1"
+              style={{
+                borderColor: colors.brownBorder,
+                backgroundColor: colors.cream,
+              }}
+              role="tablist"
+              aria-label="Add family source"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={addFamilyTab === "find"}
+                className="min-w-0 flex-1 rounded px-3 py-2 text-sm font-semibold transition"
+                style={{
+                  fontFamily: sans,
+                  backgroundColor:
+                    addFamilyTab === "find" ? colors.parchment : "transparent",
+                  color: colors.brownDark,
+                  border:
+                    addFamilyTab === "find"
+                      ? `1px solid ${colors.brownBorder}`
+                      : "1px solid transparent",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setAddFamilyTab("find");
+                  setAddFamilyFindError(null);
+                  setAddFamilyCreateError(null);
+                }}
+              >
+                Find existing
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={addFamilyTab === "create"}
+                className="min-w-0 flex-1 rounded px-3 py-2 text-sm font-semibold transition"
+                style={{
+                  fontFamily: sans,
+                  backgroundColor:
+                    addFamilyTab === "create"
+                      ? colors.parchment
+                      : "transparent",
+                  color: colors.brownDark,
+                  border:
+                    addFamilyTab === "create"
+                      ? `1px solid ${colors.brownBorder}`
+                      : "1px solid transparent",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setAddFamilyTab("create");
+                  setAddFamilyFindError(null);
+                  setAddFamilyCreateError(null);
+                }}
+              >
+                Create new
+              </button>
+            </div>
+
+            {addFamilyTab === "find" ? (
+              <div className="space-y-4">
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-find-search"
+                  >
+                    Search by name
+                  </label>
+                  <input
+                    id="add-family-find-search"
+                    type="search"
+                    value={addFamilyFindQuery}
+                    onChange={(e) => setAddFamilyFindQuery(e.target.value)}
+                    placeholder="First, middle, or last name…"
+                    autoComplete="off"
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                {addFamilyTreePeopleLoading ? (
+                  <p
+                    className="text-sm italic"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    Loading people in this tree…
+                  </p>
+                ) : null}
+                {addFamilyTreePeopleError ? (
+                  <p
+                    className="text-sm"
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                  >
+                    {addFamilyTreePeopleError}
+                  </p>
+                ) : null}
+                <ul className="max-h-[220px] space-y-2 overflow-y-auto pr-1">
+                  {addFamilyFilteredPeople.map((c) => {
+                    const line = [
+                      c.first_name,
+                      c.middle_name ?? "",
+                      c.last_name,
+                    ]
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .join(" ");
+                    const y = birthYearLabel(c.birth_date);
+                    const selected = addFamilySelectedOther?.id === c.id;
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          className="w-full rounded-lg border p-3 text-left transition hover:opacity-90"
+                          style={{
+                            fontFamily: sans,
+                            borderColor: selected
+                              ? colors.forest
+                              : colors.brownBorder,
+                            backgroundColor: selected
+                              ? colors.parchment
+                              : colors.cream,
+                            color: colors.brownDark,
+                            cursor: "pointer",
+                            boxShadow: selected
+                              ? `0 0 0 1px ${colors.forest}`
+                              : undefined,
+                          }}
+                          onClick={() => setAddFamilySelectedOther(c)}
+                        >
+                          <span className="font-semibold">{line || "—"}</span>
+                          {y ? (
+                            <span
+                              className="mt-1 block text-xs"
+                              style={{ color: colors.brownMuted }}
+                            >
+                              Born {y}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {addFamilyFindQuery.trim() !== "" &&
+                !addFamilyTreePeopleLoading &&
+                !addFamilyTreePeopleError &&
+                addFamilyFilteredPeople.length === 0 ? (
+                  <p
+                    className="text-sm italic"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    No matches in this tree.
+                  </p>
+                ) : null}
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-find-rel"
+                  >
+                    Their relationship to {personFullName || "this person"}
+                  </label>
+                  <select
+                    id="add-family-find-rel"
+                    value={addFamilyFindRel}
+                    onChange={(e) =>
+                      setAddFamilyFindRel(
+                        e.target.value as FamilyRelationshipChoice
+                      )
+                    }
+                    style={modalInputStyle}
+                  >
+                    <option value="parent">Parent</option>
+                    <option value="child">Child</option>
+                    <option value="spouse">Spouse</option>
+                    <option value="sibling">Sibling</option>
+                  </select>
+                </div>
+                {addFamilyFindError ? (
+                  <p
+                    className="text-sm"
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                  >
+                    {addFamilyFindError}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+                  <button
+                    type="button"
+                    onClick={() => closeAddFamilyModal()}
+                    disabled={addFamilyFindBusy}
+                    style={btnOutline}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      addFamilyFindBusy || !addFamilySelectedOther
+                    }
+                    onClick={() => void submitAddFamilyLinkExisting()}
+                    style={{
+                      fontFamily: sans,
+                      backgroundColor: colors.brownOutline,
+                      color: colors.cream,
+                      border: "none",
+                      padding: "0.55rem 1.2rem",
+                      fontSize: "0.875rem",
+                      fontWeight: 700,
+                      cursor:
+                        addFamilyFindBusy || !addFamilySelectedOther
+                          ? "not-allowed"
+                          : "pointer",
+                      borderRadius: 2,
+                      opacity:
+                        addFamilyFindBusy || !addFamilySelectedOther
+                          ? 0.65
+                          : 1,
+                    }}
+                  >
+                    {addFamilyFindBusy ? "Linking…" : "Link"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-fn"
+                  >
+                    First name <span style={{ color: "var(--dg-danger)" }}>*</span>
+                  </label>
+                  <input
+                    id="add-family-fn"
+                    value={addFamilyCreateFirst}
+                    onChange={(e) => setAddFamilyCreateFirst(e.target.value)}
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-mn"
+                  >
+                    Middle name
+                  </label>
+                  <input
+                    id="add-family-mn"
+                    value={addFamilyCreateMiddle}
+                    onChange={(e) => setAddFamilyCreateMiddle(e.target.value)}
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-ln"
+                  >
+                    Last name <span style={{ color: "var(--dg-danger)" }}>*</span>
+                  </label>
+                  <input
+                    id="add-family-ln"
+                    value={addFamilyCreateLast}
+                    onChange={(e) => setAddFamilyCreateLast(e.target.value)}
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-bd"
+                  >
+                    Birth date
+                  </label>
+                  <input
+                    id="add-family-bd"
+                    type="date"
+                    value={addFamilyCreateBirth}
+                    onChange={(e) => setAddFamilyCreateBirth(e.target.value)}
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-dd"
+                  >
+                    Death date
+                  </label>
+                  <input
+                    id="add-family-dd"
+                    type="date"
+                    value={addFamilyCreateDeath}
+                    onChange={(e) => setAddFamilyCreateDeath(e.target.value)}
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-gender"
+                  >
+                    Gender
+                  </label>
+                  <input
+                    id="add-family-gender"
+                    value={addFamilyCreateGender}
+                    onChange={(e) => setAddFamilyCreateGender(e.target.value)}
+                    placeholder="Optional"
+                    className="w-full"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="add-family-create-rel"
+                  >
+                    Their relationship to {personFullName || "this person"}
+                  </label>
+                  <select
+                    id="add-family-create-rel"
+                    value={addFamilyCreateRel}
+                    onChange={(e) =>
+                      setAddFamilyCreateRel(
+                        e.target.value as FamilyRelationshipChoice
+                      )
+                    }
+                    style={modalInputStyle}
+                  >
+                    <option value="parent">Parent</option>
+                    <option value="child">Child</option>
+                    <option value="spouse">Spouse</option>
+                    <option value="sibling">Sibling</option>
+                  </select>
+                </div>
+                {addFamilyCreateError ? (
+                  <p
+                    className="text-sm"
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                  >
+                    {addFamilyCreateError}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+                  <button
+                    type="button"
+                    onClick={() => closeAddFamilyModal()}
+                    disabled={addFamilyCreateBusy}
+                    style={btnOutline}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={addFamilyCreateBusy}
+                    onClick={() => void submitAddFamilyCreateAndLink()}
+                    style={{
+                      fontFamily: sans,
+                      backgroundColor: colors.brownOutline,
+                      color: colors.cream,
+                      border: "none",
+                      padding: "0.55rem 1.2rem",
+                      fontSize: "0.875rem",
+                      fontWeight: 700,
+                      cursor: addFamilyCreateBusy ? "wait" : "pointer",
+                      borderRadius: 2,
+                      opacity: addFamilyCreateBusy ? 0.85 : 1,
+                    }}
+                  >
+                    {addFamilyCreateBusy ? "Saving…" : "Create and link"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

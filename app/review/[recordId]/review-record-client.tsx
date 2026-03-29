@@ -112,6 +112,8 @@ type PersonCardState = {
 export type PendingReviewPayload = {
   recordId: string;
   recordTypeLabel: string;
+  /** When set, duplicate matching and post-save redirect target this tree. */
+  returnTreeId?: string | null;
   people: Array<{
     first_name: string;
     middle_name: string | null;
@@ -484,12 +486,14 @@ export default function ReviewRecordClient({
   fileType,
   recordTypeLabel,
   aiResponse,
+  recordTreeId = null,
 }: {
   recordId: string;
   signedDocumentUrl: string | null;
   fileType: string | null;
   recordTypeLabel: string;
   aiResponse: unknown;
+  recordTreeId?: string | null;
 }) {
   const router = useRouter();
   const parsed = useMemo(() => {
@@ -517,6 +521,7 @@ export default function ReviewRecordClient({
     const payload: PendingReviewPayload = {
       recordId,
       recordTypeLabel,
+      ...(recordTreeId ? { returnTreeId: recordTreeId } : {}),
       people: checked.map((c) => ({
         first_name: c.form.first_name.trim(),
         middle_name: c.form.middle_name.trim() || null,

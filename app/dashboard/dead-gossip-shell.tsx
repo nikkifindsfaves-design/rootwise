@@ -403,11 +403,12 @@ export default function DeadGossipShell({
               Dead Gossip
             </p>
             <p
-              className="mt-0.5 text-xs sm:text-sm"
+              className="mt-0.5"
               style={{
                 fontFamily: sans,
                 fontStyle: "italic",
-                color: colors.brownMuted,
+                fontSize: "1rem",
+                color: "var(--dg-brown-mid)",
               }}
             >
               The good, the bad, the buried.

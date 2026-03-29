@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
 
   const { data: recordRow, error: recordErr } = await supabase
     .from("records")
-    .select("id, ai_response")
+    .select("id, ai_response, tree_id")
     .eq("id", recordId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -195,6 +195,12 @@ export async function POST(request: NextRequest) {
   if (recordErr || !recordRow) {
     return NextResponse.json({ error: "Record not found." }, { status: 404 });
   }
+
+  const recordTreeIdRaw = (recordRow as { tree_id?: string | null }).tree_id;
+  const recordTreeId =
+    typeof recordTreeIdRaw === "string" && recordTreeIdRaw.trim() !== ""
+      ? recordTreeIdRaw.trim()
+      : null;
 
   const resolvedIds: string[] = [];
 
@@ -251,18 +257,23 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const newPersonRow: Record<string, unknown> = {
+        user_id: user.id,
+        first_name: payload.first_name,
+        middle_name: payload.middle_name,
+        last_name: payload.last_name,
+        birth_date: payload.birth_date,
+        death_date: payload.death_date,
+        gender: payload.gender,
+        notes: payload.notes,
+      };
+      if (recordTreeId) {
+        newPersonRow.tree_id = recordTreeId;
+      }
+
       const { data: inserted, error: insErr } = await supabase
         .from("persons")
-        .insert({
-          user_id: user.id,
-          first_name: payload.first_name,
-          middle_name: payload.middle_name,
-          last_name: payload.last_name,
-          birth_date: payload.birth_date,
-          death_date: payload.death_date,
-          gender: payload.gender,
-          notes: payload.notes,
-        })
+        .insert(newPersonRow)
         .select("id")
         .single();
 
@@ -277,10 +288,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { data: allPersons, error: listErr } = await supabase
+  let nameListQuery = supabase
     .from("persons")
     .select("id, first_name, middle_name, last_name")
     .eq("user_id", user.id);
+  if (recordTreeId) {
+    nameListQuery = nameListQuery.eq("tree_id", recordTreeId);
+  }
+  const { data: allPersons, error: listErr } = await nameListQuery;
 
   if (listErr) {
     return NextResponse.json({ error: listErr.message }, { status: 500 });
@@ -335,31 +350,42 @@ export async function POST(request: NextRequest) {
 
       const relType = String(r.relationship_type ?? "").trim() || "other";
 
-      const { error: r1 } = await supabase.from("relationships").insert({
+      const relRow1: Record<string, unknown> = {
         user_id: user.id,
         person_a_id: personId,
         person_b_id: relatedId,
         relationship_type: relType,
-      });
+      };
+      const relRow2: Record<string, unknown> = {
+        user_id: user.id,
+        person_a_id: relatedId,
+        person_b_id: personId,
+        relationship_type: inverseRelationshipType(relType),
+      };
+      if (recordTreeId) {
+        relRow1.tree_id = recordTreeId;
+        relRow2.tree_id = recordTreeId;
+      }
+
+      const { error: r1 } = await supabase.from("relationships").insert(relRow1);
 
       if (r1) {
         return NextResponse.json({ error: r1.message }, { status: 500 });
       }
 
-      const { error: r2 } = await supabase.from("relationships").insert({
-        user_id: user.id,
-        person_a_id: relatedId,
-        person_b_id: personId,
-        relationship_type: inverseRelationshipType(relType),
-      });
+      const { error: r2 } = await supabase.from("relationships").insert(relRow2);
 
       if (r2) {
-        await supabase
+        let del = supabase
           .from("relationships")
           .delete()
           .eq("user_id", user.id)
           .eq("person_a_id", personId)
           .eq("person_b_id", relatedId);
+        if (recordTreeId) {
+          del = del.eq("tree_id", recordTreeId);
+        }
+        await del;
         return NextResponse.json({ error: r2.message }, { status: 500 });
       }
     }
@@ -434,12 +460,16 @@ export async function POST(request: NextRequest) {
   // parent edge (person_a = parent, person_b = child, type parent), link them as
   // siblings to every other child of the same parent if not already linked.
   for (const personId of resolvedIds) {
-    const { data: asChildRows, error: asChildErr } = await supabase
+    let asChildQ = supabase
       .from("relationships")
       .select("person_a_id")
       .eq("user_id", user.id)
       .eq("person_b_id", personId)
       .eq("relationship_type", "parent");
+    if (recordTreeId) {
+      asChildQ = asChildQ.eq("tree_id", recordTreeId);
+    }
+    const { data: asChildRows, error: asChildErr } = await asChildQ;
 
     if (asChildErr) {
       return NextResponse.json({ error: asChildErr.message }, { status: 500 });
@@ -454,12 +484,16 @@ export async function POST(request: NextRequest) {
     ];
 
     for (const parentId of parentIds) {
-      const { data: coChildRows, error: coErr } = await supabase
+      let coChildQ = supabase
         .from("relationships")
         .select("person_b_id")
         .eq("user_id", user.id)
         .eq("person_a_id", parentId)
         .eq("relationship_type", "parent");
+      if (recordTreeId) {
+        coChildQ = coChildQ.eq("tree_id", recordTreeId);
+      }
+      const { data: coChildRows, error: coErr } = await coChildQ;
 
       if (coErr) {
         return NextResponse.json({ error: coErr.message }, { status: 500 });
@@ -474,27 +508,33 @@ export async function POST(request: NextRequest) {
       ];
 
       for (const otherId of otherChildren) {
-        const { data: sib1, error: s1Err } = await supabase
+        let sib1Q = supabase
           .from("relationships")
           .select("id")
           .eq("user_id", user.id)
           .eq("relationship_type", "sibling")
           .eq("person_a_id", personId)
-          .eq("person_b_id", otherId)
-          .maybeSingle();
+          .eq("person_b_id", otherId);
+        if (recordTreeId) {
+          sib1Q = sib1Q.eq("tree_id", recordTreeId);
+        }
+        const { data: sib1, error: s1Err } = await sib1Q.maybeSingle();
 
         if (s1Err) {
           return NextResponse.json({ error: s1Err.message }, { status: 500 });
         }
 
-        const { data: sib2, error: s2Err } = await supabase
+        let sib2Q = supabase
           .from("relationships")
           .select("id")
           .eq("user_id", user.id)
           .eq("relationship_type", "sibling")
           .eq("person_a_id", otherId)
-          .eq("person_b_id", personId)
-          .maybeSingle();
+          .eq("person_b_id", personId);
+        if (recordTreeId) {
+          sib2Q = sib2Q.eq("tree_id", recordTreeId);
+        }
+        const { data: sib2, error: s2Err } = await sib2Q.maybeSingle();
 
         if (s2Err) {
           return NextResponse.json({ error: s2Err.message }, { status: 500 });
@@ -502,32 +542,47 @@ export async function POST(request: NextRequest) {
 
         if (sib1 || sib2) continue;
 
-        const { error: insSib1 } = await supabase.from("relationships").insert({
+        const sibIns1: Record<string, unknown> = {
           user_id: user.id,
           person_a_id: personId,
           person_b_id: otherId,
           relationship_type: "sibling",
-        });
+        };
+        const sibIns2: Record<string, unknown> = {
+          user_id: user.id,
+          person_a_id: otherId,
+          person_b_id: personId,
+          relationship_type: "sibling",
+        };
+        if (recordTreeId) {
+          sibIns1.tree_id = recordTreeId;
+          sibIns2.tree_id = recordTreeId;
+        }
+
+        const { error: insSib1 } = await supabase
+          .from("relationships")
+          .insert(sibIns1);
 
         if (insSib1) {
           return NextResponse.json({ error: insSib1.message }, { status: 500 });
         }
 
-        const { error: insSib2 } = await supabase.from("relationships").insert({
-          user_id: user.id,
-          person_a_id: otherId,
-          person_b_id: personId,
-          relationship_type: "sibling",
-        });
+        const { error: insSib2 } = await supabase
+          .from("relationships")
+          .insert(sibIns2);
 
         if (insSib2) {
-          await supabase
+          let delS = supabase
             .from("relationships")
             .delete()
             .eq("user_id", user.id)
             .eq("person_a_id", personId)
             .eq("person_b_id", otherId)
             .eq("relationship_type", "sibling");
+          if (recordTreeId) {
+            delS = delS.eq("tree_id", recordTreeId);
+          }
+          await delS;
           return NextResponse.json({ error: insSib2.message }, { status: 500 });
         }
       }

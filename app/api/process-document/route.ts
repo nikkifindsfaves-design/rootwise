@@ -17,7 +17,9 @@ Story fields (Dead Gossip voice — direct, occasionally irreverent, like a true
 
 For each birth event, also add parent_events: one object per named parent. Each parent event uses event_type exactly "child born", the same event_date and event_place as the birth, person_name set to that parent's full name, description mentioning the child's name and the other parent if known, story_short one punchy sentence from the parent's perspective, story_full 2–3 sentences from the parent's perspective. Omit parent_events if parents are unknown.
 
-For any document that shows family connections, always populate the relationships array with entries like { person_a: 'John Smith', person_b: 'Mary Smith', relationship_type: 'spouse' } or { person_a: 'John Smith', person_b: 'Baby Smith', relationship_type: 'parent' }. Never put relationship information only in notes.`;
+Always populate the relationships array with parent/child links the document supports: use relationship_type exactly "parent" where person_a is the parent and person_b is the child (e.g. { person_a: 'John Smith', person_b: 'Baby Smith', relationship_type: 'parent' }). Never put relationship information only in notes.
+
+Spouse relationships (relationship_type "spouse"): include ONLY when the source text explicitly states a marriage, wedding, or spousal bond (e.g. "married", "husband", "wife", "spouse", "wedding", "marriage certificate", wording that clearly indicates a legal or stated marital relationship). Do NOT add "spouse" entries solely because two people are both listed as parents of the same child on a birth, baptism, census, or similar record. Do NOT infer marriage from shared parentage, shared surname, or co-appearance as parents. If the document only names two parents without stating they are married, use only "parent" rows toward the child—no "spouse" between those parents unless marriage is explicitly stated.`;
 
 const MODEL = "claude-sonnet-4-20250514";
 
@@ -112,6 +114,39 @@ export async function POST(request: NextRequest) {
       { error: 'Missing file field "file"' },
       { status: 400 }
     );
+  }
+
+  const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const treeIdRaw = formData.get("tree_id");
+  let resolvedTreeId: string | null = null;
+  if (treeIdRaw != null && String(treeIdRaw).trim() !== "") {
+    const tid = String(treeIdRaw).trim();
+    if (!UUID_RE.test(tid)) {
+      return NextResponse.json(
+        { error: "Invalid tree_id" },
+        { status: 400 }
+      );
+    }
+    const { data: treeRow, error: treeErr } = await supabase
+      .from("trees")
+      .select("id")
+      .eq("id", tid)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (treeErr) {
+      return NextResponse.json(
+        { error: treeErr.message },
+        { status: 500 }
+      );
+    }
+    if (!treeRow) {
+      return NextResponse.json(
+        { error: "Tree not found or access denied." },
+        { status: 403 }
+      );
+    }
+    resolvedTreeId = tid;
   }
 
   const arrayBuffer = await file.arrayBuffer();
@@ -234,6 +269,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const recordTypeField = formData.get("record_type");
+  const recordTypeStr =
+    recordTypeField != null && String(recordTypeField).trim() !== ""
+      ? String(recordTypeField).trim()
+      : null;
+
+  // Sole `records` row for this upload: `tree_id` comes from multipart field
+  // `tree_id` (validated above). Omit when null/missing so non-tree uploads unchanged.
   const { data: record, error: recordError } = await supabase
     .from("records")
     .insert({
@@ -241,6 +284,8 @@ export async function POST(request: NextRequest) {
       file_url: fileUrl,
       file_type: resolvedFileType,
       ai_response: parsed,
+      ...(recordTypeStr ? { record_type: recordTypeStr } : {}),
+      ...(resolvedTreeId != null ? { tree_id: resolvedTreeId } : {}),
     })
     .select("id")
     .single();

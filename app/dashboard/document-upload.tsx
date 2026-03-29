@@ -19,7 +19,17 @@ const RECORD_TYPES = [
 const sans = "var(--font-dg-body), Lato, sans-serif";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 
-export default function DocumentUploadSection() {
+type DocumentUploadSectionProps = {
+  /** When set, the record is tied to this tree (process-document + save-review). */
+  treeId?: string;
+  /** Omit card chrome and heading when used inside another shell (e.g. a modal). */
+  embedded?: boolean;
+};
+
+export default function DocumentUploadSection({
+  treeId,
+  embedded = false,
+}: DocumentUploadSectionProps) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [recordType, setRecordType] = useState<(typeof RECORD_TYPES)[number]>(
@@ -41,6 +51,9 @@ export default function DocumentUploadSection() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("record_type", recordType);
+      if (treeId != null && treeId.trim() !== "") {
+        formData.append("tree_id", treeId.trim());
+      }
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -72,30 +85,8 @@ export default function DocumentUploadSection() {
     }
   }
 
-  return (
-    <section
-      className="rounded-xl border p-6 shadow-sm"
-      style={{
-        backgroundColor: "var(--dg-cream)",
-        borderColor: "var(--dg-paper-border)",
-        boxShadow: "0 4px 20px rgb(var(--dg-shadow-rgb) / 0.06)",
-      }}
-    >
-      <h2
-        className="text-xl font-bold"
-        style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
-      >
-        Upload a Record
-      </h2>
-      <p
-        className="mt-1 text-sm"
-        style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
-      >
-        Upload a document and let Claude extract people, events, and
-        relationships.
-      </p>
-
-      <div className="mt-4 space-y-4">
+  const fields = (
+    <div className={embedded ? "space-y-4" : "mt-4 space-y-4"}>
         <div>
           <label
             htmlFor="record_file"
@@ -190,7 +181,36 @@ export default function DocumentUploadSection() {
             {error}
           </p>
         ) : null}
-      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return fields;
+  }
+
+  return (
+    <section
+      className="rounded-xl border p-6 shadow-sm"
+      style={{
+        backgroundColor: "var(--dg-cream)",
+        borderColor: "var(--dg-paper-border)",
+        boxShadow: "0 4px 20px rgb(var(--dg-shadow-rgb) / 0.06)",
+      }}
+    >
+      <h2
+        className="text-xl font-bold"
+        style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
+      >
+        Upload a Record
+      </h2>
+      <p
+        className="mt-1 text-sm"
+        style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
+      >
+        Upload a document and let Claude extract people, events, and
+        relationships.
+      </p>
+      {fields}
     </section>
   );
 }
