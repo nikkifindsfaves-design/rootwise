@@ -4,21 +4,21 @@ const sans = "var(--font-dg-body), Lato, sans-serif";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 
 const fieldClass =
-  "w-full rounded-md px-3 py-2 outline-none transition focus:ring-2 focus:ring-[#2C4A3E]/35";
+  "w-full rounded-md px-3 py-2 outline-none transition focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)]";
 
 export default function AddPersonForm() {
   return (
     <section
       className="rounded-xl border p-6 shadow-sm"
       style={{
-        backgroundColor: "#FFFCF7",
-        borderColor: "#C4A882",
-        boxShadow: "0 4px 20px rgba(61, 41, 20, 0.06)",
+        backgroundColor: "var(--dg-cream)",
+        borderColor: "var(--dg-paper-border)",
+        boxShadow: "0 4px 20px rgb(var(--dg-shadow-rgb) / 0.06)",
       }}
     >
       <h2
         className="text-xl font-bold"
-        style={{ fontFamily: serif, color: "#3D2914" }}
+        style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
       >
         Add a person
       </h2>
@@ -28,7 +28,7 @@ export default function AddPersonForm() {
             <label
               htmlFor="first_name"
               className="mb-1 block text-sm font-medium"
-              style={{ fontFamily: sans, color: "#5C3D2E" }}
+              style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
             >
               First name
             </label>
@@ -42,9 +42,9 @@ export default function AddPersonForm() {
                 fontFamily: sans,
                 borderWidth: 1,
                 borderStyle: "solid",
-                borderColor: "#A08060",
-                backgroundColor: "#FAF7F2",
-                color: "#3D2914",
+                borderColor: "var(--dg-brown-border)",
+                backgroundColor: "var(--dg-bg-main)",
+                color: "var(--dg-brown-dark)",
               }}
               placeholder="Given name"
             />
@@ -53,7 +53,7 @@ export default function AddPersonForm() {
             <label
               htmlFor="middle_name"
               className="mb-1 block text-sm font-medium"
-              style={{ fontFamily: sans, color: "#5C3D2E" }}
+              style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
             >
               Middle name
             </label>
@@ -66,9 +66,9 @@ export default function AddPersonForm() {
                 fontFamily: sans,
                 borderWidth: 1,
                 borderStyle: "solid",
-                borderColor: "#A08060",
-                backgroundColor: "#FAF7F2",
-                color: "#3D2914",
+                borderColor: "var(--dg-brown-border)",
+                backgroundColor: "var(--dg-bg-main)",
+                color: "var(--dg-brown-dark)",
               }}
               placeholder="Optional"
             />
@@ -79,7 +79,7 @@ export default function AddPersonForm() {
           <label
             htmlFor="last_name"
             className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "#5C3D2E" }}
+            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
           >
             Last name
           </label>
@@ -93,9 +93,9 @@ export default function AddPersonForm() {
               fontFamily: sans,
               borderWidth: 1,
               borderStyle: "solid",
-              borderColor: "#A08060",
-              backgroundColor: "#FAF7F2",
-              color: "#3D2914",
+              borderColor: "var(--dg-brown-border)",
+              backgroundColor: "var(--dg-bg-main)",
+              color: "var(--dg-brown-dark)",
             }}
             placeholder="Family name"
           />
@@ -106,7 +106,7 @@ export default function AddPersonForm() {
             <label
               htmlFor="birth_date"
               className="mb-1 block text-sm font-medium"
-              style={{ fontFamily: sans, color: "#5C3D2E" }}
+              style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
             >
               Birth date
             </label>
@@ -119,9 +119,9 @@ export default function AddPersonForm() {
                 fontFamily: sans,
                 borderWidth: 1,
                 borderStyle: "solid",
-                borderColor: "#A08060",
-                backgroundColor: "#FAF7F2",
-                color: "#3D2914",
+                borderColor: "var(--dg-brown-border)",
+                backgroundColor: "var(--dg-bg-main)",
+                color: "var(--dg-brown-dark)",
               }}
             />
           </div>
@@ -129,7 +129,7 @@ export default function AddPersonForm() {
             <label
               htmlFor="death_date"
               className="mb-1 block text-sm font-medium"
-              style={{ fontFamily: sans, color: "#5C3D2E" }}
+              style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
             >
               Death date
             </label>
@@ -142,9 +142,9 @@ export default function AddPersonForm() {
                 fontFamily: sans,
                 borderWidth: 1,
                 borderStyle: "solid",
-                borderColor: "#A08060",
-                backgroundColor: "#FAF7F2",
-                color: "#3D2914",
+                borderColor: "var(--dg-brown-border)",
+                backgroundColor: "var(--dg-bg-main)",
+                color: "var(--dg-brown-dark)",
               }}
             />
           </div>
@@ -154,7 +154,7 @@ export default function AddPersonForm() {
           <label
             htmlFor="gender"
             className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "#5C3D2E" }}
+            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
           >
             Gender
           </label>
@@ -167,9 +167,9 @@ export default function AddPersonForm() {
               fontFamily: sans,
               borderWidth: 1,
               borderStyle: "solid",
-              borderColor: "#A08060",
-              backgroundColor: "#FAF7F2",
-              color: "#3D2914",
+              borderColor: "var(--dg-brown-border)",
+              backgroundColor: "var(--dg-bg-main)",
+              color: "var(--dg-brown-dark)",
             }}
           >
             <option value="Male">Male</option>
@@ -182,7 +182,7 @@ export default function AddPersonForm() {
           <label
             htmlFor="notes"
             className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "#5C3D2E" }}
+            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
           >
             Notes
           </label>
@@ -195,9 +195,9 @@ export default function AddPersonForm() {
               fontFamily: sans,
               borderWidth: 1,
               borderStyle: "solid",
-              borderColor: "#A08060",
-              backgroundColor: "#FAF7F2",
-              color: "#3D2914",
+              borderColor: "var(--dg-brown-border)",
+              backgroundColor: "var(--dg-bg-main)",
+              color: "var(--dg-brown-dark)",
             }}
             placeholder="Optional details"
           />
@@ -208,8 +208,8 @@ export default function AddPersonForm() {
           className="rounded-md px-5 py-2.5 text-sm font-semibold transition hover:opacity-95"
           style={{
             fontFamily: sans,
-            backgroundColor: "#3D2914",
-            color: "#FFFCF7",
+            backgroundColor: "var(--dg-primary-bg)",
+            color: "var(--dg-primary-fg)",
           }}
         >
           Add person

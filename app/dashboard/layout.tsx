@@ -20,7 +20,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     <div
       className={`${playfair.variable} ${lato.variable} min-h-screen`}
       style={{
-        backgroundColor: "#FAF7F2",
+        backgroundColor: "var(--dg-bg-main)",
         fontFamily: "var(--font-dg-body), Lato, ui-sans-serif, system-ui, sans-serif",
       }}
     >

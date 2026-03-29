@@ -12,15 +12,15 @@ const serif =
 const sans = "var(--font-dg-body), Lato, sans-serif";
 
 const colors = {
-  brownDark: "#3D2914",
-  brownMid: "#5C3D2E",
-  brownMuted: "#7A6654",
-  brownBorder: "#A08060",
-  brownOutline: "#6B4423",
-  parchment: "#F3EBE0",
-  cream: "#FFFCF7",
-  avatarBg: "#D4C4B0",
-  forest: "#2C4A3E",
+  brownDark: "var(--dg-brown-dark)",
+  brownMid: "var(--dg-brown-mid)",
+  brownMuted: "var(--dg-brown-muted)",
+  brownBorder: "var(--dg-brown-border)",
+  brownOutline: "var(--dg-brown-outline)",
+  parchment: "var(--dg-parchment)",
+  cream: "var(--dg-cream)",
+  avatarBg: "var(--dg-avatar-bg)",
+  forest: "var(--dg-forest)",
 };
 
 type PersonRow = {
@@ -683,7 +683,7 @@ function FamilyMemberCard({ p }: { p: PersonRow }) {
       style={{
         borderColor: colors.brownBorder,
         backgroundColor: colors.cream,
-        boxShadow: "0 1px 4px rgba(61, 41, 20, 0.06)",
+        boxShadow: "0 1px 4px rgb(var(--dg-shadow-rgb) / 0.06)",
         textDecoration: "none",
         color: "inherit",
       }}
@@ -768,6 +768,24 @@ export default function PersonProfilePage() {
   const params = useParams();
   const router = useRouter();
   const personId = typeof params.id === "string" ? params.id : "";
+
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const stored = localStorage.getItem("dg-theme");
+    if (stored === "dark" || stored === "light") {
+      setTheme(stored);
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      setTheme("dark");
+    }
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    const next = theme === "light" ? "dark" : "light";
+    localStorage.setItem("dg-theme", next);
+    document.documentElement.classList.toggle("dark", next === "dark");
+    setTheme(next);
+  }, [theme]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2867,13 +2885,34 @@ export default function PersonProfilePage() {
           borderColor: `${colors.brownBorder}55`,
         }}
       >
-        <Link
-          href="/dashboard"
-          className="text-sm font-semibold"
-          style={{ fontFamily: sans, color: colors.forest }}
-        >
-          ← Dashboard
-        </Link>
+        <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="text-sm font-semibold"
+            style={{ fontFamily: sans, color: colors.forest }}
+          >
+            ← Dashboard
+          </Link>
+          <button
+            type="button"
+            className="ml-auto"
+            aria-label={
+              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+            }
+            style={{
+              fontFamily: sans,
+              fontSize: "1.2rem",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "0.4rem 0.6rem",
+              borderRadius: 4,
+            }}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
+        </div>
       </nav>
 
       {/* Header */}
@@ -2890,7 +2929,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.avatarBg,
               borderColor: colors.cream,
-              boxShadow: "0 8px 28px rgba(61, 41, 20, 0.12)",
+              boxShadow: "0 8px 28px rgb(var(--dg-shadow-rgb) / 0.12)",
             }}
           >
             {headerPhotoUrl ? (
@@ -2977,8 +3016,8 @@ export default function PersonProfilePage() {
                       fontSize: 12,
                       padding: "2px 10px",
                       borderRadius: 12,
-                      backgroundColor: "#8B6F4E",
-                      color: "#fff",
+                      backgroundColor: "var(--dg-badge-tan-bg)",
+                      color: "var(--dg-badge-tan-fg)",
                     }}
                   >
                     {headerGenderBadge}
@@ -3025,8 +3064,8 @@ export default function PersonProfilePage() {
                 type="button"
                 style={{
                   ...btnOutline,
-                  borderColor: "#8B3A3A",
-                  color: "#6B2A2A",
+                  borderColor: "var(--dg-danger)",
+                  color: "var(--dg-danger-mid)",
                 }}
                 onClick={() => setDeletePersonOpen(true)}
               >
@@ -3190,7 +3229,7 @@ export default function PersonProfilePage() {
                           className="relative flex gap-4 pb-10 sm:gap-6"
                         >
                           <div
-                            className="absolute left-0 top-1 z-10 h-2.5 w-2.5 rounded-full ring-4 ring-[#F3EBE0] sm:left-[0.35rem]"
+                            className="absolute left-0 top-1 z-10 h-2.5 w-2.5 rounded-full ring-4 ring-[var(--dg-parchment)] sm:left-[0.35rem]"
                             style={{
                               backgroundColor: colors.brownDark,
                             }}
@@ -3216,7 +3255,7 @@ export default function PersonProfilePage() {
                                 backgroundColor: colors.cream,
                                 borderColor: `${colors.brownBorder}99`,
                                 boxShadow:
-                                  "inset 0 1px 0 rgba(255,255,255,0.6)",
+                                  "inset 0 1px 0 var(--dg-inset-highlight)",
                               }}
                             >
                               {!isEditing ? (
@@ -3228,7 +3267,7 @@ export default function PersonProfilePage() {
                                   <button
                                     type="button"
                                     title="Edit event"
-                                    className="rounded border border-transparent p-1.5 hover:border-[#A0806099] hover:bg-[#F3EBE0]"
+                                    className="rounded border border-transparent p-1.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
                                     style={{
                                       color: colors.brownMid,
                                       cursor: "pointer",
@@ -3244,9 +3283,9 @@ export default function PersonProfilePage() {
                                   <button
                                     type="button"
                                     title="Delete event"
-                                    className="rounded border border-transparent p-1.5 hover:border-[#A0806099] hover:bg-[#F3EBE0]"
+                                    className="rounded border border-transparent p-1.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
                                     style={{
-                                      color: "#8B3A3A",
+                                      color: "var(--dg-danger)",
                                       cursor: "pointer",
                                       backgroundColor: "transparent",
                                     }}
@@ -3453,7 +3492,7 @@ export default function PersonProfilePage() {
                                       className="text-sm"
                                       style={{
                                         fontFamily: sans,
-                                        color: "#8B3A3A",
+                                        color: "var(--dg-danger)",
                                       }}
                                     >
                                       {eventEditError}
@@ -3704,7 +3743,7 @@ export default function PersonProfilePage() {
                                         }
                                         style={{
                                           fontFamily: sans,
-                                          backgroundColor: "#8B3A3A",
+                                          backgroundColor: "var(--dg-danger)",
                                           color: colors.cream,
                                           border: "none",
                                           padding: "0.35rem 0.85rem",
@@ -3748,7 +3787,7 @@ export default function PersonProfilePage() {
               style={{
                 backgroundColor: colors.cream,
                 borderColor: colors.brownBorder,
-                boxShadow: "0 4px 18px rgba(61, 41, 20, 0.06)",
+                boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.06)",
               }}
             >
               <h2
@@ -3801,7 +3840,7 @@ export default function PersonProfilePage() {
                         style={{
                           backgroundColor: colors.cream,
                           borderColor: colors.brownBorder,
-                          boxShadow: "0 2px 8px rgba(61, 41, 20, 0.05)",
+                          boxShadow: "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)",
                         }}
                       >
                         {href ? (
@@ -3902,7 +3941,7 @@ export default function PersonProfilePage() {
             {photoUploadError ? (
               <p
                 className="mb-4 text-sm"
-                style={{ fontFamily: sans, color: "#8B3A3A" }}
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
               >
                 {photoUploadError}
               </p>
@@ -3966,11 +4005,11 @@ export default function PersonProfilePage() {
                         )}
                         {rowId ? (
                           <div
-                            className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center bg-[#2A1810]/0 transition-colors group-hover:bg-[#2A1810]/45"
+                            className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center bg-transparent transition-colors group-hover:bg-[color-mix(in_srgb,var(--dg-image-dim)_45%,transparent)]"
                             aria-hidden
                           >
                             <span className="inline-flex scale-[2] opacity-0 transition-opacity group-hover:opacity-100">
-                              <IconPencil className="block text-[#FFFCF7] drop-shadow-md" />
+                              <IconPencil className="block text-[var(--dg-cream)] drop-shadow-md" />
                             </span>
                           </div>
                         ) : null}
@@ -3988,8 +4027,12 @@ export default function PersonProfilePage() {
                         ) : null}
                         {rowId ? (
                           <div
-                            className="absolute inset-0 z-[3] flex items-end justify-center gap-2 bg-gradient-to-t from-[#3D2914]/70 via-transparent to-transparent pb-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                            style={{ pointerEvents: "none" }}
+                            className="absolute inset-0 z-[3] flex items-end justify-center gap-2 pb-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                            style={{
+                              pointerEvents: "none",
+                              background:
+                                "linear-gradient(to top, color-mix(in srgb, var(--dg-photo-scrim) 70%, transparent), transparent)",
+                            }}
                           >
                             <button
                               type="button"
@@ -4039,7 +4082,7 @@ export default function PersonProfilePage() {
                                 pointerEvents: "auto",
                                 borderColor: colors.cream,
                                 backgroundColor: colors.cream,
-                                color: "#8B3A3A",
+                                color: "var(--dg-danger)",
                                 cursor: "pointer",
                               }}
                               title="Delete photo"
@@ -4132,7 +4175,7 @@ export default function PersonProfilePage() {
             {researchNoteSaveError ? (
               <p
                 className="mt-2 text-sm"
-                style={{ fontFamily: sans, color: "#8B3A3A" }}
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
               >
                 {researchNoteSaveError}
               </p>
@@ -4145,7 +4188,7 @@ export default function PersonProfilePage() {
       {editPersonOpen && editPersonDraft ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-person-title"
@@ -4158,7 +4201,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4349,7 +4392,7 @@ export default function PersonProfilePage() {
             {personEditError ? (
               <p
                 className="mt-3 text-sm"
-                style={{ fontFamily: sans, color: "#8B3A3A" }}
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
               >
                 {personEditError}
               </p>
@@ -4390,7 +4433,7 @@ export default function PersonProfilePage() {
       {deletePersonOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-person-title"
@@ -4405,7 +4448,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4434,7 +4477,7 @@ export default function PersonProfilePage() {
                 onClick={() => void confirmDeletePerson()}
                 style={{
                   fontFamily: sans,
-                  backgroundColor: "#8B3A3A",
+                  backgroundColor: "var(--dg-danger)",
                   color: colors.cream,
                   border: "none",
                   padding: "0.55rem 1.2rem",
@@ -4463,7 +4506,7 @@ export default function PersonProfilePage() {
       {mergeModalOpen && person ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="merge-modal-title"
@@ -4478,7 +4521,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4527,7 +4570,7 @@ export default function PersonProfilePage() {
                 {mergeSearchError ? (
                   <p
                     className="mb-3 text-sm"
-                    style={{ fontFamily: sans, color: "#8B3A3A" }}
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
                   >
                     {mergeSearchError}
                   </p>
@@ -4623,7 +4666,7 @@ export default function PersonProfilePage() {
                   </p>
                   <p
                     className="text-center text-xs font-bold uppercase tracking-wide"
-                    style={{ fontFamily: sans, color: "#8B3A3A" }}
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
                   >
                     Ancestor 2
                   </p>
@@ -4775,7 +4818,7 @@ export default function PersonProfilePage() {
                 {mergeError ? (
                   <p
                     className="mt-4 text-sm"
-                    style={{ fontFamily: sans, color: "#8B3A3A" }}
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
                   >
                     {mergeError}
                   </p>
@@ -4821,7 +4864,7 @@ export default function PersonProfilePage() {
       {cropModalPhoto ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="crop-photo-title"
@@ -4834,7 +4877,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4850,7 +4893,7 @@ export default function PersonProfilePage() {
               style={{
                 padding: 10,
                 borderRadius: "50%",
-                backgroundColor: "rgba(42, 24, 16, 0.42)",
+                backgroundColor: "var(--dg-modal-backdrop-deep)",
               }}
             >
               <div
@@ -4992,7 +5035,7 @@ export default function PersonProfilePage() {
       {photoSetupModal ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4"
-          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="photo-setup-title"
@@ -5007,7 +5050,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -5031,7 +5074,7 @@ export default function PersonProfilePage() {
                   style={{
                     padding: 10,
                     borderRadius: "50%",
-                    backgroundColor: "rgba(42, 24, 16, 0.42)",
+                    backgroundColor: "var(--dg-modal-backdrop-deep)",
                   }}
                 >
                   <div
@@ -5207,7 +5250,7 @@ export default function PersonProfilePage() {
                               type="button"
                               className="border-none bg-transparent p-0 leading-none"
                               style={{
-                                color: "#8B3A3A",
+                                color: "var(--dg-danger)",
                                 cursor: "pointer",
                                 fontSize: "1rem",
                                 lineHeight: 1,
@@ -5232,7 +5275,7 @@ export default function PersonProfilePage() {
             {photoSetupError ? (
               <p
                 className="mt-4 text-sm"
-                style={{ fontFamily: sans, color: "#8B3A3A" }}
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
               >
                 {photoSetupError}
               </p>
@@ -5273,7 +5316,7 @@ export default function PersonProfilePage() {
       {tagModalPhoto ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4"
-          style={{ backgroundColor: "rgba(61, 41, 20, 0.45)" }}
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="tag-modal-title"
@@ -5288,7 +5331,7 @@ export default function PersonProfilePage() {
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgba(61, 41, 20, 0.2)",
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -5341,7 +5384,7 @@ export default function PersonProfilePage() {
                         type="button"
                         className="border-none bg-transparent p-0 leading-none"
                         style={{
-                          color: "#8B3A3A",
+                          color: "var(--dg-danger)",
                           cursor: "pointer",
                           fontSize: "1rem",
                           lineHeight: 1,
@@ -5408,7 +5451,7 @@ export default function PersonProfilePage() {
             {tagModalError ? (
               <p
                 className="mb-4 text-sm"
-                style={{ fontFamily: sans, color: "#8B3A3A" }}
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
               >
                 {tagModalError}
               </p>

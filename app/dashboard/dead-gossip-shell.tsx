@@ -1,5 +1,6 @@
 "use client";
 
+import { useTheme } from "@/lib/theme/theme-context";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -8,15 +9,14 @@ import PeopleGrid, { type PersonGridRow } from "./people-grid";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 
 const colors = {
-  brownDark: "#3D2914",
-  brownMid: "#5C3D2E",
-  brownMuted: "#7A6654",
-  brownBorder: "#A08060",
-  brownOutline: "#6B4423",
-  parchment: "#F3EBE0",
-  parchmentDeep: "#E8DCC8",
-  cream: "#FFFCF7",
-  forest: "#2C4A3E",
+  brownDark: "var(--dg-brown-dark)",
+  brownMid: "var(--dg-brown-mid)",
+  brownMuted: "var(--dg-brown-muted)",
+  brownBorder: "var(--dg-brown-border)",
+  brownOutline: "var(--dg-brown-outline)",
+  parchment: "var(--dg-parchment)",
+  cream: "var(--dg-cream)",
+  forest: "var(--dg-forest)",
 };
 
 export default function DeadGossipShell({
@@ -35,6 +35,7 @@ export default function DeadGossipShell({
   personsErrorMessage: string | null;
 }) {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -68,12 +69,12 @@ export default function DeadGossipShell({
         dangerouslySetInnerHTML={{
           __html: `
             .dg-hero-btn:hover {
-              background-color: ${colors.parchmentDeep} !important;
-              border-color: ${colors.brownDark} !important;
+              background-color: var(--dg-parchment-deep) !important;
+              border-color: var(--dg-brown-dark) !important;
             }
             .dg-signout:hover {
-              background-color: ${colors.parchment} !important;
-              border-color: ${colors.brownBorder} !important;
+              background-color: var(--dg-parchment) !important;
+              border-color: var(--dg-brown-border) !important;
             }
           `,
         }}
@@ -86,7 +87,7 @@ export default function DeadGossipShell({
           borderColor: `${colors.brownBorder}55`,
         }}
       >
-        <div className="mx-auto flex max-w-6xl items-start justify-between gap-4">
+        <div className="mx-auto flex w-full max-w-6xl items-start gap-4">
           <div>
             <p
               className="text-2xl font-bold tracking-tight sm:text-3xl"
@@ -105,6 +106,25 @@ export default function DeadGossipShell({
               The good, the bad, the buried.
             </p>
           </div>
+          <button
+            type="button"
+            className="ml-auto shrink-0"
+            aria-label={
+              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+            }
+            style={{
+              fontFamily: "var(--font-dg-body), Lato, sans-serif",
+              fontSize: "1.2rem",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "0.4rem 0.6rem",
+              borderRadius: 4,
+            }}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
           <button
             type="button"
             className="dg-signout shrink-0 rounded-md border px-3 py-2 text-sm"
@@ -127,7 +147,7 @@ export default function DeadGossipShell({
           backgroundColor: colors.parchment,
           borderColor: `${colors.brownBorder}44`,
           backgroundImage:
-            "linear-gradient(180deg, rgba(255,252,247,0.5) 0%, transparent 100%)",
+            "linear-gradient(180deg, var(--dg-gradient-hero-top) 0%, transparent 100%)",
         }}
       >
         <div className="mx-auto max-w-3xl text-center">
@@ -176,9 +196,9 @@ export default function DeadGossipShell({
           <p
             className="mb-6 rounded-lg border px-4 py-3 text-sm"
             style={{
-              borderColor: "#C45C5C",
-              backgroundColor: "#FDF2F2",
-              color: "#7A2E2E",
+              borderColor: "var(--dg-error-border)",
+              backgroundColor: "var(--dg-error-bg)",
+              color: "var(--dg-error-text)",
               fontFamily: "var(--font-dg-body), Lato, sans-serif",
             }}
             role="alert"

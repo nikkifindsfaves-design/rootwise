@@ -76,20 +76,20 @@ export default function DocumentUploadSection() {
     <section
       className="rounded-xl border p-6 shadow-sm"
       style={{
-        backgroundColor: "#FFFCF7",
-        borderColor: "#C4A882",
-        boxShadow: "0 4px 20px rgba(61, 41, 20, 0.06)",
+        backgroundColor: "var(--dg-cream)",
+        borderColor: "var(--dg-paper-border)",
+        boxShadow: "0 4px 20px rgb(var(--dg-shadow-rgb) / 0.06)",
       }}
     >
       <h2
         className="text-xl font-bold"
-        style={{ fontFamily: serif, color: "#3D2914" }}
+        style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
       >
         Upload a Record
       </h2>
       <p
         className="mt-1 text-sm"
-        style={{ fontFamily: sans, color: "#7A6654" }}
+        style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
       >
         Upload a document and let Claude extract people, events, and
         relationships.
@@ -100,7 +100,7 @@ export default function DocumentUploadSection() {
           <label
             htmlFor="record_file"
             className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "#5C3D2E" }}
+            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
           >
             File (JPG, PNG, PDF)
           </label>
@@ -109,14 +109,14 @@ export default function DocumentUploadSection() {
             type="file"
             accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            className="block w-full rounded-md px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#3D2914] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[#FFFCF7] hover:file:opacity-90"
+            className="block w-full rounded-md px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[var(--dg-primary-bg)] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[var(--dg-primary-fg)] hover:file:opacity-90"
             style={{
               fontFamily: sans,
               borderWidth: 1,
               borderStyle: "solid",
-              borderColor: "#A08060",
-              backgroundColor: "#FAF7F2",
-              color: "#3D2914",
+              borderColor: "var(--dg-brown-border)",
+              backgroundColor: "var(--dg-bg-main)",
+              color: "var(--dg-brown-dark)",
             }}
           />
         </div>
@@ -125,7 +125,7 @@ export default function DocumentUploadSection() {
           <label
             htmlFor="record_type"
             className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "#5C3D2E" }}
+            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
           >
             Record type
           </label>
@@ -135,14 +135,14 @@ export default function DocumentUploadSection() {
             onChange={(event) =>
               setRecordType(event.target.value as (typeof RECORD_TYPES)[number])
             }
-            className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[#2C4A3E]/35 sm:max-w-xs"
+            className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)] sm:max-w-xs"
             style={{
               fontFamily: sans,
               borderWidth: 1,
               borderStyle: "solid",
-              borderColor: "#A08060",
-              backgroundColor: "#FAF7F2",
-              color: "#3D2914",
+              borderColor: "var(--dg-brown-border)",
+              backgroundColor: "var(--dg-bg-main)",
+              color: "var(--dg-brown-dark)",
             }}
           >
             {RECORD_TYPES.map((type) => (
@@ -160,15 +160,18 @@ export default function DocumentUploadSection() {
           className="rounded-md px-4 py-2 text-sm font-semibold transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
           style={{
             fontFamily: sans,
-            backgroundColor: "#3D2914",
-            color: "#FFFCF7",
+            backgroundColor: "var(--dg-primary-bg)",
+            color: "var(--dg-primary-fg)",
           }}
         >
           Upload and Analyze
         </button>
 
         {isLoading ? (
-          <p className="text-sm italic" style={{ fontFamily: sans, color: "#5C3D2E" }}>
+          <p
+            className="text-sm italic"
+            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
+          >
             Claude is reading your document…
           </p>
         ) : null}
@@ -178,9 +181,9 @@ export default function DocumentUploadSection() {
             className="rounded-md border px-3 py-2 text-sm"
             style={{
               fontFamily: sans,
-              borderColor: "#C45C5C",
-              backgroundColor: "#FDF2F2",
-              color: "#7A2E2E",
+              borderColor: "var(--dg-error-border)",
+              backgroundColor: "var(--dg-error-bg)",
+              color: "var(--dg-error-text)",
             }}
             role="alert"
           >

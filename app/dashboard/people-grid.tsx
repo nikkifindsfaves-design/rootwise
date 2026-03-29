@@ -16,7 +16,7 @@ export type PersonGridRow = {
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 const sans = "var(--font-dg-body), Lato, sans-serif";
 
-const defaultForest = "#2C4A3E";
+const defaultForest = "var(--dg-forest)";
 
 function initialsForPerson(p: PersonGridRow): string {
   const f = p.first_name.trim();
@@ -56,13 +56,13 @@ export default function PeopleGrid({
 
   const total = people.length;
 
-  const cream = "#FFFCF7";
-  const paperBorder = "#C4A882";
-  const brownDark = "#3D2914";
-  const brownMid = "#5C3D2E";
-  const brownMuted = "#7A6654";
-  const avatarBg = "#D4C4B0";
-  const avatarRing = "#A08060";
+  const cream = "var(--dg-cream)";
+  const paperBorder = "var(--dg-paper-border)";
+  const brownDark = "var(--dg-brown-dark)";
+  const brownMid = "var(--dg-brown-mid)";
+  const brownMuted = "var(--dg-brown-muted)";
+  const avatarBg = "var(--dg-avatar-bg)";
+  const avatarRing = "var(--dg-brown-border)";
 
   return (
     <section className="space-y-5">
@@ -79,7 +79,7 @@ export default function PeopleGrid({
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search by first, middle, or last name…"
         aria-label="Search people"
-        className="w-full rounded-lg px-4 py-3 text-sm shadow-sm outline-none transition placeholder:italic placeholder:text-[#A08060]"
+        className="w-full rounded-lg px-4 py-3 text-sm shadow-sm outline-none transition placeholder:italic placeholder:text-[var(--dg-brown-border)]"
         style={{
           fontFamily: sans,
           backgroundColor: cream,
@@ -144,22 +144,22 @@ export default function PeopleGrid({
                     backgroundColor: cream,
                     borderColor: paperBorder,
                     boxShadow:
-                      "0 2px 8px rgba(61, 41, 20, 0.06), 0 1px 2px rgba(61, 41, 20, 0.04)",
+                      "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.06), 0 1px 2px rgb(var(--dg-shadow-rgb) / 0.04)",
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.boxShadow =
-                      "0 12px 28px rgba(61, 41, 20, 0.12), 0 4px 8px rgba(61, 41, 20, 0.06)";
+                      "0 12px 28px rgb(var(--dg-shadow-rgb) / 0.12), 0 4px 8px rgb(var(--dg-shadow-rgb) / 0.06)";
                     e.currentTarget.style.borderColor = `${avatarRing}`;
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.boxShadow =
-                      "0 2px 8px rgba(61, 41, 20, 0.06), 0 1px 2px rgba(61, 41, 20, 0.04)";
+                      "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.06), 0 1px 2px rgb(var(--dg-shadow-rgb) / 0.04)";
                     e.currentTarget.style.borderColor = paperBorder;
                   }}
                 >
                   <div className="flex gap-3">
                     <div
-                      className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2 ring-[#A0806040] transition group-hover:ring-[3px] group-hover:ring-[#8B735566]"
+                      className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2 ring-[color-mix(in_srgb,var(--dg-brown-border)_25%,transparent)] transition group-hover:ring-[3px] group-hover:ring-[color-mix(in_srgb,var(--dg-brown-border)_40%,transparent)]"
                       style={{
                         backgroundColor: avatarBg,
                       }}
