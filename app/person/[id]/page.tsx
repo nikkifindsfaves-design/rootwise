@@ -2028,11 +2028,23 @@ export default function PersonProfilePage() {
     return q.split(/\s+/).filter(Boolean);
   }, [addFamilyFindQuery]);
 
+  const addFamilyRelatedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of family.parents) ids.add(p.id);
+    for (const p of family.spouses) ids.add(p.id);
+    for (const p of family.siblings) ids.add(p.id);
+    for (const p of family.children) ids.add(p.id);
+    return ids;
+  }, [family]);
+
   const addFamilyFilteredPeople = useMemo(() => {
-    return addFamilyTreePeople.filter((p) =>
-      personMatchesNameTokens(p, addFamilyFindTokens)
+    return addFamilyTreePeople.filter(
+      (p) =>
+        p.id !== personId &&
+        !addFamilyRelatedIds.has(p.id) &&
+        personMatchesNameTokens(p, addFamilyFindTokens)
     );
-  }, [addFamilyTreePeople, addFamilyFindTokens]);
+  }, [addFamilyTreePeople, addFamilyFindTokens, addFamilyRelatedIds, personId]);
 
   useEffect(() => {
     if (!mergeModalOpen || !personId) return;
@@ -2275,34 +2287,26 @@ export default function PersonProfilePage() {
       }
       const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
       const file_url = pub.publicUrl;
-      const { data: photoSample } = await supabase
-        .from("photos")
-        .select("id")
-        .eq("person_id", personId)
-        .limit(1);
-      const { data: tagSample } = await supabase
+      const { data: primaryTagSample } = await supabase
         .from("photo_tags")
         .select("id")
         .eq("person_id", personId)
+        .eq("is_primary", true)
         .limit(1);
-      const isPrimary =
-        (!photoSample || photoSample.length === 0) &&
-        (!tagSample || tagSample.length === 0);
+      const isPrimary = !primaryTagSample || primaryTagSample.length === 0;
 
       console.log(
         "photo insert isPrimary:",
         isPrimary,
         "existingPhotos:",
-        { photoSample, tagSample }
+        { primaryTagSample }
       );
 
       const { data: newRow, error: insErr } = await supabase
         .from("photos")
         .insert({
           user_id: user.id,
-          person_id: personId,
           file_url,
-          is_primary: isPrimary,
           ...(naturalWidth > 0 && naturalHeight > 0
             ? { natural_width: naturalWidth, natural_height: naturalHeight }
             : {}),
@@ -2311,6 +2315,19 @@ export default function PersonProfilePage() {
         .single();
       if (insErr || !newRow) {
         setPhotoUploadError(insErr?.message ?? "Could not save photo.");
+        return;
+      }
+      const { error: tagInsErr } = await supabase.from("photo_tags").insert({
+        photo_id: String((newRow as Record<string, unknown>).id ?? ""),
+        person_id: personId,
+        user_id: user.id,
+        is_primary: isPrimary,
+        crop_x: 50,
+        crop_y: 50,
+        crop_zoom: 1.0,
+      });
+      if (tagInsErr) {
+        setPhotoUploadError(tagInsErr.message);
         return;
       }
       const inserted = newRow as Record<string, unknown>;
@@ -2931,47 +2948,38 @@ export default function PersonProfilePage() {
         setTagModalError("Not signed in.");
         return;
       }
-      const { error: delErr } = await supabase
+      const { data: existingTagRows, error: existingTagErr } = await supabase
         .from("photo_tags")
-        .delete()
+        .select("person_id")
         .eq("photo_id", photoId)
         .eq("user_id", user.id);
-      if (delErr) {
-        setTagModalError(delErr.message);
+      if (existingTagErr) {
+        setTagModalError(existingTagErr.message);
         return;
       }
-      const tagPersonIds = tagModalTags.map((t) => t.id);
-      const withPhotos = new Set<string>();
-      const withTags = new Set<string>();
-      if (tagPersonIds.length > 0) {
-        const { data: ph } = await supabase
-          .from("photos")
-          .select("person_id")
-          .in("person_id", tagPersonIds);
-        const { data: tg } = await supabase
+      const existingPersonIds = new Set(
+        (existingTagRows ?? [])
+          .map((r) => (r as { person_id?: string }).person_id)
+          .filter((id): id is string => typeof id === "string" && id !== "")
+      );
+      const newTagPerson = tagModalTags.find((t) => !existingPersonIds.has(t.id));
+      if (newTagPerson) {
+        const { data: personPrimaryTag } = await supabase
           .from("photo_tags")
-          .select("person_id")
-          .in("person_id", tagPersonIds);
-        for (const r of ph ?? []) {
-          const pid = (r as { person_id?: string }).person_id;
-          if (typeof pid === "string") withPhotos.add(pid);
-        }
-        for (const r of tg ?? []) {
-          const pid = (r as { person_id?: string }).person_id;
-          if (typeof pid === "string") withTags.add(pid);
-        }
-      }
-      const rows = tagModalTags.map((t) => {
-        const is_primary = !withPhotos.has(t.id) && !withTags.has(t.id);
-        return {
+          .select("id")
+          .eq("person_id", newTagPerson.id)
+          .eq("is_primary", true)
+          .limit(1);
+        const is_primary = !personPrimaryTag || personPrimaryTag.length === 0;
+        const { error: insErr } = await supabase.from("photo_tags").insert({
           photo_id: photoId,
-          person_id: t.id,
+          person_id: newTagPerson.id,
           user_id: user.id,
           is_primary,
-        };
-      });
-      if (rows.length > 0) {
-        const { error: insErr } = await supabase.from("photo_tags").insert(rows);
+          crop_x: 50,
+          crop_y: 50,
+          crop_zoom: 1.0,
+        });
         if (insErr) {
           setTagModalError(insErr.message);
           return;
@@ -3035,15 +3043,22 @@ export default function PersonProfilePage() {
       const { error: upErr } = await supabase
         .from("photos")
         .update({
-          crop_x: cx,
-          crop_y: cy,
-          crop_zoom: cz,
           photo_date: dateTrim === "" ? null : dateTrim,
         })
         .eq("id", photoId)
         .eq("user_id", user.id);
       if (upErr) {
         setPhotoSetupError(upErr.message);
+        return;
+      }
+      const { error: cropErr } = await supabase
+        .from("photo_tags")
+        .update({ crop_x: cx, crop_y: cy, crop_zoom: cz })
+        .eq("photo_id", photoId)
+        .eq("person_id", personId)
+        .eq("user_id", user.id);
+      if (cropErr) {
+        setPhotoSetupError(cropErr.message);
         return;
       }
       const setupTagPersonIds = photoSetupTags.map((t) => t.id);
@@ -3266,7 +3281,10 @@ export default function PersonProfilePage() {
       return;
     }
     setDeletePersonOpen(false);
-    router.push(backToTreeHref);
+    const deletedTreeId = (person.tree_id ?? "").trim();
+    router.push(
+      deletedTreeId !== "" ? `/dashboard/${deletedTreeId}` : "/dashboard"
+    );
     router.refresh();
   }
 
@@ -4231,7 +4249,7 @@ export default function PersonProfilePage() {
                 role="menuitem"
                 style={{
                   ...headerMenuItemBaseStyle,
-                  color: "#8B3A3A",
+                  color: "var(--dg-danger)",
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = colors.parchment;

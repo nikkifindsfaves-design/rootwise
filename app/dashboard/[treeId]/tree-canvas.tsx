@@ -419,8 +419,16 @@ function computeExplicitTreeLayout(
   };
 }
 
-function TreeCanvasZoomControls() {
+function TreeCanvasZoomControls({
+  unlinkedPeople,
+  onSelectUnlinkedPerson,
+}: {
+  unlinkedPeople: TreeCanvasPerson[];
+  onSelectUnlinkedPerson: (personId: string) => void;
+}) {
   const { zoomIn, zoomOut, resetTransform } = useControls();
+  const [unlinkedOpen, setUnlinkedOpen] = useState(false);
+  const unlinkedRef = useRef<HTMLDivElement>(null);
   const btnBase: CSSProperties = {
     fontFamily: sans,
     minWidth: 36,
@@ -442,17 +450,115 @@ function TreeCanvasZoomControls() {
     transition: "background-color 0.15s, border-color 0.15s",
   };
 
+  useEffect(() => {
+    if (!unlinkedOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const root = unlinkedRef.current;
+      if (!root || root.contains(e.target as Node)) return;
+      setUnlinkedOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [unlinkedOpen]);
+
   return (
     <div
-      className="pointer-events-auto absolute bottom-4 right-4 z-20 flex flex-col gap-1 rounded-md border p-1.5 shadow-sm"
-      style={{
-        backgroundColor: colors.parchment,
-        borderColor: colors.brownBorder,
-        boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
-      }}
-      role="toolbar"
-      aria-label="Canvas zoom"
+      className="pointer-events-auto absolute bottom-4 right-4 z-20 flex flex-col items-end gap-2"
     >
+      {unlinkedPeople.length > 0 ? (
+        <div ref={unlinkedRef} className="relative">
+          {unlinkedOpen ? (
+            <div
+              className="absolute bottom-full right-0 mb-2 w-64 max-h-64 overflow-y-auto rounded-md border p-2 shadow-sm"
+              style={{
+                backgroundColor: colors.parchment,
+                borderColor: colors.brownBorder,
+                boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
+              }}
+            >
+              <div className="mb-1 flex items-center justify-between">
+                <p
+                  className="text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Unlinked people
+                </p>
+                <button
+                  type="button"
+                  className="rounded border px-1.5 py-0 text-xs"
+                  style={{
+                    fontFamily: sans,
+                    borderColor: colors.brownBorder,
+                    color: colors.brownDark,
+                    backgroundColor: colors.cream,
+                  }}
+                  aria-label="Close unlinked people list"
+                  onClick={() => setUnlinkedOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <ul className="space-y-1">
+                {unlinkedPeople.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded border px-2 py-1 text-left text-sm hover:opacity-90"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownBorder,
+                        color: colors.brownDark,
+                        backgroundColor: colors.cream,
+                      }}
+                      onClick={() => {
+                        onSelectUnlinkedPerson(p.id);
+                        setUnlinkedOpen(false);
+                      }}
+                    >
+                      {displayName(p)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="relative rounded-md border px-2 py-1.5 text-sm font-semibold"
+            style={{
+              fontFamily: sans,
+              color: colors.brownDark,
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
+            }}
+            aria-label="Show unlinked people"
+            onClick={() => setUnlinkedOpen((v) => !v)}
+          >
+            ⚭
+            <span
+              className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full border px-1 text-[11px] leading-4"
+              style={{
+                borderColor: colors.brownBorder,
+                backgroundColor: colors.cream,
+                color: colors.brownDark,
+              }}
+            >
+              {unlinkedPeople.length}
+            </span>
+          </button>
+        </div>
+      ) : null}
+      <div
+        className="flex flex-col gap-1 rounded-md border p-1.5 shadow-sm"
+        style={{
+          backgroundColor: colors.parchment,
+          borderColor: colors.brownBorder,
+          boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
+        }}
+        role="toolbar"
+        aria-label="Canvas zoom"
+      >
       <button
         type="button"
         className="dg-tree-zoom-btn"
@@ -485,6 +591,7 @@ function TreeCanvasZoomControls() {
       >
         Reset
       </button>
+      </div>
     </div>
   );
 }
@@ -645,6 +752,7 @@ function parseTaggedPrimaryPhotoRow(
 }
 
 const TREE_NODE_AVATAR_VP = 40;
+const TREE_PHOTO_CROP_PREVIEW_PX = 200;
 
 function cropCoverRenderedSize(
   naturalW: number,
@@ -691,6 +799,26 @@ function cropPercentToOffsetCover(
     renderedH,
     viewportPx
   );
+}
+
+function offsetToCropPercentCover(
+  offset: { x: number; y: number },
+  renderedW: number,
+  renderedH: number,
+  viewportPx: number
+): { x: number; y: number } {
+  const spanX = Math.max(0, renderedW - viewportPx);
+  const spanY = Math.max(0, renderedH - viewportPx);
+  return {
+    x:
+      spanX > 0
+        ? Math.min(100, Math.max(0, (-offset.x / spanX) * 100))
+        : 50,
+    y:
+      spanY > 0
+        ? Math.min(100, Math.max(0, (-offset.y / spanY) * 100))
+        : 50,
+  };
 }
 
 function TreeNodeAvatarImg({
@@ -781,8 +909,19 @@ export default function TreeCanvas({
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
-  const [photoSelectedPerson, setPhotoSelectedPerson] =
-    useState<TreeCanvasPerson | null>(null);
+  const [photoSelectedPersons, setPhotoSelectedPersons] = useState<
+    TreeCanvasPerson[]
+  >([]);
+  const [cropX, setCropX] = useState(50);
+  const [cropY, setCropY] = useState(50);
+  const [cropZoom, setCropZoom] = useState(1.0);
+  const [photoCropNaturalSize, setPhotoCropNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
+  const [photoCropDragging, setPhotoCropDragging] = useState(false);
+  const photoCropMouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const photoCropTouchDragCleanupRef = useRef<(() => void) | null>(null);
   const [photoPersonSearch, setPhotoPersonSearch] = useState("");
   const [photoUploadSaving, setPhotoUploadSaving] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
@@ -834,6 +973,15 @@ export default function TreeCanvas({
     return m;
   }, [mergedPersons]);
 
+  const unlinkedPeople = useMemo(() => {
+    const linkedIds = new Set<string>();
+    for (const rel of relationships) {
+      if (rel.person_a_id) linkedIds.add(rel.person_a_id);
+      if (rel.person_b_id) linkedIds.add(rel.person_b_id);
+    }
+    return mergedPersons.filter((p) => !linkedIds.has(p.id));
+  }, [mergedPersons, relationships]);
+
   const personIdsRef = useRef(personIds);
   personIdsRef.current = personIds;
 
@@ -851,22 +999,7 @@ export default function TreeCanvas({
       setPrimaryPhotoMap({});
       return;
     }
-    const { data: photosData, error: photosError } = await supabase
-      .from("photos")
-      .select("person_id, file_url, natural_width, natural_height, crop_x, crop_y, crop_zoom")
-      .eq("user_id", user.id)
-      .eq("is_primary", true)
-      .in("person_id", ids);
-    if (photosError) {
-      return;
-    }
     const next: Record<string, ClientPrimaryPhotoRow> = {};
-    for (const row of photosData ?? []) {
-      const parsed = parseClientPrimaryPhotoRow(row as Record<string, unknown>);
-      if (parsed && !next[parsed.person_id]) {
-        next[parsed.person_id] = parsed;
-      }
-    }
 
     const { data: tagsData, error: tagsError } = await supabase
       .from("photo_tags")
@@ -880,7 +1013,10 @@ export default function TreeCanvas({
         const person_id = String(r.person_id ?? "").trim();
         if (!person_id) continue;
 
-        const photosField = r.photos as Record<string, unknown> | null;
+        const photosRaw = r.photos;
+        const photosField = (
+          Array.isArray(photosRaw) ? photosRaw[0] : photosRaw
+        ) as Record<string, unknown> | null;
         const file_url = String(photosField?.file_url ?? "").trim();
         if (!file_url) continue;
 
@@ -972,31 +1108,189 @@ export default function TreeCanvas({
       return null;
     });
     setPhotoFile(null);
-    setPhotoSelectedPerson(null);
+    setPhotoSelectedPersons([]);
+    setCropX(50);
+    setCropY(50);
+    setCropZoom(1.0);
+    setPhotoCropDragging(false);
+    setPhotoCropNaturalSize(null);
     setPhotoPersonSearch("");
     setPhotoModalOpen(true);
   }, []);
 
   const closePhotoModal = useCallback(() => {
     if (photoUploadSaving) return;
+    photoCropMouseDragCleanupRef.current?.();
+    photoCropTouchDragCleanupRef.current?.();
     setPhotoPreviewUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
     setPhotoModalOpen(false);
     setPhotoFile(null);
-    setPhotoSelectedPerson(null);
+    setPhotoSelectedPersons([]);
+    setCropX(50);
+    setCropY(50);
+    setCropZoom(1.0);
+    setPhotoCropDragging(false);
+    setPhotoCropNaturalSize(null);
     setPhotoPersonSearch("");
     setPhotoUploadError(null);
   }, [photoUploadSaving]);
+
+  const handlePhotoCropCircleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!photoCropNaturalSize) return;
+      e.preventDefault();
+      photoCropMouseDragCleanupRef.current?.();
+      const { w: rw, h: rh } = cropCoverRenderedSize(
+        photoCropNaturalSize.w,
+        photoCropNaturalSize.h,
+        TREE_PHOTO_CROP_PREVIEW_PX,
+        cropZoom
+      );
+      const startOffset = cropPercentToOffsetCover(
+        cropX,
+        cropY,
+        rw,
+        rh,
+        TREE_PHOTO_CROP_PREVIEW_PX
+      );
+      const startX = e.clientX;
+      const startY = e.clientY;
+      setPhotoCropDragging(true);
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        const next = clampCropOffsetCover(
+          { x: startOffset.x + dx, y: startOffset.y + dy },
+          rw,
+          rh,
+          TREE_PHOTO_CROP_PREVIEW_PX
+        );
+        const nextPct = offsetToCropPercentCover(
+          next,
+          rw,
+          rh,
+          TREE_PHOTO_CROP_PREVIEW_PX
+        );
+        setCropX(nextPct.x);
+        setCropY(nextPct.y);
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        photoCropMouseDragCleanupRef.current = null;
+        setPhotoCropDragging(false);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      photoCropMouseDragCleanupRef.current = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+    },
+    [photoCropNaturalSize, cropZoom, cropX, cropY]
+  );
+
+  const handlePhotoCropCircleTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      if (!photoCropNaturalSize) return;
+      const t = e.touches[0];
+      if (!t) return;
+      e.preventDefault();
+      photoCropTouchDragCleanupRef.current?.();
+      const { w: rw, h: rh } = cropCoverRenderedSize(
+        photoCropNaturalSize.w,
+        photoCropNaturalSize.h,
+        TREE_PHOTO_CROP_PREVIEW_PX,
+        cropZoom
+      );
+      const startOffset = cropPercentToOffsetCover(
+        cropX,
+        cropY,
+        rw,
+        rh,
+        TREE_PHOTO_CROP_PREVIEW_PX
+      );
+      const startX = t.clientX;
+      const startY = t.clientY;
+      setPhotoCropDragging(true);
+      const onMove = (ev: TouchEvent) => {
+        const nt = ev.touches[0];
+        if (!nt) return;
+        const dx = nt.clientX - startX;
+        const dy = nt.clientY - startY;
+        const next = clampCropOffsetCover(
+          { x: startOffset.x + dx, y: startOffset.y + dy },
+          rw,
+          rh,
+          TREE_PHOTO_CROP_PREVIEW_PX
+        );
+        const nextPct = offsetToCropPercentCover(
+          next,
+          rw,
+          rh,
+          TREE_PHOTO_CROP_PREVIEW_PX
+        );
+        setCropX(nextPct.x);
+        setCropY(nextPct.y);
+      };
+      const onEnd = () => {
+        window.removeEventListener("touchmove", onMove);
+        window.removeEventListener("touchend", onEnd);
+        window.removeEventListener("touchcancel", onEnd);
+        photoCropTouchDragCleanupRef.current = null;
+        setPhotoCropDragging(false);
+      };
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("touchend", onEnd);
+      window.addEventListener("touchcancel", onEnd);
+      photoCropTouchDragCleanupRef.current = () => {
+        window.removeEventListener("touchmove", onMove);
+        window.removeEventListener("touchend", onEnd);
+        window.removeEventListener("touchcancel", onEnd);
+      };
+    },
+    [photoCropNaturalSize, cropZoom, cropX, cropY]
+  );
+
+  useEffect(() => {
+    if (photoFile) {
+      void (async () => {
+        try {
+          const { w, h } = await getNaturalSize(photoFile);
+          setPhotoCropNaturalSize(
+            w > 0 && h > 0
+              ? {
+                  w,
+                  h,
+                }
+              : null
+          );
+        } catch {
+          setPhotoCropNaturalSize(null);
+        }
+      })();
+    } else {
+      setPhotoCropNaturalSize(null);
+    }
+  }, [photoFile]);
+
+  useEffect(() => {
+    return () => {
+      photoCropMouseDragCleanupRef.current?.();
+      photoCropTouchDragCleanupRef.current?.();
+    };
+  }, []);
 
   const saveTreePhoto = useCallback(async () => {
     if (!photoFile) {
       setPhotoUploadError("Please select a photo.");
       return;
     }
-    if (!photoSelectedPerson) {
-      setPhotoUploadError("Please select who this photo is of.");
+    if (photoSelectedPersons.length === 0) {
+      setPhotoUploadError("Please select at least one person.");
       return;
     }
     setPhotoUploadSaving(true);
@@ -1011,18 +1305,16 @@ export default function TreeCanvas({
         return;
       }
 
-      const personId = photoSelectedPerson.id;
-      const { data: existingPhotos } = await supabase
-        .from("photos")
-        .select("id")
-        .eq("person_id", personId);
-
-      const isPrimary = !existingPhotos || existingPhotos.length === 0;
+      const primaryPersonId = photoSelectedPersons[0]?.id ?? "";
+      if (!primaryPersonId) {
+        setPhotoUploadError("Please select at least one person.");
+        return;
+      }
 
       const { w: naturalWidth, h: naturalHeight } =
         await getNaturalSize(photoFile);
       const ext = extFromImageFile(photoFile);
-      const path = `${user.id}/${personId}/${crypto.randomUUID()}.${ext}`;
+      const path = `${user.id}/${primaryPersonId}/${crypto.randomUUID()}.${ext}`;
 
       const { error: upErr } = await supabase.storage
         .from("photos")
@@ -1038,20 +1330,46 @@ export default function TreeCanvas({
       const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
       const file_url = pub.publicUrl;
 
-      const { error: insErr } = await supabase.from("photos").insert({
-        user_id: user.id,
-        person_id: personId,
-        file_url,
-        is_primary: isPrimary,
-        ...(naturalWidth > 0 && naturalHeight > 0
-          ? { natural_width: naturalWidth, natural_height: naturalHeight }
-          : {}),
-      });
+      const { data: insertedPhoto, error: insErr } = await supabase
+        .from("photos")
+        .insert({
+          user_id: user.id,
+          file_url,
+          ...(naturalWidth > 0 && naturalHeight > 0
+            ? { natural_width: naturalWidth, natural_height: naturalHeight }
+            : {}),
+        })
+        .select("id")
+        .single();
 
-      if (insErr) {
+      if (insErr || !insertedPhoto) {
         await supabase.storage.from("photos").remove([path]);
-        setPhotoUploadError(insErr.message);
+        setPhotoUploadError(insErr?.message ?? "Could not save photo.");
         return;
+      }
+      for (const selectedPerson of photoSelectedPersons) {
+        const { data: existingPrimaryTags } = await supabase
+          .from("photo_tags")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("person_id", selectedPerson.id)
+          .eq("is_primary", true)
+          .limit(1);
+        const isPrimary = !existingPrimaryTags || existingPrimaryTags.length === 0;
+        const { error: tagErr } = await supabase.from("photo_tags").insert({
+          photo_id: insertedPhoto.id,
+          person_id: selectedPerson.id,
+          user_id: user.id,
+          is_primary: isPrimary,
+          crop_x: cropX,
+          crop_y: cropY,
+          crop_zoom: cropZoom,
+        });
+        if (tagErr) {
+          await supabase.storage.from("photos").remove([path]);
+          setPhotoUploadError(tagErr.message);
+          return;
+        }
       }
 
       setPhotoPreviewUrl((prev) => {
@@ -1060,14 +1378,19 @@ export default function TreeCanvas({
       });
       setPhotoModalOpen(false);
       setPhotoFile(null);
-      setPhotoSelectedPerson(null);
+      setPhotoSelectedPersons([]);
+      setCropX(50);
+      setCropY(50);
+      setCropZoom(1.0);
+      setPhotoCropDragging(false);
+      setPhotoCropNaturalSize(null);
       setPhotoPersonSearch("");
       setPhotoUploadError(null);
       await refetchPrimaryPhotos();
     } finally {
       setPhotoUploadSaving(false);
     }
-  }, [photoFile, photoSelectedPerson, refetchPrimaryPhotos]);
+  }, [photoFile, photoSelectedPersons, cropX, cropY, cropZoom, refetchPrimaryPhotos]);
 
   const submitAddPerson = useCallback(async () => {
     const first_name = addFirst.trim();
@@ -1473,6 +1796,9 @@ export default function TreeCanvas({
             return URL.createObjectURL(f);
           });
           setPhotoFile(f);
+          setCropX(50);
+          setCropY(50);
+          setCropZoom(1.0);
         }}
       />
 
@@ -1480,8 +1806,8 @@ export default function TreeCanvas({
         <nav
           className="shrink-0 border-b px-4 py-3 sm:px-6"
           style={{
-            backgroundColor: colors.cream,
-            borderColor: `${colors.brownBorder}55`,
+            backgroundColor: "var(--dg-parchment-deep)",
+            borderColor: "var(--dg-brown-border)",
           }}
         >
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
@@ -1813,7 +2139,12 @@ export default function TreeCanvas({
                 })}
                 </div>
               </TransformComponent>
-              <TreeCanvasZoomControls />
+              <TreeCanvasZoomControls
+                unlinkedPeople={unlinkedPeople}
+                onSelectUnlinkedPerson={(personId) => {
+                  zoomToPerson(personId);
+                }}
+              />
             </div>
           </TransformWrapper>
         </div>
@@ -1905,20 +2236,60 @@ export default function TreeCanvas({
 
             <div className="mb-6 flex justify-center">
               <div
-                className="overflow-hidden rounded-full bg-[var(--dg-avatar-bg)] ring-2"
+                className="relative overflow-hidden rounded-full bg-[var(--dg-avatar-bg)] ring-2"
                 style={{
-                  width: 200,
-                  height: 200,
+                  width: TREE_PHOTO_CROP_PREVIEW_PX,
+                  height: TREE_PHOTO_CROP_PREVIEW_PX,
                   borderColor: colors.brownBorder,
+                  cursor: photoCropDragging ? "grabbing" : "grab",
+                  touchAction: "none",
                 }}
+                onMouseDown={handlePhotoCropCircleMouseDown}
+                onTouchStart={handlePhotoCropCircleTouchStart}
               >
                 {photoPreviewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photoPreviewUrl}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
+                  (() => {
+                    const snw = photoCropNaturalSize?.w ?? 0;
+                    const snh = photoCropNaturalSize?.h ?? 0;
+                    const hasNatural = snw > 0 && snh > 0;
+                    const rendered = hasNatural
+                      ? cropCoverRenderedSize(
+                          snw,
+                          snh,
+                          TREE_PHOTO_CROP_PREVIEW_PX,
+                          cropZoom
+                        )
+                      : {
+                          w: TREE_PHOTO_CROP_PREVIEW_PX * cropZoom,
+                          h: TREE_PHOTO_CROP_PREVIEW_PX * cropZoom,
+                        };
+                    const { w: rw, h: rh } = rendered;
+                    const off = hasNatural
+                      ? cropPercentToOffsetCover(
+                          cropX,
+                          cropY,
+                          rw,
+                          rh,
+                          TREE_PHOTO_CROP_PREVIEW_PX
+                        )
+                      : { x: 0, y: 0 };
+                    return (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={photoPreviewUrl}
+                        alt=""
+                        draggable={false}
+                        className="absolute select-none"
+                        style={{
+                          left: off.x,
+                          top: off.y,
+                          width: rw,
+                          height: rh,
+                          maxWidth: "none",
+                        }}
+                      />
+                    );
+                  })()
                 ) : (
                   <div
                     className="flex h-full w-full items-center justify-center text-sm"
@@ -1932,6 +2303,65 @@ export default function TreeCanvas({
                 )}
               </div>
             </div>
+            {photoPreviewUrl ? (
+              <div className="mb-4">
+                <label
+                  className="mb-2 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="tree-photo-crop-zoom"
+                >
+                  Zoom
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded border px-2 py-1 text-sm"
+                    style={{
+                      fontFamily: sans,
+                      borderColor: colors.brownBorder,
+                      color: colors.brownDark,
+                      backgroundColor: colors.cream,
+                    }}
+                    onClick={() => setCropZoom((z) => Math.max(1, +(z - 0.1).toFixed(2)))}
+                  >
+                    -
+                  </button>
+                  <input
+                    id="tree-photo-crop-zoom"
+                    type="range"
+                    min={1}
+                    max={3}
+                    step={0.01}
+                    value={cropZoom}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      if (!Number.isFinite(next)) return;
+                      setCropZoom(Math.min(3, Math.max(1, next)));
+                    }}
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    className="rounded border px-2 py-1 text-sm"
+                    style={{
+                      fontFamily: sans,
+                      borderColor: colors.brownBorder,
+                      color: colors.brownDark,
+                      backgroundColor: colors.cream,
+                    }}
+                    onClick={() => setCropZoom((z) => Math.min(3, +(z + 0.1).toFixed(2)))}
+                  >
+                    +
+                  </button>
+                  <span
+                    className="w-12 text-right text-sm"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    {Number(cropZoom.toFixed(2))}x
+                  </span>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mb-4 flex justify-center">
               <button
@@ -1966,26 +2396,35 @@ export default function TreeCanvas({
                 className="mb-2 w-full"
                 style={modalInputStyle}
               />
-              {photoSelectedPerson ? (
-                <div
-                  className="mb-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm"
-                  style={{
-                    fontFamily: sans,
-                    borderColor: colors.brownBorder,
-                    backgroundColor: colors.cream,
-                    color: colors.brownDark,
-                  }}
-                >
-                  {displayName(photoSelectedPerson)}
-                  <button
-                    type="button"
-                    className="ml-0.5 rounded px-1 leading-none"
-                    style={{ color: colors.brownMid }}
-                    aria-label="Clear selected person"
-                    onClick={() => setPhotoSelectedPerson(null)}
-                  >
-                    ×
-                  </button>
+              {photoSelectedPersons.length > 0 ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {photoSelectedPersons.map((selectedPerson) => (
+                    <div
+                      key={selectedPerson.id}
+                      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.cream,
+                        color: colors.brownDark,
+                      }}
+                    >
+                      {displayName(selectedPerson)}
+                      <button
+                        type="button"
+                        className="ml-0.5 rounded px-1 leading-none"
+                        style={{ color: colors.brownMid }}
+                        aria-label={`Remove ${displayName(selectedPerson)}`}
+                        onClick={() =>
+                          setPhotoSelectedPersons((prev) =>
+                            prev.filter((x) => x.id !== selectedPerson.id)
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
                 </div>
               ) : null}
               <ul
@@ -2006,7 +2445,11 @@ export default function TreeCanvas({
                   </li>
                 ) : (
                   photoPersonOptions.map((p) => (
-                    <li key={p.id} role="option" aria-selected={false}>
+                    <li
+                      key={p.id}
+                      role="option"
+                      aria-selected={photoSelectedPersons.some((x) => x.id === p.id)}
+                    >
                       <button
                         type="button"
                         className="w-full px-3 py-2 text-left text-sm hover:opacity-90"
@@ -2014,16 +2457,22 @@ export default function TreeCanvas({
                           fontFamily: sans,
                           color: colors.brownDark,
                           backgroundColor:
-                            photoSelectedPerson?.id === p.id
+                            photoSelectedPersons.some((x) => x.id === p.id)
                               ? "var(--dg-parchment-deep)"
                               : "transparent",
                         }}
                         onClick={() => {
-                          setPhotoSelectedPerson(p);
+                          setPhotoSelectedPersons((prev) =>
+                            prev.some((x) => x.id === p.id)
+                              ? prev.filter((x) => x.id !== p.id)
+                              : [...prev, p]
+                          );
                           setPhotoPersonSearch("");
                         }}
                       >
-                        {displayName(p)}
+                        {photoSelectedPersons.some((x) => x.id === p.id)
+                          ? `✓ ${displayName(p)}`
+                          : displayName(p)}
                       </button>
                     </li>
                   ))

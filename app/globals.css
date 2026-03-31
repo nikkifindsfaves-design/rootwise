@@ -36,33 +36,31 @@
 }
 
 .dark {
-  --background: #1c1108;
+  --background: #1a1714;
   --foreground: #e8d5b0;
-
-  --dg-bg-main: #1c1108;
-  --dg-parchment: #1F1408;
-  --dg-parchment-deep: #2e2215;
-  --dg-cream: #2A1C0E;
+  --dg-bg-main: #1a1714;
+  --dg-parchment: #3d3628;
+  --dg-parchment-deep: #2e2b24;
+  --dg-cream: #252018;
   --dg-brown-dark: #e8d5b0;
-  --dg-brown-mid: #d4b896;
-  --dg-brown-muted: #B09070;
-  --dg-brown-border: #5A3E28;
-  --dg-brown-outline: #8b6423;
-  --dg-forest: #3d6b55;
-  --dg-avatar-bg: #3d2914;
-
+  --dg-brown-mid: #c4a882;
+  --dg-brown-muted: #8c7860;
+  --dg-brown-border: #6b5540;
+  --dg-brown-outline: #7a5c3a;
+  --dg-forest: #4a8068;
+  --dg-avatar-bg: #3d3028;
   --dg-paper-border: #5c4a38;
   --dg-primary-bg: #8b6423;
   --dg-primary-fg: #1a1005;
-  --dg-danger: #c47878;
+  --dg-danger: #f4a0a0;
   --dg-danger-mid: #e8b4b4;
   --dg-badge-tan-bg: #9a7a55;
   --dg-badge-tan-fg: #1a1005;
-  --dg-gradient-hero-top: rgb(26 16 5 / 0.5);
+  --dg-gradient-hero-top: rgb(26 23 20 / 0.5);
   --dg-shadow-rgb: 0 0 0;
-  --dg-photo-scrim: #0d0805;
-  --dg-image-dim: #1a0f08;
-  --dg-inset-highlight: rgb(255 255 255 / 0.08);
+  --dg-photo-scrim: #0d0b09;
+  --dg-image-dim: #1a1410;
+  --dg-inset-highlight: rgb(255 255 255 / 0.06);
   --dg-modal-backdrop: rgb(0 0 0 / 0.55);
   --dg-modal-backdrop-deep: rgb(0 0 0 / 0.5);
   --dg-error-border: #a05050;
