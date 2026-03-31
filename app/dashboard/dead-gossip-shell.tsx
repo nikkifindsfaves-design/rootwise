@@ -268,9 +268,7 @@ export default function DeadGossipShell({
         .from("photos")
         .insert({
           user_id: user.id,
-          person_id: firstTagId,
           file_url,
-          is_primary: false,
           photo_date: dateTrim === "" ? null : dateTrim,
           ...(naturalWidth > 0 && naturalHeight > 0
             ? { natural_width: naturalWidth, natural_height: naturalHeight }
@@ -283,11 +281,17 @@ export default function DeadGossipShell({
         return;
       }
       const photoId = (newPhoto as { id: string }).id;
-      const tagRows = photoUploadTags.map((t) => ({
+      const tagRows = [
+        {
         photo_id: photoId,
-        person_id: t.id,
+        person_id: firstTagId,
         user_id: user.id,
-      }));
+        is_primary: false,
+        crop_x: 50,
+        crop_y: 50,
+        crop_zoom: 1.0,
+      },
+      ];
       const { error: tagErr } = await supabase.from("photo_tags").insert(tagRows);
       if (tagErr) {
         setPhotoUploadError(tagErr.message);

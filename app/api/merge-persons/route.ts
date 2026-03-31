@@ -229,7 +229,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { error: phErr } = await supabase
-    .from("photos")
+    .from("photo_tags")
     .update({ person_id: primaryId })
     .eq("person_id", duplicateId);
 

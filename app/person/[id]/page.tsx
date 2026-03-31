@@ -1596,13 +1596,13 @@ export default function PersonProfilePage() {
       };
 
       const { data: relPhotos, error: relPhErr } = await supabase
-        .from("photos")
+        .from("photo_tags")
         .select(
-          "person_id, file_url, is_primary, crop_x, crop_y, crop_zoom, natural_width, natural_height"
+          "person_id, crop_x, crop_y, crop_zoom, photos(file_url, natural_width, natural_height)"
         )
+        .eq("is_primary", true)
         .eq("user_id", user.id)
-        .in("person_id", relatedIds)
-        .order("created_at", { ascending: true });
+        .in("person_id", relatedIds);
 
       if (relPhErr) {
         setError(relPhErr.message);
@@ -1615,31 +1615,47 @@ export default function PersonProfilePage() {
       for (const row of relPhotos ?? []) {
         const r = row as {
           person_id?: string;
-          file_url?: string | null;
-          is_primary?: boolean;
           crop_x?: number | null;
           crop_y?: number | null;
           crop_zoom?: number | null;
-          natural_width?: number | null;
-          natural_height?: number | null;
+          photos?:
+            | {
+                file_url?: string | null;
+                natural_width?: number | null;
+                natural_height?: number | null;
+              }
+            | null;
         };
         const pid = r.person_id;
-        const url = typeof r.file_url === "string" ? r.file_url.trim() : "";
+        const photoObj =
+          r.photos && typeof r.photos === "object"
+            ? (r.photos as {
+                file_url?: string | null;
+                natural_width?: number | null;
+                natural_height?: number | null;
+              })
+            : null;
+        const url =
+          photoObj && typeof photoObj.file_url === "string"
+            ? photoObj.file_url.trim()
+            : "";
         if (typeof pid !== "string" || pid === "" || url === "") continue;
         const pick: RelPrimaryPhotoPick = {
           file_url: url,
           ...(typeof r.crop_x === "number" ? { crop_x: r.crop_x } : {}),
           ...(typeof r.crop_y === "number" ? { crop_y: r.crop_y } : {}),
           ...(typeof r.crop_zoom === "number" ? { crop_zoom: r.crop_zoom } : {}),
-          ...(typeof r.natural_width === "number" && r.natural_width > 0
-            ? { natural_width: r.natural_width }
+          ...(typeof photoObj?.natural_width === "number" &&
+          photoObj.natural_width > 0
+            ? { natural_width: photoObj.natural_width }
             : {}),
-          ...(typeof r.natural_height === "number" && r.natural_height > 0
-            ? { natural_height: r.natural_height }
+          ...(typeof photoObj?.natural_height === "number" &&
+          photoObj.natural_height > 0
+            ? { natural_height: photoObj.natural_height }
             : {}),
         };
         if (!firstByPerson.has(pid)) firstByPerson.set(pid, pick);
-        if (r.is_primary === true && !preferredByPerson.has(pid)) {
+        if (!preferredByPerson.has(pid)) {
           preferredByPerson.set(pid, pick);
         }
       }
@@ -2440,21 +2456,6 @@ export default function PersonProfilePage() {
       setPhotoUploadError("Not signed in.");
       return;
     }
-    const rowForPrimary =
-      photoRows.find(
-        (r) => typeof r.id === "string" && r.id === photoRowId
-      ) ?? null;
-    const saveToTag = rowForPrimary?.__crop_save_to_tag === true;
-
-    const { error: clearPhotosErr } = await supabase
-      .from("photos")
-      .update({ is_primary: false })
-      .eq("person_id", personId)
-      .eq("user_id", user.id);
-    if (clearPhotosErr) {
-      setPhotoUploadError(clearPhotosErr.message);
-      return;
-    }
     const { error: clearTagsErr } = await supabase
       .from("photo_tags")
       .update({ is_primary: false })
@@ -2465,28 +2466,15 @@ export default function PersonProfilePage() {
       return;
     }
 
-    if (saveToTag) {
-      const { error: setTagErr } = await supabase
-        .from("photo_tags")
-        .update({ is_primary: true })
-        .eq("photo_id", photoRowId)
-        .eq("person_id", personId)
-        .eq("user_id", user.id);
-      if (setTagErr) {
-        setPhotoUploadError(setTagErr.message);
-        return;
-      }
-    } else {
-      const { error: setPhotoErr } = await supabase
-        .from("photos")
-        .update({ is_primary: true })
-        .eq("id", photoRowId)
-        .eq("person_id", personId)
-        .eq("user_id", user.id);
-      if (setPhotoErr) {
-        setPhotoUploadError(setPhotoErr.message);
-        return;
-      }
+    const { error: setTagErr } = await supabase
+      .from("photo_tags")
+      .update({ is_primary: true })
+      .eq("person_id", personId)
+      .eq("photo_id", photoRowId)
+      .eq("user_id", user.id);
+    if (setTagErr) {
+      setPhotoUploadError(setTagErr.message);
+      return;
     }
     await load();
   }
