@@ -14,6 +14,7 @@ const MERGE_FIELDS = [
   "last_name",
   "birth_date",
   "death_date",
+  "birth_place",
   "gender",
   "notes",
 ] as const;
@@ -27,6 +28,7 @@ type PendingPersonBody = {
   last_name?: unknown;
   birth_date?: unknown;
   death_date?: unknown;
+  birth_place?: unknown;
   gender?: unknown;
   notes?: unknown;
   relationships?: unknown;
@@ -75,6 +77,10 @@ function isMergeField(k: string): k is MergeField {
   return (MERGE_FIELDS as readonly string[]).includes(k);
 }
 
+function isEmptyDbField(v: string | null | undefined): boolean {
+  return v == null || String(v).trim() === "";
+}
+
 function toPersonPayload(p: PendingPersonBody) {
   const first_name = String(p.first_name ?? "").trim();
   const last_name = String(p.last_name ?? "").trim();
@@ -84,6 +90,7 @@ function toPersonPayload(p: PendingPersonBody) {
     middle_name: String(p.middle_name ?? "").trim() || null,
     birth_date: String(p.birth_date ?? "").trim() || null,
     death_date: String(p.death_date ?? "").trim() || null,
+    birth_place: String(p.birth_place ?? "").trim() || null,
     gender: String(p.gender ?? "").trim() || "Unknown",
     notes: String(p.notes ?? "").trim() || null,
   };
@@ -104,6 +111,8 @@ function valueForMergeUpdate(
       return payload.birth_date;
     case "death_date":
       return payload.death_date;
+    case "birth_place":
+      return payload.birth_place;
     case "gender":
       return payload.gender;
     case "notes":
@@ -211,7 +220,7 @@ export async function POST(request: NextRequest) {
     if (existingId) {
       const { data: row, error: fetchErr } = await supabase
         .from("persons")
-        .select("id")
+        .select("id, birth_place")
         .eq("id", existingId)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -233,6 +242,15 @@ export async function POST(request: NextRequest) {
       for (const [fieldKey, choice] of Object.entries(fieldChoices)) {
         if (choice !== "record" || !isMergeField(fieldKey)) continue;
         updates[fieldKey] = valueForMergeUpdate(payload, fieldKey);
+      }
+
+      const existingBirthPlace = (row as { birth_place?: string | null })
+        .birth_place;
+      if (
+        isEmptyDbField(existingBirthPlace) &&
+        !isEmptyDbField(payload.birth_place)
+      ) {
+        updates.birth_place = payload.birth_place;
       }
 
       if (Object.keys(updates).length > 0) {
@@ -264,6 +282,7 @@ export async function POST(request: NextRequest) {
         last_name: payload.last_name,
         birth_date: payload.birth_date,
         death_date: payload.death_date,
+        birth_place: payload.birth_place,
         gender: payload.gender,
         notes: payload.notes,
       };

@@ -245,9 +245,13 @@ function computeExplicitTreeLayout(
   const personSet = new Set(personIds);
   const edges = parentChildEdges(relationships, personSet);
   const gen = assignGenerations(personIds, edges, rootId);
+  const reachable = reachableFromRoot(rootId, edges, personSet);
+  const floaterIds = personIds.filter((id) => !reachable.has(id));
+  const floaterSet = new Set(floaterIds);
 
   const byGen = new Map<number, string[]>();
   for (const id of personIds) {
+    if (floaterSet.has(id)) continue;
     const g = gen.get(id) ?? 0;
     if (!byGen.has(g)) byGen.set(g, []);
     byGen.get(g)!.push(id);
@@ -270,7 +274,6 @@ function computeExplicitTreeLayout(
 
   const parentsOf = buildParentsOfMap(edges);
   const childrenOf = buildChildrenOfMap(edges, personSet);
-  const reachable = reachableFromRoot(rootId, edges, personSet);
   const centerX = LAYOUT_CANVAS_W / 2;
   const xById = new Map<string, number>();
   const sortedIds = [...personIds].sort((a, b) => a.localeCompare(b));
@@ -347,7 +350,8 @@ function computeExplicitTreeLayout(
   for (let r = 0; r < 5; r++) {
     let moved = false;
     for (const ids of byGen.values()) {
-      const sorted = [...ids].sort((a, b) => {
+      const nonFloaters = ids.filter((id) => !floaterSet.has(id));
+      const sorted = [...nonFloaters].sort((a, b) => {
         const xa = posById.get(a)!.x;
         const xb = posById.get(b)!.x;
         if (xa !== xb) return xa - xb;
@@ -366,6 +370,23 @@ function computeExplicitTreeLayout(
     if (!moved) break;
   }
 
+  let maxConnectedY = LAYOUT_BASE_Y;
+  if (posById.size > 0) {
+    maxConnectedY = Math.max(...[...posById.values()].map((p) => p.y));
+  }
+
+  const floaterY = maxConnectedY + LAYOUT_GEN_DY * 2;
+  const floaterStep = LAYOUT_NODE_W + LAYOUT_MIN_NODE_GAP;
+  const sortedFloaters = [...floaterIds].sort((a, b) => a.localeCompare(b));
+  for (let i = 0; i < sortedFloaters.length; i++) {
+    const id = sortedFloaters[i]!;
+    posById.set(id, {
+      x: LAYOUT_V_PAD + i * floaterStep,
+      y: floaterY,
+      generation: -999,
+    });
+  }
+
   const positions = personIds
     .map((id) => {
       const p = posById.get(id);
@@ -382,6 +403,9 @@ function computeExplicitTreeLayout(
   }
   if (positions.length === 0) {
     maxBottom = LAYOUT_BASE_Y + LAYOUT_NODE_H;
+  }
+  if (floaterIds.length > 0) {
+    maxBottom = Math.max(maxBottom, floaterY + LAYOUT_NODE_H);
   }
   const contentHeight = Math.max(
     maxBottom + LAYOUT_V_PAD,
@@ -1263,8 +1287,8 @@ export default function TreeCanvas({
       const branchY =
         Math.min(...childLayouts.map((c) => c.p.y)) - PED_BRANCH_BAR_ABOVE_CHILD;
       const centers = childLayouts.map((c) => c.p.x + cx).sort((a, b) => a - b);
-      const barLeft = centers[0]!;
-      const barRight = centers[centers.length - 1]!;
+      const barLeft = Math.min(centers[0]!, midX);
+      const barRight = Math.max(centers[centers.length - 1]!, midX);
 
       out.push({
         key: `ped:couple:${pk}`,

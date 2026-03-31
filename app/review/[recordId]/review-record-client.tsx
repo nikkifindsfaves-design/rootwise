@@ -10,6 +10,7 @@ type AiPerson = {
   last_name?: string | null;
   birth_date?: string | null;
   death_date?: string | null;
+  birth_place?: string | null;
   gender?: string | null;
   notes?: string | null;
 };
@@ -70,6 +71,7 @@ type PersonForm = {
   last_name: string;
   birth_date: string;
   death_date: string;
+  birth_place: string;
   gender: string;
   notes: string;
 };
@@ -120,6 +122,7 @@ export type PendingReviewPayload = {
     last_name: string;
     birth_date: string | null;
     death_date: string | null;
+    birth_place: string | null;
     gender: string | null;
     notes: string | null;
     relationships: Array<{
@@ -219,6 +222,7 @@ function toForm(p: AiPerson): PersonForm {
     last_name: p.last_name ?? "",
     birth_date: formatDateString(p.birth_date ?? ""),
     death_date: formatDateString(p.death_date ?? ""),
+    birth_place: p.birth_place ?? "",
     gender: normalizeGenderForPendingReview(p.gender),
     notes: p.notes ?? "",
   };
@@ -528,14 +532,24 @@ export default function ReviewRecordClient({
         last_name: c.form.last_name.trim(),
         birth_date: c.form.birth_date.trim() || null,
         death_date: c.form.death_date.trim() || null,
+        birth_place: c.form.birth_place.trim() || null,
         gender: normalizeGenderForPendingReview(c.form.gender),
         notes: c.form.notes.trim() || null,
         relationships: c.relationships
           .map((r) => ({
             related_name: resolveRelationshipExportName(r, cards),
             relationship_type: r.relationshipType,
+            relatedPeerIndex: r.relatedPeerIndex,
           }))
-          .filter((r) => r.related_name !== ""),
+          .filter((r) => {
+            if (r.related_name === "") return false;
+            if (r.relatedPeerIndex !== null) {
+              const peer = cards[r.relatedPeerIndex];
+              if (peer && !peer.include) return false;
+            }
+            return true;
+          })
+          .map(({ relatedPeerIndex: _rp, ...rest }) => rest),
         events: c.events.map((e) => ({
           event_type: e.eventType,
           event_date: e.eventDate.trim() || null,
@@ -729,6 +743,19 @@ export default function ReviewRecordClient({
                                   ...item.form,
                                   death_date: e.target.value,
                                 },
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className={labelClass}>Birth place</label>
+                          <input
+                            className={inputClass}
+                            value={item.form.birth_place}
+                            onChange={(e) =>
+                              updateCard(item.key, {
+                                ...item,
+                                form: { ...item.form, birth_place: e.target.value },
                               })
                             }
                           />

@@ -3869,9 +3869,17 @@ export default function PersonProfilePage() {
     .join(" ");
 
   const headerGenderBadge = genderBadgeLabel(person.gender);
+  const headerBirthPlaceStr = person.birth_place?.trim() ?? "";
+  const headerHasBirthPlace = headerBirthPlaceStr.length > 0;
   const headerDateBits: string[] = [];
-  if (person.birth_date) {
+  if (person.birth_date && headerHasBirthPlace) {
+    headerDateBits.push(
+      `b. ${formatDateString(person.birth_date)}  ·  ${headerBirthPlaceStr}`
+    );
+  } else if (person.birth_date) {
     headerDateBits.push(`b. ${formatDateString(person.birth_date)}`);
+  } else if (headerHasBirthPlace) {
+    headerDateBits.push(headerBirthPlaceStr);
   }
   if (person.death_date) {
     headerDateBits.push(`d. ${formatDateString(person.death_date)}`);
