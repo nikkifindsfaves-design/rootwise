@@ -219,9 +219,17 @@ type EventRow = {
 };
 
 type RelRow = {
+  id?: string;
   person_a_id: string;
   person_b_id: string;
   relationship_type: string;
+};
+
+type RelationshipMeta = {
+  otherPersonId: string;
+  relationshipType: string;
+  personAId: string;
+  personBId: string;
 };
 
 type RecordRow = {
@@ -814,6 +822,7 @@ function FamilyMemberCard({
   crop_zoom,
   natural_width,
   natural_height,
+  onEditRelationship,
 }: {
   p: PersonRow;
   crop_x?: number | null;
@@ -821,6 +830,7 @@ function FamilyMemberCard({
   crop_zoom?: number | null;
   natural_width?: number | null;
   natural_height?: number | null;
+  onEditRelationship?: () => void;
 }) {
   const last = p.last_name.trim() || "—";
   const firstMiddle = [p.first_name, p.middle_name ?? ""]
@@ -870,7 +880,7 @@ function FamilyMemberCard({
   return (
     <Link
       href={`/person/${p.id}`}
-      className="flex gap-2 rounded-lg border p-2 transition hover:-translate-y-0.5"
+      className="relative flex gap-2 rounded-lg border p-2 transition hover:-translate-y-0.5"
       style={{
         borderColor: colors.brownBorder,
         backgroundColor: colors.cream,
@@ -879,6 +889,21 @@ function FamilyMemberCard({
         color: "inherit",
       }}
     >
+      {onEditRelationship ? (
+        <button
+          type="button"
+          className="absolute right-1.5 top-1.5 rounded px-1 text-xs"
+          style={{ color: colors.brownMuted }}
+          aria-label="Edit relationship"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onEditRelationship();
+          }}
+        >
+          ✎
+        </button>
+      ) : null}
       <div
         className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-1"
         style={{
@@ -946,9 +971,13 @@ function FamilyMemberCard({
 function FamilyGroup({
   title,
   members,
+  relationshipMetaByPersonId,
+  onEditRelationship,
 }: {
   title: string;
   members: PersonRow[];
+  relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
+  onEditRelationship: (meta: RelationshipMeta) => void;
 }) {
   if (members.length === 0) return null;
   return (
@@ -962,6 +991,9 @@ function FamilyGroup({
       <ul className="space-y-2">
         {members.map((p) => (
           <li key={p.id}>
+            {(() => {
+              const relMeta = relationshipMetaByPersonId[p.id];
+              return (
             <FamilyMemberCard
               p={p}
               crop_x={p.crop_x}
@@ -969,7 +1001,12 @@ function FamilyGroup({
               crop_zoom={p.crop_zoom}
               natural_width={p.natural_width}
               natural_height={p.natural_height}
+              onEditRelationship={
+                relMeta ? () => onEditRelationship(relMeta) : undefined
+              }
             />
+              );
+            })()}
           </li>
         ))}
       </ul>
@@ -1030,6 +1067,13 @@ export default function PersonProfilePage() {
     siblings: PersonRow[];
     children: PersonRow[];
   }>({ parents: [], spouses: [], siblings: [], children: [] });
+  const [relationshipMetaByPersonId, setRelationshipMetaByPersonId] = useState<
+    Record<string, RelationshipMeta>
+  >({});
+  const [editRelModal, setEditRelModal] = useState<RelationshipMeta | null>(null);
+  const [editRelType, setEditRelType] = useState("");
+  const [editRelBusy, setEditRelBusy] = useState(false);
+  const [editRelError, setEditRelError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("details");
   const [signedDocUrls, setSignedDocUrls] = useState<Map<string, string>>(
     new Map()
@@ -1255,6 +1299,11 @@ export default function PersonProfilePage() {
     setAddFamilyCreateBusy(false);
     setAddFamilyCreateError(null);
     setCropModalPhoto(null);
+    setRelationshipMetaByPersonId({});
+    setEditRelModal(null);
+    setEditRelType("");
+    setEditRelBusy(false);
+    setEditRelError(null);
     setPhotoSetupModal(null);
     setCropOffset({ x: 0, y: 0 });
     setCropNaturalSize(null);
@@ -1480,7 +1529,7 @@ export default function PersonProfilePage() {
 
     let relQuery = supabase
       .from("relationships")
-      .select("person_a_id, person_b_id, relationship_type")
+      .select("id, person_a_id, person_b_id, relationship_type")
       .eq("user_id", user.id)
       .or(`person_a_id.eq.${personId},person_b_id.eq.${personId}`);
     if (effectiveTreeForRels !== "") {
@@ -1498,6 +1547,7 @@ export default function PersonProfilePage() {
     const children = new Set<string>();
     const spouses = new Set<string>();
     const siblings = new Set<string>();
+    const relMetaByPersonId: Record<string, RelationshipMeta> = {};
 
     for (const rel of (relData ?? []) as RelRow[]) {
       const c = classifyRelationship(personId, rel);
@@ -1506,6 +1556,14 @@ export default function PersonProfilePage() {
       else if (c.category === "child") children.add(c.otherId);
       else if (c.category === "spouse") spouses.add(c.otherId);
       else if (c.category === "sibling") siblings.add(c.otherId);
+      if (!relMetaByPersonId[c.otherId]) {
+        relMetaByPersonId[c.otherId] = {
+          otherPersonId: c.otherId,
+          relationshipType: c.category,
+          personAId: rel.person_a_id,
+          personBId: rel.person_b_id,
+        };
+      }
     }
 
     const relatedIds = [
@@ -1957,6 +2015,7 @@ export default function PersonProfilePage() {
       siblings: pick(siblings),
       children: pick(children),
     });
+    setRelationshipMetaByPersonId(relMetaByPersonId);
     setResearchNoteId(pnId);
     setResearchNoteText(pnContent);
     setResearchNoteUpdatedAt(pnUpdated);
@@ -2045,6 +2104,22 @@ export default function PersonProfilePage() {
         personMatchesNameTokens(p, addFamilyFindTokens)
     );
   }, [addFamilyTreePeople, addFamilyFindTokens, addFamilyRelatedIds, personId]);
+
+  const editRelOtherName = useMemo(() => {
+    if (!editRelModal) return "";
+    const all = [
+      ...family.parents,
+      ...family.spouses,
+      ...family.siblings,
+      ...family.children,
+    ];
+    const other = all.find((p) => p.id === editRelModal.otherPersonId);
+    if (!other) return "this person";
+    return [other.first_name, other.middle_name ?? "", other.last_name]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(" ");
+  }, [editRelModal, family]);
 
   useEffect(() => {
     if (!mergeModalOpen || !personId) return;
@@ -3398,6 +3473,123 @@ export default function PersonProfilePage() {
     if (addFamilyFindBusy || addFamilyCreateBusy) return;
     setAddFamilyModalOpen(false);
     resetAddFamilyModalFormState();
+  }
+
+  async function submitEditRelationship() {
+    if (!personId || !editRelModal || effectiveTreeIdForFamily === "") return;
+    const nextType = editRelType.trim().toLowerCase();
+    if (
+      nextType !== "parent" &&
+      nextType !== "child" &&
+      nextType !== "spouse" &&
+      nextType !== "sibling"
+    ) {
+      setEditRelError("Choose a valid relationship type.");
+      return;
+    }
+    setEditRelBusy(true);
+    setEditRelError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setEditRelError("Not signed in.");
+        return;
+      }
+      const reverseType =
+        editRelModal.relationshipType === "parent"
+          ? "child"
+          : editRelModal.relationshipType === "child"
+            ? "parent"
+            : editRelModal.relationshipType;
+      const { error: delErr } = await supabase
+        .from("relationships")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeIdForFamily)
+        .or(
+          `and(person_a_id.eq.${editRelModal.personAId},person_b_id.eq.${editRelModal.personBId},relationship_type.eq.${editRelModal.relationshipType}),and(person_a_id.eq.${editRelModal.personBId},person_b_id.eq.${editRelModal.personAId},relationship_type.eq.${reverseType})`
+        );
+      if (delErr) {
+        setEditRelError(delErr.message);
+        return;
+      }
+      const nextRows = bidirectionalRelationshipRows(
+        nextType as FamilyRelationshipChoice,
+        personId,
+        editRelModal.otherPersonId
+      );
+      const base = {
+        user_id: user.id,
+        tree_id: effectiveTreeIdForFamily,
+      };
+      const { error: e1 } = await supabase.from("relationships").insert({
+        ...base,
+        person_a_id: nextRows[0]!.person_a_id,
+        person_b_id: nextRows[0]!.person_b_id,
+        relationship_type: nextRows[0]!.relationship_type,
+      });
+      if (e1) {
+        setEditRelError(e1.message);
+        return;
+      }
+      const { error: e2 } = await supabase.from("relationships").insert({
+        ...base,
+        person_a_id: nextRows[1]!.person_a_id,
+        person_b_id: nextRows[1]!.person_b_id,
+        relationship_type: nextRows[1]!.relationship_type,
+      });
+      if (e2) {
+        setEditRelError(e2.message);
+        return;
+      }
+      setEditRelModal(null);
+      setEditRelType("");
+      await load();
+    } finally {
+      setEditRelBusy(false);
+    }
+  }
+
+  async function submitRemoveRelationship() {
+    if (!personId || !editRelModal || effectiveTreeIdForFamily === "") return;
+    setEditRelBusy(true);
+    setEditRelError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setEditRelError("Not signed in.");
+        return;
+      }
+      const reverseType =
+        editRelModal.relationshipType === "parent"
+          ? "child"
+          : editRelModal.relationshipType === "child"
+            ? "parent"
+            : editRelModal.relationshipType;
+      const { error: delErr } = await supabase
+        .from("relationships")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeIdForFamily)
+        .or(
+          `and(person_a_id.eq.${editRelModal.personAId},person_b_id.eq.${editRelModal.personBId},relationship_type.eq.${editRelModal.relationshipType}),and(person_a_id.eq.${editRelModal.personBId},person_b_id.eq.${editRelModal.personAId},relationship_type.eq.${reverseType})`
+        );
+      if (delErr) {
+        setEditRelError(delErr.message);
+        return;
+      }
+      setEditRelModal(null);
+      setEditRelType("");
+      await load();
+    } finally {
+      setEditRelBusy(false);
+    }
   }
 
   async function submitAddFamilyLinkExisting() {
@@ -4992,10 +5184,46 @@ export default function PersonProfilePage() {
               >
                 Immediate family
               </h2>
-              <FamilyGroup title="Parents" members={family.parents} />
-              <FamilyGroup title="Spouses" members={family.spouses} />
-              <FamilyGroup title="Siblings" members={family.siblings} />
-              <FamilyGroup title="Children" members={family.children} />
+              <FamilyGroup
+                title="Parents"
+                members={family.parents}
+                relationshipMetaByPersonId={relationshipMetaByPersonId}
+                onEditRelationship={(meta) => {
+                  setEditRelModal(meta);
+                  setEditRelType(meta.relationshipType);
+                  setEditRelError(null);
+                }}
+              />
+              <FamilyGroup
+                title="Spouses"
+                members={family.spouses}
+                relationshipMetaByPersonId={relationshipMetaByPersonId}
+                onEditRelationship={(meta) => {
+                  setEditRelModal(meta);
+                  setEditRelType(meta.relationshipType);
+                  setEditRelError(null);
+                }}
+              />
+              <FamilyGroup
+                title="Siblings"
+                members={family.siblings}
+                relationshipMetaByPersonId={relationshipMetaByPersonId}
+                onEditRelationship={(meta) => {
+                  setEditRelModal(meta);
+                  setEditRelType(meta.relationshipType);
+                  setEditRelError(null);
+                }}
+              />
+              <FamilyGroup
+                title="Children"
+                members={family.children}
+                relationshipMetaByPersonId={relationshipMetaByPersonId}
+                onEditRelationship={(meta) => {
+                  setEditRelModal(meta);
+                  setEditRelType(meta.relationshipType);
+                  setEditRelError(null);
+                }}
+              />
               {family.parents.length === 0 &&
               family.spouses.length === 0 &&
               family.siblings.length === 0 &&
@@ -5727,6 +5955,116 @@ export default function PersonProfilePage() {
                 type="button"
                 disabled={deletePersonBusy}
                 onClick={() => setDeletePersonOpen(false)}
+                style={btnOutline}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editRelModal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-relationship-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !editRelBusy) {
+              setEditRelModal(null);
+              setEditRelType("");
+              setEditRelError(null);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="edit-relationship-modal-title"
+              className="mb-1 text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Edit relationship
+            </h2>
+            <p
+              className="mb-4 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              {editRelOtherName}
+            </p>
+            <label
+              className="mb-1 block text-xs font-bold uppercase tracking-wide"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+              htmlFor="edit-family-rel-type"
+            >
+              Relationship type
+            </label>
+            <select
+              id="edit-family-rel-type"
+              value={editRelType}
+              onChange={(e) => setEditRelType(e.target.value)}
+              className="mb-4 w-full"
+              style={modalInputStyle}
+              disabled={editRelBusy}
+            >
+              <option value="parent">Parent</option>
+              <option value="child">Child</option>
+              <option value="spouse">Spouse</option>
+              <option value="sibling">Sibling</option>
+            </select>
+            {editRelError ? (
+              <p
+                className="mb-3 text-sm"
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+              >
+                {editRelError}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={editRelBusy}
+                onClick={() => void submitEditRelationship()}
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: colors.brownOutline,
+                  color: colors.cream,
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  borderRadius: 2,
+                  cursor: editRelBusy ? "wait" : "pointer",
+                  opacity: editRelBusy ? 0.85 : 1,
+                }}
+              >
+                {editRelBusy ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={editRelBusy}
+                onClick={() => void submitRemoveRelationship()}
+                style={{ ...btnOutline, color: "var(--dg-danger)" }}
+              >
+                Remove relationship
+              </button>
+              <button
+                type="button"
+                disabled={editRelBusy}
+                onClick={() => {
+                  setEditRelModal(null);
+                  setEditRelType("");
+                  setEditRelError(null);
+                }}
                 style={btnOutline}
               >
                 Cancel
