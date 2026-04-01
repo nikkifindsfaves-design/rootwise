@@ -3,6 +3,7 @@
 import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
+import DocumentUploadSection from "../../dashboard/document-upload";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -1186,6 +1187,7 @@ export default function PersonProfilePage() {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [recordUploadModalOpen, setRecordUploadModalOpen] = useState(false);
   const headerActionsDropdownRef = useRef<HTMLDivElement>(null);
   const headerPhotoFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1826,47 +1828,29 @@ export default function PersonProfilePage() {
       ),
     ];
 
-    const { data: photosData, error: photosErr } = await supabase
-      .from("photos")
-      .select("*")
-      .eq("person_id", personId)
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+    let photosData: Record<string, unknown>[] = [];
+    if (tagPhotoIds.length > 0) {
+      const { data, error: photosErr } = await supabase
+        .from("photos")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("id", tagPhotoIds)
+        .order("created_at", { ascending: false });
 
-    if (photosErr) {
-      setError(photosErr.message);
-      setLoading(false);
-      return;
+      if (photosErr) {
+        setError(photosErr.message);
+        setLoading(false);
+        return;
+      }
+      photosData = (data ?? []) as Record<string, unknown>[];
     }
 
     const photosById = new Map<string, Record<string, unknown>>();
-    const directPhotoIds = new Set<string>();
     for (const row of photosData ?? []) {
       const rec = row as Record<string, unknown>;
       const pid = rec.id;
       if (typeof pid === "string") {
         photosById.set(pid, rec);
-        directPhotoIds.add(pid);
-      }
-    }
-
-    const extraTagIds = tagPhotoIds.filter((id) => !photosById.has(id));
-    if (extraTagIds.length > 0) {
-      const { data: taggedPhotos, error: taggedErr } = await supabase
-        .from("photos")
-        .select("*")
-        .eq("user_id", user.id)
-        .in("id", extraTagIds);
-
-      if (taggedErr) {
-        setError(taggedErr.message);
-        setLoading(false);
-        return;
-      }
-      for (const row of taggedPhotos ?? []) {
-        const rec = row as Record<string, unknown>;
-        const pid = rec.id;
-        if (typeof pid === "string") photosById.set(pid, rec);
       }
     }
 
@@ -1903,23 +1887,13 @@ export default function PersonProfilePage() {
         if (typeof pid !== "string") {
           return {
             ...rec,
-            __crop_save_to_tag: false,
+            __crop_save_to_tag: true,
             __person_crop_x: cropPercentFromUnknown(rec.crop_x, 50),
             __person_crop_y: cropPercentFromUnknown(rec.crop_y, 50),
             __person_crop_zoom: cropZoomFromUnknown(rec.crop_zoom, 1),
           };
         }
         const tagCrop = tagCropByPhotoId.get(pid);
-        const ownedByThisPerson = directPhotoIds.has(pid);
-        if (ownedByThisPerson) {
-          return {
-            ...rec,
-            __crop_save_to_tag: false,
-            __person_crop_x: cropPercentFromUnknown(rec.crop_x, 50),
-            __person_crop_y: cropPercentFromUnknown(rec.crop_y, 50),
-            __person_crop_zoom: cropZoomFromUnknown(rec.crop_zoom, 1),
-          };
-        }
         if (tagCrop) {
           return {
             ...rec,
@@ -1941,7 +1915,7 @@ export default function PersonProfilePage() {
         }
         return {
           ...rec,
-          __crop_save_to_tag: false,
+          __crop_save_to_tag: true,
           __person_crop_x: cropPercentFromUnknown(rec.crop_x, 50),
           __person_crop_y: cropPercentFromUnknown(rec.crop_y, 50),
           __person_crop_zoom: cropZoomFromUnknown(rec.crop_zoom, 1),
@@ -2491,27 +2465,48 @@ export default function PersonProfilePage() {
       setPhotoUploadError("Not signed in.");
       return;
     }
-    const fileUrl = photoUrlFromRow(row);
-    if (fileUrl) {
-      const storagePath = photosStoragePathFromFileUrl(fileUrl);
-      if (storagePath) {
-        const { error: rmErr } = await supabase.storage
-          .from("photos")
-          .remove([storagePath]);
-        if (rmErr) {
-          setPhotoUploadError(rmErr.message);
-          return;
+    const { error: delTagErr } = await supabase
+      .from("photo_tags")
+      .delete()
+      .eq("photo_id", id)
+      .eq("person_id", personId)
+      .eq("user_id", user.id);
+    if (delTagErr) {
+      setPhotoUploadError(delTagErr.message);
+      return;
+    }
+    const { count: tagCount, error: countErr } = await supabase
+      .from("photo_tags")
+      .select("id", { count: "exact", head: true })
+      .eq("photo_id", id)
+      .eq("user_id", user.id);
+    if (countErr) {
+      setPhotoUploadError(countErr.message);
+      return;
+    }
+    if ((tagCount ?? 0) === 0) {
+      const fileUrl = photoUrlFromRow(row);
+      if (fileUrl) {
+        const storagePath = photosStoragePathFromFileUrl(fileUrl);
+        if (storagePath) {
+          const { error: rmErr } = await supabase.storage
+            .from("photos")
+            .remove([storagePath]);
+          if (rmErr) {
+            setPhotoUploadError(rmErr.message);
+            return;
+          }
         }
       }
-    }
-    const { error: delErr } = await supabase
-      .from("photos")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
-    if (delErr) {
-      setPhotoUploadError(delErr.message);
-      return;
+      const { error: delPhotoErr } = await supabase
+        .from("photos")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (delPhotoErr) {
+        setPhotoUploadError(delPhotoErr.message);
+        return;
+      }
     }
     await load();
   }
@@ -2811,12 +2806,14 @@ export default function PersonProfilePage() {
         .from("persons")
         .select("id, first_name, middle_name, last_name")
         .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeIdForFamily)
         .ilike("first_name", pattern)
         .limit(10);
       const { data: d2, error: e2 } = await supabase
         .from("persons")
         .select("id, first_name, middle_name, last_name")
         .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeIdForFamily)
         .ilike("last_name", pattern)
         .limit(10);
       if (e1 || e2) {
@@ -2887,12 +2884,14 @@ export default function PersonProfilePage() {
         .from("persons")
         .select("id, first_name, middle_name, last_name")
         .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeIdForFamily)
         .ilike("first_name", pattern)
         .limit(10);
       const { data: d2, error: e2 } = await supabase
         .from("persons")
         .select("id, first_name, middle_name, last_name")
         .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeIdForFamily)
         .ilike("last_name", pattern)
         .limit(10);
       if (e1 || e2) {
@@ -4406,6 +4405,23 @@ export default function PersonProfilePage() {
                 }}
               >
                 Upload photo
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                style={headerMenuItemBaseStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.parchment;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  setRecordUploadModalOpen(true);
+                }}
+              >
+                Upload record
               </button>
               <button
                 type="button"
@@ -6496,6 +6512,75 @@ export default function PersonProfilePage() {
         </div>
       ) : null}
 
+      {recordUploadModalOpen && person ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="person-upload-record-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRecordUploadModalOpen(false);
+          }}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <h2
+                id="person-upload-record-title"
+                className="text-2xl font-bold"
+                style={{ fontFamily: serif, color: colors.brownDark }}
+              >
+                Upload a record
+              </h2>
+              <button
+                type="button"
+                className="shrink-0 rounded border-2 px-2.5 py-1 text-sm font-semibold"
+                style={{
+                  fontFamily: sans,
+                  borderColor: colors.brownOutline,
+                  color: colors.brownDark,
+                  backgroundColor: "transparent",
+                  cursor: "pointer",
+                }}
+                aria-label="Close"
+                onClick={() => setRecordUploadModalOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <p
+              className="mb-4 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Upload a document and we&apos;ll extract events and relationships
+              for{" "}
+              {[
+                person.first_name,
+                person.middle_name ?? "",
+                person.last_name,
+              ]
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .join(" ")}
+              .
+            </p>
+            <DocumentUploadSection
+              treeId={effectiveTreeIdForFamily}
+              anchorPersonId={personId}
+              embedded
+            />
+          </div>
+        </div>
+      ) : null}
+
       {mergeModalOpen && person ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -7027,7 +7112,7 @@ export default function PersonProfilePage() {
 
       {photoSetupModal ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
@@ -7320,7 +7405,7 @@ export default function PersonProfilePage() {
 
       {tagModalPhoto ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"

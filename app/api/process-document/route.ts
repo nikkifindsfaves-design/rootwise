@@ -2,8 +2,50 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse, type NextRequest } from "next/server";
 
-const SYSTEM_PROMPT = `You are a genealogy expert. Analyze this document and extract all people, events and relationships you find. Return ONLY a JSON object with this exact structure:
+function getVoiceInstructions(vibe: string): string {
+  switch (vibe) {
+    case "gossip_girl":
+      return `Write like the Gossip Girl narrator — omniscient, theatrical, weaponizing politeness. You are reporting the facts but you have opinions. Every event is a reveal. Names are dropped with intention. Breathless but never frantic. Vary your opening — sometimes it's the scene, sometimes a direct address to the reader, sometimes you lead with the most interesting person in the room. Use "our girl," "yours truly," and dramatic pauses sparingly but with full commitment when you do. Example story_short: "Della Mae Hutchins made her entrance in March 1887 — already fashionably late to the nineteenth century, and not yet done surprising people." Example story_full: "Well, well, well. A farmer named Roy Hutchins walked into the Pittsylvania County clerk's office in the spring of 1887 and announced that he and his wife Cora had produced a daughter. Her name: Della Mae. Her destiny: unwritten, which is frankly the most interesting kind. Roy handled the paperwork himself — a man who shows up, we respect that — while Cora, as history so often records it, is simply listed and left to our imagination. Watch this space, Della Mae. XOXO."`;
+
+    case "old_timey":
+      return `Write as though you are a learned gentleman of the 1800s recounting events aloud to a parlor full of people who have nowhere else to be. Expansive, self-important, full of asides and qualifications. You believe every detail is worth remarking upon. Rhetorical flourishes are not just permitted, they are expected. Vary your opening between a meditation on the place, a formal introduction of the subject, or a reflection on the significance of the occasion. Never use contractions. Take your time. Example story_short: "It is with no small measure of satisfaction that we record the birth of Miss Della Mae Hutchins, who arrived in Pittsylvania County, Virginia, on the fourth of March, 1887, as if she had always intended to." Example story_full: "On the fourth of March, in the year of our Lord eighteen hundred and eighty-seven, in that fine and storied county of Pittsylvania, Virginia, a daughter was born to Mr. Roy Hutchins — a man of agricultural pursuits and evident civic responsibility, for it was he who presented himself to the county clerk to ensure the matter was properly set down for posterity. The child was given the name Della Mae, a name well-suited to its time and place, and her mother Cora — of whom the record speaks briefly, though we may assume her contribution to the occasion was not inconsiderable — was duly noted alongside. Let it be known, then, that Della Mae Hutchins entered this world, and the world was the richer for it."`;
+
+    case "southern_gothic":
+      return `Write like a literary novelist from the American South — slow, atmospheric, a little haunted. Every birth is also a foreshadowing. Every name carries weight. Beauty and unease can coexist in the same sentence. Vary your opening between the landscape, the person, and the moment. Use specific sensory detail when the document provides it. Never rush. Never be cute. Example story_short: "Della Mae Hutchins came into the world in the red clay county of Pittsylvania, Virginia, in the early days of March 1887, when the ground was still cold and everything was beginning anyway." Example story_full: "It was the fourth of March, 1887, and in Pittsylvania County, Virginia, a farmer named Roy Hutchins went to the county clerk and said his daughter had been born. Her name was Della Mae. Her mother was Cora. The record does not say what the weather was, or whether the house was warm, or what Cora thought about any of it — only that the child arrived, and was named, and was written down, which is how the dead come to be known at all."`;
+
+    case "gen_z":
+      return `Write in a Gen Z tone but keep the focus entirely on the ancestor and what happened. Casual, direct, zero formality. Short punchy sentences. Lowercase is fine. Use "like" and "actually" and "so" as natural connective tissue, not as jokes. Dry observation over emotional reaction. The ancestor is the main character — the narrator has no feelings about this, they're just telling you what happened in the most unbothered way possible. Vary your opening every time. Example story_short: "della mae hutchins was born march 4, 1887 in pittsylvania county, virginia. her dad roy, a farmer, filed the paperwork. very normal start for someone's whole entire life." Example story_full: "so on march 4, 1887, della mae hutchins was born in pittsylvania county, virginia. her parents were roy hutchins, a farmer, and cora hutchins. roy actually went to the county clerk himself to get it all documented, which is how we know any of this. della mae came in, got a name, got written down. that's the origin story."`;
+
+    case "classic":
+    default:
+      return `Write like a true-crime podcaster narrating a life moment — direct, occasionally dry, never sentimental. Lead with what happened. Don't editorialize excessively but let one sharp observation land per story. Vary your structure every time: sometimes open with place, sometimes with the person, sometimes drop straight into the event. Never use the same sentence construction twice in a row across stories. Example story_short: "Della Mae Hutchins arrived in Pittsylvania County on a Tuesday in March, 1887, and the paperwork was filed accordingly." Example story_full: "Della Mae Hutchins was born March 4, 1887, in Pittsylvania County, Virginia, the daughter of Roy Hutchins, a farmer, and Cora Hutchins. The record was filed with the county clerk — name, date, parents — the bare minimum a life requires to be made official. Roy was listed as the informant, which means he's the one who walked in and told them she existed."`;
+  }
+}
+
+function buildSystemPrompt(
+  vibe: string,
+  anchorPersonName: string | null
+): string {
+  const anchorSuffix =
+    anchorPersonName != null
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".
+
+If this is a multi-person document (register page, list, bible record with multiple entries):
+- Scan the document to find the entry or cluster that contains "${anchorPersonName}" — they may appear as a parent, child, or named individual in that entry
+- Once you find the matching cluster, extract ALL people named within it — this includes the child who is the subject of the record, both parents, godparents, witnesses, and any other individuals named in that specific entry
+- The anchor person is your search key to locate the right cluster, not a filter on who to extract — extract the complete entry
+- Do NOT extract any other entries, families, or individuals from other clusters on the document
+- The people array, events array, and relationships array must contain only people from that one matched entry cluster
+
+If this is a single-subject document (certificate, obituary, etc.):
+- Treat "${anchorPersonName}" as the primary subject as normal
+- Extract all people and events as usual`
+      : "";
+
+  return `You are a genealogy expert. Analyze this document and extract all people, events and relationships you find. Return ONLY a JSON object with this exact structure:
 {
+  is_multi_person: boolean,
+  document_subtype: string,
   record_type: string,
   people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, birth_place, notes }],
   events: [{ person_name, event_type, event_date, event_place, description, story_short, story_full }],
@@ -11,9 +53,16 @@ const SYSTEM_PROMPT = `You are a genealogy expert. Analyze this document and ext
   relationships: [{ person_a, person_b, relationship_type }]
 }
 
+- is_multi_person: true if this document contains multiple unrelated or loosely related individuals (e.g. a church register page, parish record page, census page, family bible page with many entries). false if it is a single-subject document (e.g. a birth certificate, death certificate, obituary, draft card, marriage license).
+- document_subtype: a short label for the specific document format detected, e.g. "birth certificate", "death certificate", "church register", "family bible", "census record", "newspaper announcement", "military record", "marriage record", "obituary". Use your best judgment from the document's appearance and content.
+- Church registers and parish records are multi-person documents (is_multi_person: true), document_subtype: "church register". These typically show multiple family entries on a page, each with parents, child name, and birth/baptism dates. They are NOT family bibles.
+- Family bibles are also multi-person (is_multi_person: true), document_subtype: "family bible". These are handwritten lists of births, marriages and deaths kept by a single family, usually with consistent surnames.
+- Key difference: church registers contain multiple unrelated families on the same page. Family bibles contain one family's records across multiple pages.
+
 birth_place for each person is where that individual was born, taken from wherever the document states their personal birthplace — not the location of the event being recorded. For example on a birth certificate, the child's birth_place is the location of the birth, but the father's birth_place and mother's birth_place are their own stated birthplaces, which are typically listed separately on the document as biographical details about the parents.
 
-Story fields (Dead Gossip voice — direct, occasionally irreverent, like a true-crime podcaster narrating a life moment):
+Story fields — ${getVoiceInstructions(vibe)}
+
 - story_short: one punchy sentence for the person the event is about.
 - story_full: 2–3 sentences including every detail from the document: all people present, full location, time if stated, and any other context.
 
@@ -23,7 +72,8 @@ Always populate the relationships array with parent/child links the document sup
 
 Gender must be read explicitly from document text only. Use these indicators: 'male', 'female', 'son', 'daughter', 'his', 'her', 'he', 'she', 'Mr.', 'Mrs.', 'father', 'mother', 'husband', 'wife', 'brother', 'sister'. Never infer gender from a person's name alone. If the document contains no explicit gender indicator for a person, return null for gender.
 
-Spouse relationships (relationship_type "spouse"): include ONLY when the source text explicitly states a marriage, wedding, or spousal bond (e.g. "married", "husband", "wife", "spouse", "wedding", "marriage certificate", wording that clearly indicates a legal or stated marital relationship). Do NOT add "spouse" entries solely because two people are both listed as parents of the same child on a birth, baptism, census, or similar record. Do NOT infer marriage from shared parentage, shared surname, or co-appearance as parents. If the document only names two parents without stating they are married, use only "parent" rows toward the child—no "spouse" between those parents unless marriage is explicitly stated.`;
+Spouse relationships (relationship_type "spouse"): include ONLY when the source text explicitly states a marriage, wedding, or spousal bond (e.g. "married", "husband", "wife", "spouse", "wedding", "marriage certificate", wording that clearly indicates a legal or stated marital relationship). Do NOT add "spouse" entries solely because two people are both listed as parents of the same child on a birth, baptism, census, or similar record. Do NOT infer marriage from shared parentage, shared surname, or co-appearance as parents. If the document only names two parents without stating they are married, use only "parent" rows toward the child—no "spouse" between those parents unless marriage is explicitly stated.${anchorSuffix}`;
+}
 
 const MODEL = "claude-sonnet-4-20250514";
 
@@ -74,6 +124,29 @@ type ExtractedPerson = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function resolveAnchorPersonName(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  personId: string,
+  userId: string
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("persons")
+    .select("first_name, middle_name, last_name")
+    .eq("id", personId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return null;
+  const r = data as {
+    first_name?: string;
+    middle_name?: string | null;
+    last_name?: string;
+  };
+  return [r.first_name, r.middle_name ?? "", r.last_name]
+    .map((s) => (s ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 export async function POST(request: NextRequest) {
@@ -151,6 +224,46 @@ export async function POST(request: NextRequest) {
       );
     }
     resolvedTreeId = tid;
+  }
+
+  const anchorIdRaw = formData.get("anchor_person_id");
+  const anchorNameRaw = formData.get("anchor_person_name");
+  const anchorIdTrim =
+    anchorIdRaw != null && String(anchorIdRaw).trim() !== ""
+      ? String(anchorIdRaw).trim()
+      : "";
+
+  let anchorPersonName: string | null = null;
+  if (anchorIdTrim !== "") {
+    anchorPersonName = await resolveAnchorPersonName(
+      supabase,
+      anchorIdTrim,
+      user.id
+    );
+  } else {
+    const anchorNameTrim =
+      anchorNameRaw != null && String(anchorNameRaw).trim() !== ""
+        ? String(anchorNameRaw).trim()
+        : "";
+    if (anchorNameTrim !== "") {
+      anchorPersonName = anchorNameTrim;
+    }
+  }
+
+  let resolvedVibe = "classic";
+  if (resolvedTreeId !== null) {
+    const { data: vibeRow, error: vibeErr } = await supabase
+      .from("trees")
+      .select("vibe")
+      .eq("id", resolvedTreeId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!vibeErr && vibeRow) {
+      const v = (vibeRow as { vibe?: string | null }).vibe;
+      if (typeof v === "string" && v.trim() !== "") {
+        resolvedVibe = v.trim();
+      }
+    }
   }
 
   const arrayBuffer = await file.arrayBuffer();
@@ -244,7 +357,7 @@ export async function POST(request: NextRequest) {
     message = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 8192,
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(resolvedVibe, anchorPersonName),
       messages: [{ role: "user", content: userContent }],
     });
   } catch (e) {
@@ -339,10 +452,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const payload =
+  const payload: Record<string, unknown> =
     typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
       ? { ...(parsed as Record<string, unknown>), recordId }
       : { extraction: parsed, recordId };
+
+  if (isRecord(parsed)) {
+    if (typeof parsed["is_multi_person"] === "boolean") {
+      payload.is_multi_person = parsed["is_multi_person"];
+    }
+    if (typeof parsed["document_subtype"] === "string") {
+      payload.document_subtype = parsed["document_subtype"];
+    }
+  }
 
   return NextResponse.json(payload);
 }

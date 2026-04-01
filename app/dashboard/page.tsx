@@ -14,7 +14,7 @@ export default async function DashboardPage() {
 
   const { data: trees, error: treesError } = await supabase
     .from("trees")
-    .select("id, name, created_at")
+    .select("id, name, created_at, vibe")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -33,11 +33,17 @@ export default async function DashboardPage() {
   }
 
   const treesWithCounts: TreeWithCount[] = (trees ?? []).map((t) => {
-    const rec = t as { id: string; name: string; created_at: string };
+    const rec = t as {
+      id: string;
+      name: string;
+      created_at: string;
+      vibe?: string | null;
+    };
     return {
       id: rec.id,
       name: rec.name,
       created_at: rec.created_at,
+      vibe: rec.vibe ?? "classic",
       ancestorCount: countByTreeId.get(rec.id) ?? 0,
     };
   });

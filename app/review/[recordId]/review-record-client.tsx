@@ -11,6 +11,7 @@ type AiPerson = {
   birth_date?: string | null;
   death_date?: string | null;
   birth_place?: string | null;
+  occupation?: string | null;
   gender?: string | null;
   notes?: string | null;
 };
@@ -35,6 +36,7 @@ type AiResponseShape = {
   record_type?: string;
   people?: AiPerson[];
   events?: AiEvent[];
+  parent_events?: AiEvent[];
   relationships?: AiRelationship[];
 };
 
@@ -72,6 +74,7 @@ type PersonForm = {
   birth_date: string;
   death_date: string;
   birth_place: string;
+  occupation: string;
   gender: string;
   notes: string;
 };
@@ -100,6 +103,7 @@ type EventRow = {
   eventNotes: string;
   eventStoryShort: string;
   eventStoryFull: string;
+  stale: boolean;
 };
 
 type PersonCardState = {
@@ -123,6 +127,7 @@ export type PendingReviewPayload = {
     birth_date: string | null;
     death_date: string | null;
     birth_place: string | null;
+    occupation: string | null;
     gender: string | null;
     notes: string | null;
     relationships: Array<{
@@ -178,6 +183,17 @@ function resolveRelationshipExportName(
   return rel.relatedNameExternal.trim();
 }
 
+function markAllEventsStale(card: PersonCardState): PersonCardState {
+  return {
+    ...card,
+    events: card.events.map((e) => ({ ...e, stale: true })),
+  };
+}
+
+function markEveryCardEventsStale(allCards: PersonCardState[]): PersonCardState[] {
+  return allCards.map((card) => markAllEventsStale(card));
+}
+
 function relatedPersonDisplayLabel(
   rel: RelationshipRow,
   allCards: PersonCardState[]
@@ -223,6 +239,7 @@ function toForm(p: AiPerson): PersonForm {
     birth_date: formatDateString(p.birth_date ?? ""),
     death_date: formatDateString(p.death_date ?? ""),
     birth_place: p.birth_place ?? "",
+    occupation: p.occupation ?? "",
     gender: normalizeGenderForPendingReview(p.gender),
     notes: p.notes ?? "",
   };
@@ -306,6 +323,7 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
   const people = parsed.people ?? [];
   const rels = parsed.relationships ?? [];
   const evs = parsed.events ?? [];
+  const parentEvs = parsed.parent_events ?? [];
 
   return people.map((p, personIndex) => {
     const form = toForm(p);
@@ -347,6 +365,22 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           eventNotes: (e.description ?? "").trim(),
           eventStoryShort: (e.story_short ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
+          stale: false,
+        });
+      }
+    }
+    for (const e of parentEvs) {
+      const pn = String(e.person_name ?? "").trim();
+      if (namesMatch(pn, myName)) {
+        events.push({
+          key: newKey("ev"),
+          eventType: normalizeEventType(String(e.event_type ?? "other")),
+          eventDate: formatDateString(e.event_date ?? ""),
+          eventPlace: e.event_place ?? "",
+          eventNotes: (e.description ?? "").trim(),
+          eventStoryShort: (e.story_short ?? "").trim(),
+          eventStoryFull: (e.story_full ?? "").trim(),
+          stale: false,
         });
       }
     }
@@ -503,15 +537,19 @@ export default function ReviewRecordClient({
   const parsed = useMemo(() => {
     const r = aiResponse as AiResponseShape;
     return {
+      record_type:
+        typeof r?.record_type === "string" ? r.record_type.trim() : "",
       people: Array.isArray(r?.people) ? r.people : [],
       relationships: Array.isArray(r?.relationships) ? r.relationships : [],
       events: Array.isArray(r?.events) ? r.events : [],
+      parent_events: Array.isArray(r?.parent_events) ? r.parent_events : [],
     };
   }, [aiResponse]);
 
   const [cards, setCards] = useState<PersonCardState[]>(() =>
     buildInitialCards(parsed as AiResponseShape)
   );
+  const [isRegeneratingStories, setIsRegeneratingStories] = useState(false);
 
   const ft = (fileType ?? "").toLowerCase();
   const isImage = ft.startsWith("image/");
@@ -520,58 +558,156 @@ export default function ReviewRecordClient({
     setCards((prev) => prev.map((c) => (c.key === key ? next : c)));
   }
 
-  function handleContinue() {
-    const checked = cards.filter((c) => c.include);
-    const payload: PendingReviewPayload = {
-      recordId,
-      recordTypeLabel,
-      ...(recordTreeId ? { returnTreeId: recordTreeId } : {}),
-      people: checked.map((c) => ({
-        first_name: c.form.first_name.trim(),
-        middle_name: c.form.middle_name.trim() || null,
-        last_name: c.form.last_name.trim(),
-        birth_date: c.form.birth_date.trim() || null,
-        death_date: c.form.death_date.trim() || null,
-        birth_place: c.form.birth_place.trim() || null,
-        gender: normalizeGenderForPendingReview(c.form.gender),
-        notes: c.form.notes.trim() || null,
-        relationships: c.relationships
-          .map((r) => ({
-            related_name: resolveRelationshipExportName(r, cards),
-            relationship_type: r.relationshipType,
-            relatedPeerIndex: r.relatedPeerIndex,
-          }))
-          .filter((r) => {
-            if (r.related_name === "") return false;
-            if (r.relatedPeerIndex !== null) {
-              const peer = cards[r.relatedPeerIndex];
-              if (peer && !peer.include) return false;
-            }
-            return true;
-          })
-          .map(({ relatedPeerIndex: _rp, ...rest }) => rest),
-        events: c.events.map((e) => ({
-          event_type: e.eventType,
-          event_date: e.eventDate.trim() || null,
-          event_place: e.eventPlace.trim() || null,
-          notes: e.eventNotes.trim() || null,
-          story_short: e.eventStoryShort.trim() || null,
-          story_full: e.eventStoryFull.trim() || null,
-        })),
-      })),
-    };
-
-    console.log(
-      "[review step1] pendingReview before localStorage:",
-      JSON.parse(JSON.stringify(payload))
-    );
-
+  async function handleContinue() {
+    if (isRegeneratingStories) return;
+    setIsRegeneratingStories(true);
     try {
-      localStorage.setItem(PENDING_REVIEW_KEY, JSON.stringify(payload));
-    } catch {
-      // still navigate; step 2 may show empty if storage blocked
+      let workingCards = cards;
+      const staleTargets = cards.flatMap((card) => {
+        if (!card.include)
+          return [] as Array<{ cardKey: string; eventKey: string }>;
+        return card.events
+          .filter((e) => e.stale)
+          .map((e) => ({ cardKey: card.key, eventKey: e.key }));
+      });
+
+      if (recordTreeId && staleTargets.length > 0) {
+        const regenerated = await Promise.all(
+          staleTargets.map(async (target) => {
+            const card = cards.find((c) => c.key === target.cardKey);
+            const event = card?.events.find((e) => e.key === target.eventKey);
+            if (!card || !event) return null;
+
+            try {
+              const response = await fetch("/api/regenerate-story", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  tree_id: recordTreeId,
+                  person_name: fullNameFromForm(card.form),
+                  event_type: event.eventType,
+                  event_date: event.eventDate.trim() || null,
+                  event_place: event.eventPlace.trim() || null,
+                  event_notes: event.eventNotes.trim() || null,
+                  related_people: card.relationships
+                    .map((rel) => {
+                      if (rel.relatedPeerIndex != null) {
+                        const peer = cards[rel.relatedPeerIndex];
+                        if (!peer) return null;
+                        return {
+                          name: fullNameFromForm(peer.form).trim(),
+                          relationship_type: rel.relationshipType,
+                        };
+                      }
+                      return {
+                        name: rel.relatedNameExternal.trim(),
+                        relationship_type: rel.relationshipType,
+                      };
+                    })
+                    .filter(
+                      (
+                        rp
+                      ): rp is { name: string; relationship_type: string } =>
+                        rp !== null && rp.name !== ""
+                    ),
+                }),
+              });
+              if (!response.ok) return null;
+              const data = (await response.json()) as {
+                story_short?: unknown;
+                story_full?: unknown;
+              };
+              if (
+                typeof data.story_short !== "string" ||
+                typeof data.story_full !== "string"
+              ) {
+                return null;
+              }
+              return {
+                ...target,
+                storyShort: data.story_short,
+                storyFull: data.story_full,
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        workingCards = cards.map((card) => ({
+          ...card,
+          events: card.events.map((event) => {
+            const match = regenerated.find(
+              (r) => r && r.cardKey === card.key && r.eventKey === event.key
+            );
+            if (!event.stale) return event;
+            if (!match) return { ...event, stale: false };
+            return {
+              ...event,
+              eventStoryShort: match.storyShort,
+              eventStoryFull: match.storyFull,
+              stale: false,
+            };
+          }),
+        }));
+        setCards(workingCards);
+      }
+
+      const checked = workingCards.filter((c) => c.include);
+      const payload: PendingReviewPayload = {
+        recordId,
+        recordTypeLabel,
+        ...(recordTreeId ? { returnTreeId: recordTreeId } : {}),
+        people: checked.map((c) => ({
+          first_name: c.form.first_name.trim(),
+          middle_name: c.form.middle_name.trim() || null,
+          last_name: c.form.last_name.trim(),
+          birth_date: c.form.birth_date.trim() || null,
+          death_date: c.form.death_date.trim() || null,
+          birth_place: c.form.birth_place.trim() || null,
+          gender: normalizeGenderForPendingReview(c.form.gender),
+          notes: c.form.notes.trim() || null,
+          occupation: c.form.occupation.trim() || null,
+          relationships: c.relationships
+            .map((r) => ({
+              related_name: resolveRelationshipExportName(r, workingCards),
+              relationship_type: r.relationshipType,
+              relatedPeerIndex: r.relatedPeerIndex,
+            }))
+            .filter((r) => {
+              if (r.related_name === "") return false;
+              if (r.relatedPeerIndex !== null) {
+                const peer = workingCards[r.relatedPeerIndex];
+                if (peer && !peer.include) return false;
+              }
+              return true;
+            })
+            .map(({ relatedPeerIndex: _rp, ...rest }) => rest),
+          events: c.events.map((e) => ({
+            event_type: e.eventType,
+            event_date: e.eventDate.trim() || null,
+            event_place: e.eventPlace.trim() || null,
+            notes: e.eventNotes.trim() || null,
+            story_short: e.eventStoryShort.trim() || null,
+            story_full: e.eventStoryFull.trim() || null,
+          })),
+        })),
+      };
+
+      console.log(
+        "[review step1] pendingReview before localStorage:",
+        JSON.parse(JSON.stringify(payload))
+      );
+
+      try {
+        localStorage.setItem(PENDING_REVIEW_KEY, JSON.stringify(payload));
+      } catch {
+        // still navigate; step 2 may show empty if storage blocked
+      }
+      router.push(`/review/${recordId}/duplicates`);
+    } finally {
+      setIsRegeneratingStories(false);
     }
-    router.push(`/review/${recordId}/duplicates`);
   }
 
   return (
@@ -627,6 +763,11 @@ export default function ReviewRecordClient({
             <h2 className="text-sm font-semibold text-zinc-900">
               People ({cards.length})
             </h2>
+            {!!parsed.record_type && (
+              <p className="rounded-lg border border-zinc-200 bg-zinc-100/70 px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-600">
+                {parsed.record_type}
+              </p>
+            )}
 
             {cards.length === 0 ? (
               <p className="rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-600">
@@ -673,13 +814,19 @@ export default function ReviewRecordClient({
                             className={inputClass}
                             value={item.form.first_name}
                             onChange={(e) =>
-                              updateCard(item.key, {
-                                ...item,
-                                form: {
-                                  ...item.form,
-                                  first_name: e.target.value,
-                                },
-                              })
+                              setCards((prev) =>
+                                markEveryCardEventsStale(prev).map((c) =>
+                                  c.key === item.key
+                                    ? {
+                                        ...c,
+                                        form: {
+                                          ...c.form,
+                                          first_name: e.target.value,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
                             }
                           />
                         </div>
@@ -689,13 +836,19 @@ export default function ReviewRecordClient({
                             className={inputClass}
                             value={item.form.middle_name}
                             onChange={(e) =>
-                              updateCard(item.key, {
-                                ...item,
-                                form: {
-                                  ...item.form,
-                                  middle_name: e.target.value,
-                                },
-                              })
+                              setCards((prev) =>
+                                markEveryCardEventsStale(prev).map((c) =>
+                                  c.key === item.key
+                                    ? {
+                                        ...c,
+                                        form: {
+                                          ...c.form,
+                                          middle_name: e.target.value,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
                             }
                           />
                         </div>
@@ -705,13 +858,19 @@ export default function ReviewRecordClient({
                             className={inputClass}
                             value={item.form.last_name}
                             onChange={(e) =>
-                              updateCard(item.key, {
-                                ...item,
-                                form: {
-                                  ...item.form,
-                                  last_name: e.target.value,
-                                },
-                              })
+                              setCards((prev) =>
+                                markEveryCardEventsStale(prev).map((c) =>
+                                  c.key === item.key
+                                    ? {
+                                        ...c,
+                                        form: {
+                                          ...c.form,
+                                          last_name: e.target.value,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
                             }
                           />
                         </div>
@@ -722,7 +881,7 @@ export default function ReviewRecordClient({
                             value={item.form.birth_date}
                             onChange={(e) =>
                               updateCard(item.key, {
-                                ...item,
+                                ...markAllEventsStale(item),
                                 form: {
                                   ...item.form,
                                   birth_date: e.target.value,
@@ -754,7 +913,7 @@ export default function ReviewRecordClient({
                             value={item.form.birth_place}
                             onChange={(e) =>
                               updateCard(item.key, {
-                                ...item,
+                                ...markAllEventsStale(item),
                                 form: { ...item.form, birth_place: e.target.value },
                               })
                             }
@@ -780,20 +939,26 @@ export default function ReviewRecordClient({
                             <option value="Unknown">Unknown</option>
                           </select>
                         </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass}>Notes</label>
-                          <textarea
-                            className={`${inputClass} resize-y`}
-                            rows={3}
-                            value={item.form.notes}
-                            onChange={(e) =>
-                              updateCard(item.key, {
-                                ...item,
-                                form: { ...item.form, notes: e.target.value },
-                              })
-                            }
-                          />
-                        </div>
+                        {item.relationships.some(
+                          (rel) => rel.relationshipType === "parent"
+                        ) && (
+                          <div className="sm:col-span-2">
+                            <label className={labelClass}>Occupation</label>
+                            <input
+                              className={inputClass}
+                              value={item.form.occupation}
+                              onChange={(e) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  form: {
+                                    ...item.form,
+                                    occupation: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </div>
+                        )}
                       </div>
 
                       <div className="border-t border-zinc-100 pt-4">
@@ -911,158 +1076,6 @@ export default function ReviewRecordClient({
                         )}
                       </div>
 
-                      <div className="border-t border-zinc-100 pt-4">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                            Events
-                          </h4>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateCard(item.key, {
-                                ...item,
-                                events: [
-                                  ...item.events,
-                                  {
-                                    key: newKey("ev"),
-                                    eventType: "other",
-                                    eventDate: "",
-                                    eventPlace: "",
-                                    eventNotes: "",
-                                    eventStoryShort: "",
-                                    eventStoryFull: "",
-                                  },
-                                ],
-                              })
-                            }
-                            className="text-xs font-medium text-emerald-700 hover:text-emerald-800"
-                          >
-                            Add event
-                          </button>
-                        </div>
-                        {item.events.length === 0 ? (
-                          <p className="text-xs text-zinc-500">
-                            No events linked from the document.
-                          </p>
-                        ) : (
-                          <ul className="space-y-3">
-                            {item.events.map((ev) => (
-                              <li
-                                key={ev.key}
-                                className="rounded-lg border border-zinc-100 bg-zinc-50/80 p-3"
-                              >
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                  <div className="sm:col-span-2">
-                                    <label className={labelClass}>
-                                      Event type
-                                    </label>
-                                    <select
-                                      className={inputClass}
-                                      value={ev.eventType}
-                                      onChange={(e) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((x) =>
-                                            x.key === ev.key
-                                              ? {
-                                                  ...x,
-                                                  eventType: e.target
-                                                    .value as EvOption,
-                                                }
-                                              : x
-                                          ),
-                                        })
-                                      }
-                                    >
-                                      {EVENT_TYPE_OPTIONS.map((opt) => (
-                                        <option key={opt} value={opt}>
-                                          {opt}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className={labelClass}>Date</label>
-                                    <input
-                                      className={inputClass}
-                                      value={ev.eventDate}
-                                      onChange={(e) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((x) =>
-                                            x.key === ev.key
-                                              ? {
-                                                  ...x,
-                                                  eventDate: e.target.value,
-                                                }
-                                              : x
-                                          ),
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className={labelClass}>Place</label>
-                                    <input
-                                      className={inputClass}
-                                      value={ev.eventPlace}
-                                      onChange={(e) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((x) =>
-                                            x.key === ev.key
-                                              ? {
-                                                  ...x,
-                                                  eventPlace: e.target.value,
-                                                }
-                                              : x
-                                          ),
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div className="sm:col-span-2">
-                                    <label className={labelClass}>Notes</label>
-                                    <textarea
-                                      className={textareaClass}
-                                      value={ev.eventNotes}
-                                      onChange={(e) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((x) =>
-                                            x.key === ev.key
-                                              ? {
-                                                  ...x,
-                                                  eventNotes: e.target.value,
-                                                }
-                                              : x
-                                          ),
-                                        })
-                                      }
-                                      rows={3}
-                                      placeholder="Details from the document (saved as timeline notes)"
-                                    />
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    updateCard(item.key, {
-                                      ...item,
-                                      events: item.events.filter(
-                                        (x) => x.key !== ev.key
-                                      ),
-                                    })
-                                  }
-                                  className="mt-2 text-xs text-red-600 hover:underline"
-                                >
-                                  Remove event
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
                     </div>
                   </article>
                 ))}
@@ -1078,9 +1091,10 @@ export default function ReviewRecordClient({
               <button
                 type="button"
                 onClick={handleContinue}
+                disabled={isRegeneratingStories}
                 className="w-full rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
               >
-                Continue
+                {isRegeneratingStories ? "Updating stories…" : "Continue"}
               </button>
             </div>
           </section>
