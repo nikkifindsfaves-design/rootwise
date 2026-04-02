@@ -38,7 +38,7 @@ type PersonRow = {
   last_name: string;
   birth_date: string | null;
   death_date: string | null;
-  birth_place: string | null;
+  birth_place_id: string | null;
   photo_url: string | null;
   crop_x?: number | null;
   crop_y?: number | null;
@@ -158,7 +158,7 @@ const MERGE_COMPARE_KEYS = [
   "last_name",
   "birth_date",
   "death_date",
-  "birth_place",
+  "birth_place_id",
   "gender",
   "notes",
 ] as const;
@@ -171,7 +171,7 @@ const MERGE_FIELD_LABELS: Record<MergeCompareKey, string> = {
   last_name: "Last name",
   birth_date: "Birth date",
   death_date: "Death date",
-  birth_place: "Birth place",
+  birth_place_id: "Birth place",
   gender: "Gender",
   notes: "Notes",
 };
@@ -210,7 +210,7 @@ type EventRow = {
   id: string;
   event_type: string;
   event_date: string | null;
-  event_place: string | null;
+  event_place_id: string | null;
   description: string | null;
   record_id: string | null;
   notes: string | null;
@@ -781,15 +781,8 @@ function eventsSharingTimelineDedupeKey(rep: EventRow, all: EventRow[]): EventRo
   return all.filter((e) => timelineDedupeKey(e) === k);
 }
 
-function clusterPlacesLine(cluster: EventCluster): string {
-  const parts = [
-    ...new Set(
-      cluster.events
-        .map((e) => e.event_place?.trim())
-        .filter(Boolean) as string[]
-    ),
-  ];
-  return parts.join(" · ");
+function clusterPlacesLine(_cluster: EventCluster): string {
+  return "";
 }
 
 function clusterDescriptionLines(cluster: EventCluster): string[] {
@@ -1103,7 +1096,7 @@ export default function PersonProfilePage() {
   const [eventEditDraft, setEventEditDraft] = useState<{
     event_type: string;
     event_date: string;
-    event_place: string;
+    event_place_id: string | null;
     story_short: string;
     story_full: string;
     notes: string;
@@ -1122,7 +1115,7 @@ export default function PersonProfilePage() {
     last_name: string;
     birth_date: string;
     death_date: string;
-    birth_place: string;
+    birth_place_id: string | null;
     gender: string;
     notes: string;
   } | null>(null);
@@ -1472,7 +1465,7 @@ export default function PersonProfilePage() {
     const { data: personData, error: personErr } = await supabase
       .from("persons")
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes, tree_id"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, photo_url, gender, notes, tree_id"
       )
       .eq("id", personId)
       .eq("user_id", user.id)
@@ -1490,7 +1483,7 @@ export default function PersonProfilePage() {
     }
 
     const raw = personData as PersonRow & {
-      birth_place?: string | null;
+      birth_place_id?: string | null;
       tree_id?: string | null;
     };
     const personTreeId =
@@ -1501,14 +1494,14 @@ export default function PersonProfilePage() {
 
     const p: PersonRow = {
       ...raw,
-      birth_place: raw.birth_place ?? null,
+      birth_place_id: raw.birth_place_id ?? null,
       tree_id: raw.tree_id ?? null,
     };
 
     const { data: eventData, error: eventErr } = await supabase
       .from("events")
       .select(
-        "id, event_type, event_date, event_place, description, record_id, notes, story_short, story_full, created_at"
+        "id, event_type, event_date, event_place_id, description, record_id, notes, story_short, story_full, created_at"
       )
       .eq("person_id", personId)
       .eq("user_id", user.id)
@@ -3262,7 +3255,7 @@ export default function PersonProfilePage() {
       last_name: person.last_name,
       birth_date: normalizeDateToMMDDYYYY(person.birth_date),
       death_date: normalizeDateToMMDDYYYY(person.death_date),
-      birth_place: person.birth_place ?? "",
+      birth_place_id: person.birth_place_id ?? null,
       gender: genderVal,
       notes: person.notes ?? "",
     });
@@ -3295,14 +3288,14 @@ export default function PersonProfilePage() {
         last_name: d.last_name.trim(),
         birth_date: d.birth_date.trim() || null,
         death_date: d.death_date.trim() || null,
-        birth_place: d.birth_place.trim() || null,
+        birth_place_id: d.birth_place_id ?? null,
         gender: d.gender.trim() || null,
         notes: d.notes.trim() || null,
       })
       .eq("id", personId)
       .eq("user_id", user.id)
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, photo_url, gender, notes"
       )
       .single();
 
@@ -3312,10 +3305,10 @@ export default function PersonProfilePage() {
       return;
     }
     if (data) {
-      const row = data as PersonRow & { birth_place?: string | null };
+      const row = data as PersonRow & { birth_place_id?: string | null };
       setPerson({
         ...row,
-        birth_place: row.birth_place ?? null,
+        birth_place_id: row.birth_place_id ?? null,
       });
     }
     closeEditPersonModal();
@@ -3384,7 +3377,7 @@ export default function PersonProfilePage() {
       middle_name: dup.middle_name ?? null,
       birth_date: dup.birth_date ?? null,
       death_date: dup.death_date ?? null,
-      birth_place: dup.birth_place ?? null,
+      birth_place_id: dup.birth_place_id ?? null,
       photo_url: dup.photo_url ?? null,
       gender: dup.gender ?? null,
       notes: dup.notes ?? null,
@@ -3759,7 +3752,7 @@ export default function PersonProfilePage() {
     setEventEditDraft({
       event_type: ev.event_type?.trim() || "other",
       event_date: normalizeDateToMMDDYYYY(ev.event_date),
-      event_place: ev.event_place?.trim() ?? "",
+      event_place_id: ev.event_place_id ?? null,
       story_short: ev.story_short?.trim() ?? "",
       story_full: ev.story_full?.trim() ?? "",
       notes: ev.notes?.trim() ?? "",
@@ -3790,7 +3783,7 @@ export default function PersonProfilePage() {
       .update({
         event_type: d.event_type.trim() || "other",
         event_date: d.event_date.trim() || null,
-        event_place: d.event_place.trim() || null,
+        event_place_id: d.event_place_id ?? null,
         story_short: d.story_short.trim() || null,
         story_full: d.story_full.trim() || null,
         notes: d.notes.trim() || null,
@@ -3798,7 +3791,7 @@ export default function PersonProfilePage() {
       .eq("id", eventId)
       .eq("user_id", user.id)
       .select(
-        "id, event_type, event_date, event_place, description, record_id, notes, story_short, story_full, created_at"
+        "id, event_type, event_date, event_place_id, description, record_id, notes, story_short, story_full, created_at"
       )
       .single();
 
@@ -4066,8 +4059,8 @@ export default function PersonProfilePage() {
     .join(" ");
 
   const headerGenderBadge = genderBadgeLabel(person.gender);
-  const headerBirthPlaceStr = person.birth_place?.trim() ?? "";
-  const headerHasBirthPlace = headerBirthPlaceStr.length > 0;
+  const headerBirthPlaceStr = "";
+  const headerHasBirthPlace = false;
   const headerDateBits: string[] = [];
   if (person.birth_date && headerHasBirthPlace) {
     headerDateBits.push(
@@ -4593,8 +4586,7 @@ export default function PersonProfilePage() {
                       const storyOpen = expandedStoryFullIds.has(
                         fullPick.eventId
                       );
-                      const placesLine =
-                        clusterPlacesLine(mergeCluster) || "—";
+                      const placesLine = clusterPlacesLine(mergeCluster);
                       const noteSegments = clusterNotesSegmentsForTimeline(
                         mergeCluster,
                         eventSourcesByEventId
@@ -4778,17 +4770,8 @@ export default function PersonProfilePage() {
                                     <input
                                       id={`ev-place-${ev.id}`}
                                       type="text"
-                                      value={eventEditDraft.event_place}
-                                      onChange={(e) =>
-                                        setEventEditDraft((prev) =>
-                                          prev
-                                            ? {
-                                                ...prev,
-                                                event_place: e.target.value,
-                                              }
-                                            : null
-                                        )
-                                      }
+                                      value=""
+                                      readOnly
                                       style={modalInputStyle}
                                     />
                                   </div>
@@ -4940,7 +4923,7 @@ export default function PersonProfilePage() {
                                       color: colors.brownMuted,
                                     }}
                                   >
-                                    {placesLine || "—"}
+                                    {placesLine}
                                   </p>
                                   {full ? (
                                     <div className="mt-2">
@@ -5791,12 +5774,8 @@ export default function PersonProfilePage() {
                 <input
                   id="edit-bp"
                   type="text"
-                  value={editPersonDraft.birth_place}
-                  onChange={(e) =>
-                    setEditPersonDraft((d) =>
-                      d ? { ...d, birth_place: e.target.value } : null
-                    )
-                  }
+                  value=""
+                  readOnly
                   style={modalInputStyle}
                 />
               </div>

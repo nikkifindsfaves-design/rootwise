@@ -8,7 +8,7 @@ import {
 import { NextResponse, type NextRequest } from "next/server";
 
 const PERSON_SELECT =
-  "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, photo_url, gender, notes";
+  "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, photo_url, gender, notes";
 
 const MERGE_FIELD_KEYS = [
   "first_name",
@@ -16,7 +16,7 @@ const MERGE_FIELD_KEYS = [
   "last_name",
   "birth_date",
   "death_date",
-  "birth_place",
+  "birth_place_id",
   "gender",
   "notes",
 ] as const;

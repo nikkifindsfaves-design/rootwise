@@ -1,8 +1,17 @@
 "use client";
 
+import { PlaceInput } from "@/components/ui/place-input";
 import { formatDateString } from "@/lib/utils/dates";
+import { formatPlace } from "@/lib/utils/places";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type MouseEvent } from "react";
+
+type PlaceFields = {
+  township: string | null;
+  county: string | null;
+  state: string | null;
+  country: string;
+};
 
 type AiPerson = {
   first_name?: string | null;
@@ -10,7 +19,7 @@ type AiPerson = {
   last_name?: string | null;
   birth_date?: string | null;
   death_date?: string | null;
-  birth_place?: string | null;
+  birth_place?: PlaceFields | string | null;
   occupation?: string | null;
   gender?: string | null;
   notes?: string | null;
@@ -20,7 +29,7 @@ type AiEvent = {
   person_name?: string | null;
   event_type?: string | null;
   event_date?: string | null;
-  event_place?: string | null;
+  event_place?: PlaceFields | string | null;
   description?: string | null;
   story_short?: string | null;
   story_full?: string | null;
@@ -73,7 +82,9 @@ type PersonForm = {
   last_name: string;
   birth_date: string;
   death_date: string;
-  birth_place: string;
+  birth_place_display: string;
+  birth_place_id: string | null;
+  birth_place_fields: PlaceFields | null;
   occupation: string;
   gender: string;
   notes: string;
@@ -98,7 +109,9 @@ type EventRow = {
   key: string;
   eventType: EvOption;
   eventDate: string;
-  eventPlace: string;
+  event_place_display: string;
+  event_place_id: string | null;
+  event_place_fields: PlaceFields | null;
   /** From AI `description`; saved to DB as `events.notes`. */
   eventNotes: string;
   eventStoryShort: string;
@@ -126,7 +139,8 @@ export type PendingReviewPayload = {
     last_name: string;
     birth_date: string | null;
     death_date: string | null;
-    birth_place: string | null;
+    birth_place_id: string | null;
+    birth_place_fields: PlaceFields | null;
     occupation: string | null;
     gender: string | null;
     notes: string | null;
@@ -137,7 +151,8 @@ export type PendingReviewPayload = {
     events: Array<{
       event_type: string;
       event_date: string | null;
-      event_place: string | null;
+      event_place_id: string | null;
+      event_place_fields: PlaceFields | null;
       notes: string | null;
       story_short: string | null;
       story_full: string | null;
@@ -210,6 +225,31 @@ function relatedPersonDisplayLabel(
  * AI often returns lowercase or synonyms; normalize so the dropdown is controlled
  * correctly and localStorage matches what the user sees.
  */
+function placeFromAiField(
+  v: PlaceFields | string | null | undefined
+): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  return formatPlace(v);
+}
+
+function placeFieldsFromAi(
+  v: PlaceFields | string | null | undefined
+): PlaceFields | null {
+  if (v == null || typeof v === "string") return null;
+  if (typeof v !== "object" || Array.isArray(v)) return null;
+  return {
+    township:
+      typeof v.township === "string" || v.township === null
+        ? v.township
+        : null,
+    county:
+      typeof v.county === "string" || v.county === null ? v.county : null,
+    state: typeof v.state === "string" || v.state === null ? v.state : null,
+    country: typeof v.country === "string" ? v.country : "",
+  };
+}
+
 function normalizeGenderForPendingReview(
   raw: string | null | undefined
 ): "Male" | "Female" | "Unknown" {
@@ -238,7 +278,9 @@ function toForm(p: AiPerson): PersonForm {
     last_name: p.last_name ?? "",
     birth_date: formatDateString(p.birth_date ?? ""),
     death_date: formatDateString(p.death_date ?? ""),
-    birth_place: p.birth_place ?? "",
+    birth_place_display: placeFromAiField(p.birth_place),
+    birth_place_id: null,
+    birth_place_fields: placeFieldsFromAi(p.birth_place),
     occupation: p.occupation ?? "",
     gender: normalizeGenderForPendingReview(p.gender),
     notes: p.notes ?? "",
@@ -353,22 +395,7 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
       }
     }
 
-    const events: EventRow[] = [];
-    for (const e of evs) {
-      const pn = String(e.person_name ?? "").trim();
-      if (namesMatch(pn, myName)) {
-        events.push({
-          key: newKey("ev"),
-          eventType: normalizeEventType(String(e.event_type ?? "other")),
-          eventDate: formatDateString(e.event_date ?? ""),
-          eventPlace: e.event_place ?? "",
-          eventNotes: (e.description ?? "").trim(),
-          eventStoryShort: (e.story_short ?? "").trim(),
-          eventStoryFull: (e.story_full ?? "").trim(),
-          stale: false,
-        });
-      }
-    }
+    let events: EventRow[] = [];
     for (const e of parentEvs) {
       const pn = String(e.person_name ?? "").trim();
       if (namesMatch(pn, myName)) {
@@ -376,7 +403,9 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           key: newKey("ev"),
           eventType: normalizeEventType(String(e.event_type ?? "other")),
           eventDate: formatDateString(e.event_date ?? ""),
-          eventPlace: e.event_place ?? "",
+          event_place_display: placeFromAiField(e.event_place),
+          event_place_id: null,
+          event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryShort: (e.story_short ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
@@ -384,6 +413,30 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
         });
       }
     }
+    for (const e of evs) {
+      const pn = String(e.person_name ?? "").trim();
+      if (namesMatch(pn, myName)) {
+        events.push({
+          key: newKey("ev"),
+          eventType: normalizeEventType(String(e.event_type ?? "other")),
+          eventDate: formatDateString(e.event_date ?? ""),
+          event_place_display: placeFromAiField(e.event_place),
+          event_place_id: null,
+          event_place_fields: placeFieldsFromAi(e.event_place),
+          eventNotes: (e.description ?? "").trim(),
+          eventStoryShort: (e.story_short ?? "").trim(),
+          eventStoryFull: (e.story_full ?? "").trim(),
+          stale: false,
+        });
+      }
+    }
+
+    const seenEventTypes = new Set<EvOption>();
+    events = events.filter((row) => {
+      if (seenEventTypes.has(row.eventType)) return false;
+      seenEventTypes.add(row.eventType);
+      return true;
+    });
 
     return {
       key: newKey("p"),
@@ -546,9 +599,15 @@ export default function ReviewRecordClient({
     };
   }, [aiResponse]);
 
-  const [cards, setCards] = useState<PersonCardState[]>(() =>
-    buildInitialCards(parsed as AiResponseShape)
-  );
+  const [cards, setCards] = useState<PersonCardState[]>(() => {
+    const p = parsed as AiResponseShape;
+    console.log("[review] buildInitialCards input", {
+      parsed: p,
+      people: p.people,
+      parent_events: p.parent_events,
+    });
+    return buildInitialCards(p);
+  });
   const [isRegeneratingStories, setIsRegeneratingStories] = useState(false);
 
   const ft = (fileType ?? "").toLowerCase();
@@ -587,7 +646,7 @@ export default function ReviewRecordClient({
                   person_name: fullNameFromForm(card.form),
                   event_type: event.eventType,
                   event_date: event.eventDate.trim() || null,
-                  event_place: event.eventPlace.trim() || null,
+                  event_place: event.event_place_display.trim() || null,
                   event_notes: event.eventNotes.trim() || null,
                   related_people: card.relationships
                     .map((rel) => {
@@ -599,8 +658,17 @@ export default function ReviewRecordClient({
                           relationship_type: rel.relationshipType,
                         };
                       }
+                      const external = rel.relatedNameExternal.trim();
+                      let name = external;
+                      for (const c of cards) {
+                        const fn = fullNameFromForm(c.form);
+                        if (namesMatch(fn, external)) {
+                          name = fn.trim();
+                          break;
+                        }
+                      }
                       return {
-                        name: rel.relatedNameExternal.trim(),
+                        name,
                         relationship_type: rel.relationshipType,
                       };
                     })
@@ -664,7 +732,8 @@ export default function ReviewRecordClient({
           last_name: c.form.last_name.trim(),
           birth_date: c.form.birth_date.trim() || null,
           death_date: c.form.death_date.trim() || null,
-          birth_place: c.form.birth_place.trim() || null,
+          birth_place_id: c.form.birth_place_id,
+          birth_place_fields: c.form.birth_place_fields,
           gender: normalizeGenderForPendingReview(c.form.gender),
           notes: c.form.notes.trim() || null,
           occupation: c.form.occupation.trim() || null,
@@ -686,7 +755,8 @@ export default function ReviewRecordClient({
           events: c.events.map((e) => ({
             event_type: e.eventType,
             event_date: e.eventDate.trim() || null,
-            event_place: e.eventPlace.trim() || null,
+            event_place_id: e.event_place_id,
+            event_place_fields: e.event_place_fields,
             notes: e.eventNotes.trim() || null,
             story_short: e.eventStoryShort.trim() || null,
             story_full: e.eventStoryFull.trim() || null,
@@ -908,13 +978,26 @@ export default function ReviewRecordClient({
                         </div>
                         <div className="sm:col-span-2">
                           <label className={labelClass}>Birth place</label>
-                          <input
-                            className={inputClass}
-                            value={item.form.birth_place}
-                            onChange={(e) =>
+                          <PlaceInput
+                            value={item.form.birth_place_display}
+                            onChange={(v) =>
                               updateCard(item.key, {
                                 ...markAllEventsStale(item),
-                                form: { ...item.form, birth_place: e.target.value },
+                                form: {
+                                  ...item.form,
+                                  birth_place_display: v,
+                                  birth_place_id: null,
+                                },
+                              })
+                            }
+                            onPlaceSelect={(place) =>
+                              updateCard(item.key, {
+                                ...markAllEventsStale(item),
+                                form: {
+                                  ...item.form,
+                                  birth_place_display: place.display,
+                                  birth_place_id: place.id,
+                                },
                               })
                             }
                           />

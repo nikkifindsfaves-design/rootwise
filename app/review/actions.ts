@@ -2,6 +2,7 @@
 
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type PersonRow = {
   id: string;
@@ -46,6 +47,88 @@ function levenshtein(a: string, b: string): number {
 
 function isEmptyDbField(v: string | null | undefined): boolean {
   return v == null || String(v).trim() === "";
+}
+
+type PlaceFields = {
+  township: string | null;
+  county: string | null;
+  state: string | null;
+  country: string;
+};
+
+function parsePlaceFields(raw: unknown): PlaceFields | null {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const o = raw as Record<string, unknown>;
+  return {
+    township:
+      typeof o.township === "string" || o.township === null
+        ? (o.township as string | null)
+        : null,
+    county:
+      typeof o.county === "string" || o.county === null
+        ? (o.county as string | null)
+        : null,
+    state:
+      typeof o.state === "string" || o.state === null
+        ? (o.state as string | null)
+        : null,
+    country: typeof o.country === "string" ? o.country : "",
+  };
+}
+
+async function findOrCreatePlace(
+  supabase: SupabaseClient,
+  fields: PlaceFields
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  let q = supabase.from("places").select("id");
+  if (fields.township === null) {
+    q = q.is("township", null);
+  } else {
+    q = q.eq("township", fields.township);
+  }
+  if (fields.county === null) {
+    q = q.is("county", null);
+  } else {
+    q = q.eq("county", fields.county);
+  }
+  if (fields.state === null) {
+    q = q.is("state", null);
+  } else {
+    q = q.eq("state", fields.state);
+  }
+  q = q.eq("country", fields.country);
+
+  const { data: found, error: findErr } = await q.maybeSingle();
+
+  if (findErr) {
+    return { ok: false, message: findErr.message };
+  }
+  const fid = (found as { id?: string } | null)?.id;
+  if (typeof fid === "string" && fid !== "") {
+    return { ok: true, id: fid };
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from("places")
+    .insert({
+      township: fields.township,
+      county: fields.county,
+      state: fields.state,
+      country: fields.country,
+    })
+    .select("id")
+    .single();
+
+  if (insErr) {
+    return { ok: false, message: insErr.message };
+  }
+  const iid = (inserted as { id?: string } | null)?.id;
+  if (typeof iid !== "string" || iid === "") {
+    return { ok: false, message: "Failed to create place." };
+  }
+  return { ok: true, id: iid };
 }
 
 /**
@@ -376,11 +459,35 @@ export type CardRelationshipInput = {
 export type CardEventInput = {
   event_type: string;
   event_date: string | null;
-  event_place: string | null;
+  event_place_display: string | null;
+  event_place_id: string | null;
+  event_place_fields: PlaceFields | null;
   notes: string | null;
   story_short: string | null;
   story_full: string | null;
 };
+
+async function resolveEventPlaceIdFromCardEvent(
+  supabase: SupabaseClient,
+  ev: CardEventInput
+): Promise<{ id: string | null; error: string | null }> {
+  const rawId = ev.event_place_id;
+  if (typeof rawId === "string" && rawId.trim() !== "") {
+    return { id: rawId.trim(), error: null };
+  }
+  const fields =
+    ev.event_place_fields == null
+      ? null
+      : parsePlaceFields(ev.event_place_fields);
+  if (fields === null) {
+    return { id: null, error: null };
+  }
+  const r = await findOrCreatePlace(supabase, fields);
+  if (!r.ok) {
+    return { id: null, error: r.message };
+  }
+  return { id: r.id, error: null };
+}
 
 function inverseRelationshipType(t: string): string {
   const n = t.trim().toLowerCase();
@@ -402,7 +509,7 @@ function inverseRelationshipType(t: string): string {
  * Saves the person, relationship edges (two rows per relationship: A→B and B→A perspectives), and events.
  * `relationships`: this person's relationship toward `related_name` with `relationship_type`.
  * Tables: `relationships` (user_id, person_a_id, person_b_id, relationship_type),
- * `events` (user_id, person_id, record_id, event_type, event_date, event_place, notes, story_short, story_full).
+ * `events` (user_id, person_id, record_id, event_type, event_date, event_place_id, notes, story_short, story_full).
  */
 export async function acceptPersonCard(params: {
   form: PersonFormInput;
@@ -594,6 +701,10 @@ export async function acceptPersonCard(params: {
   }
 
   for (const ev of params.events) {
+    const placeRes = await resolveEventPlaceIdFromCardEvent(supabase, ev);
+    if (placeRes.error) {
+      return { ok: false, error: placeRes.error };
+    }
     const { error: evErr } = await savePersonEventWithDedupe(
       supabase,
       user.id,
@@ -602,7 +713,7 @@ export async function acceptPersonCard(params: {
       {
         event_type: ev.event_type.trim() || "other",
         event_date: ev.event_date?.trim() || null,
-        event_place: ev.event_place?.trim() || null,
+        event_place_id: placeRes.id,
         notes: ev.notes?.trim() || null,
         story_short: ev.story_short?.trim() || null,
         story_full: ev.story_full?.trim() || null,

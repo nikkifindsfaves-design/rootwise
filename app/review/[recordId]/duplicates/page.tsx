@@ -13,7 +13,7 @@ const MERGE_FIELDS = [
   "last_name",
   "birth_date",
   "death_date",
-  "birth_place",
+  "birth_place_id",
   "gender",
   "notes",
 ] as const;
@@ -27,7 +27,7 @@ type DbPerson = {
   last_name: string;
   birth_date: string | null;
   death_date: string | null;
-  birth_place: string | null;
+  birth_place_id: string | null;
   gender: string | null;
   notes: string | null;
 };
@@ -105,7 +105,7 @@ function labelForField(field: MergeField): string {
     last_name: "Last name",
     birth_date: "Birth date",
     death_date: "Death date",
-    birth_place: "Birth place",
+    birth_place_id: "Birth place",
     gender: "Gender",
     notes: "Notes",
   };
@@ -128,8 +128,8 @@ function displayValue(
             ? fieldStr(pending.birth_date)
             : field === "death_date"
               ? fieldStr(pending.death_date)
-              : field === "birth_place"
-                ? fieldStr(pending.birth_place)
+              : field === "birth_place_id"
+                ? fieldStr(pending.birth_place_id)
                 : field === "gender"
                   ? fieldStr(pending.gender)
                   : fieldStr(pending.notes);
@@ -145,8 +145,8 @@ function displayValue(
             ? fieldStr(existing.birth_date)
             : field === "death_date"
               ? fieldStr(existing.death_date)
-              : field === "birth_place"
-                ? fieldStr(existing.birth_place)
+              : field === "birth_place_id"
+                ? fieldStr(existing.birth_place_id)
                 : field === "gender"
                   ? fieldStr(existing.gender)
                   : fieldStr(existing.notes);
@@ -297,7 +297,7 @@ export default function ReviewDuplicatesPage() {
       let personsQuery = supabase
         .from("persons")
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place, gender, notes"
+          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, gender, notes"
         )
         .eq("user_id", user.id);
       if (returnTreeId) {

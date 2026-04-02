@@ -47,9 +47,9 @@ If this is a single-subject document (certificate, obituary, etc.):
   is_multi_person: boolean,
   document_subtype: string,
   record_type: string,
-  people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, birth_place, notes }],
-  events: [{ person_name, event_type, event_date, event_place, description, story_short, story_full }],
-  parent_events: [{ person_name, event_type, event_date, event_place, description, story_short, story_full }],
+  people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, birth_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description, story_short, story_full }],
+  parent_events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description, story_short, story_full }],
   relationships: [{ person_a, person_b, relationship_type }]
 }
 
@@ -59,7 +59,13 @@ If this is a single-subject document (certificate, obituary, etc.):
 - Family bibles are also multi-person (is_multi_person: true), document_subtype: "family bible". These are handwritten lists of births, marriages and deaths kept by a single family, usually with consistent surnames.
 - Key difference: church registers contain multiple unrelated families on the same page. Family bibles contain one family's records across multiple pages.
 
-birth_place for each person is where that individual was born, taken from wherever the document states their personal birthplace — not the location of the event being recorded. For example on a birth certificate, the child's birth_place is the location of the birth, but the father's birth_place and mother's birth_place are their own stated birthplaces, which are typically listed separately on the document as biographical details about the parents.
+Places — birth_place on each person and event_place on each event and parent_event must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable strings; country is required and must always be present as a string.
+- township is the most local jurisdiction (town, township, parish, district, etc.) and may be null if not stated or not applicable.
+- county is the county or county-equivalent and may be null if not stated or not applicable.
+- state is the state, province, or colony and may be null if not stated or not applicable.
+- country must reflect the political entity at the time of the record (historical accuracy). For example, records before 1776 in American colonies should use "British Colonial America"; Irish records should use "Ireland"; never default to "United States" for records that predate its existence.
+Always parse place text from the document into these four separate fields rather than stuffing an undifferentiated string into one field. Spell out abbreviations fully in every field — for example "West River" not "W. River", "Randolph County" not "Randolph Co."
+birth_place for each person is where that individual was born, taken from wherever the document states their personal birthplace — not the location of the event being recorded unless the document equates them. On a birth certificate, the child's birth_place is typically found in the upper left of the document showing township and county, with state listed separately; the father's birth_place and mother's birth_place are their own stated birthplaces, usually listed separately as biographical details about the parents.
 
 Story fields — ${getVoiceInstructions(vibe)}
 

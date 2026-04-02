@@ -1,5 +1,6 @@
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
@@ -14,7 +15,7 @@ const MERGE_FIELDS = [
   "last_name",
   "birth_date",
   "death_date",
-  "birth_place",
+  "birth_place_id",
   "gender",
   "notes",
 ] as const;
@@ -28,7 +29,8 @@ type PendingPersonBody = {
   last_name?: unknown;
   birth_date?: unknown;
   death_date?: unknown;
-  birth_place?: unknown;
+  birth_place_id?: unknown;
+  birth_place_fields?: unknown;
   gender?: unknown;
   notes?: unknown;
   relationships?: unknown;
@@ -81,6 +83,136 @@ function isEmptyDbField(v: string | null | undefined): boolean {
   return v == null || String(v).trim() === "";
 }
 
+type PlaceFields = {
+  township: string | null;
+  county: string | null;
+  state: string | null;
+  country: string;
+};
+
+function parsePlaceFields(raw: unknown): PlaceFields | null {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const o = raw as Record<string, unknown>;
+  return {
+    township:
+      typeof o.township === "string" || o.township === null
+        ? (o.township as string | null)
+        : null,
+    county:
+      typeof o.county === "string" || o.county === null
+        ? (o.county as string | null)
+        : null,
+    state:
+      typeof o.state === "string" || o.state === null
+        ? (o.state as string | null)
+        : null,
+    country: typeof o.country === "string" ? o.country : "",
+  };
+}
+
+async function findOrCreatePlace(
+  supabase: SupabaseClient,
+  fields: PlaceFields
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  let q = supabase.from("places").select("id");
+  if (fields.township === null) {
+    q = q.is("township", null);
+  } else {
+    q = q.eq("township", fields.township);
+  }
+  if (fields.county === null) {
+    q = q.is("county", null);
+  } else {
+    q = q.eq("county", fields.county);
+  }
+  if (fields.state === null) {
+    q = q.is("state", null);
+  } else {
+    q = q.eq("state", fields.state);
+  }
+  q = q.eq("country", fields.country);
+
+  const { data: found, error: findErr } = await q.maybeSingle();
+
+  if (findErr) {
+    return { ok: false, message: findErr.message };
+  }
+  const fid = (found as { id?: string } | null)?.id;
+  if (typeof fid === "string" && fid !== "") {
+    return { ok: true, id: fid };
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from("places")
+    .insert({
+      township: fields.township,
+      county: fields.county,
+      state: fields.state,
+      country: fields.country,
+    })
+    .select("id")
+    .single();
+
+  if (insErr) {
+    return { ok: false, message: insErr.message };
+  }
+  const iid = (inserted as { id?: string } | null)?.id;
+  if (typeof iid !== "string" || iid === "") {
+    return { ok: false, message: "Failed to create place." };
+  }
+  return { ok: true, id: iid };
+}
+
+async function resolveBirthPlaceIdFromBody(
+  supabase: SupabaseClient,
+  p: PendingPersonBody
+): Promise<{ id: string | null; error: string | null }> {
+  const rawId = p.birth_place_id;
+  if (typeof rawId === "string" && rawId.trim() !== "") {
+    return { id: rawId.trim(), error: null };
+  }
+  const fields = parsePlaceFields(p.birth_place_fields);
+  if (fields === null) {
+    return { id: null, error: null };
+  }
+  const r = await findOrCreatePlace(supabase, fields);
+  if (!r.ok) {
+    return { id: null, error: r.message };
+  }
+  return { id: r.id, error: null };
+}
+
+async function resolveEventPlaceIdFromEvent(
+  supabase: SupabaseClient,
+  e: Record<string, unknown>
+): Promise<{ id: string | null; error: string | null }> {
+  const rawId = e.event_place_id;
+  if (typeof rawId === "string" && rawId.trim() !== "") {
+    return { id: rawId.trim(), error: null };
+  }
+  const fields = parsePlaceFields(e.event_place_fields);
+  if (fields === null) {
+    return { id: null, error: null };
+  }
+  const r = await findOrCreatePlace(supabase, fields);
+  if (!r.ok) {
+    return { id: null, error: r.message };
+  }
+  return { id: r.id, error: null };
+}
+
+function placeFieldsFromAiEventPlaceRaw(raw: unknown): PlaceFields | null {
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (!t) return null;
+    return { township: null, county: null, state: null, country: t };
+  }
+  return parsePlaceFields(raw);
+}
+
 function toPersonPayload(p: PendingPersonBody) {
   const first_name = String(p.first_name ?? "").trim();
   const last_name = String(p.last_name ?? "").trim();
@@ -90,14 +222,17 @@ function toPersonPayload(p: PendingPersonBody) {
     middle_name: String(p.middle_name ?? "").trim() || null,
     birth_date: String(p.birth_date ?? "").trim() || null,
     death_date: String(p.death_date ?? "").trim() || null,
-    birth_place: String(p.birth_place ?? "").trim() || null,
     gender: String(p.gender ?? "").trim() || "Unknown",
     notes: String(p.notes ?? "").trim() || null,
   };
 }
 
+type PersonPayload = ReturnType<typeof toPersonPayload> & {
+  birth_place_id: string | null;
+};
+
 function valueForMergeUpdate(
-  payload: ReturnType<typeof toPersonPayload>,
+  payload: PersonPayload,
   field: MergeField
 ): string | null {
   switch (field) {
@@ -111,8 +246,8 @@ function valueForMergeUpdate(
       return payload.birth_date;
     case "death_date":
       return payload.death_date;
-    case "birth_place":
-      return payload.birth_place;
+    case "birth_place_id":
+      return payload.birth_place_id;
     case "gender":
       return payload.gender;
     case "notes":
@@ -217,10 +352,19 @@ export async function POST(request: NextRequest) {
     const existingId =
       typeof p.existingPersonId === "string" ? p.existingPersonId.trim() : "";
 
+    const birthRes = await resolveBirthPlaceIdFromBody(supabase, p);
+    if (birthRes.error) {
+      return NextResponse.json({ error: birthRes.error }, { status: 500 });
+    }
+    const payload: PersonPayload = {
+      ...toPersonPayload(p),
+      birth_place_id: birthRes.id,
+    };
+
     if (existingId) {
       const { data: row, error: fetchErr } = await supabase
         .from("persons")
-        .select("id, birth_place")
+        .select("id, birth_place_id")
         .eq("id", existingId)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -236,7 +380,6 @@ export async function POST(request: NextRequest) {
       }
 
       const fieldChoices = mergeByExistingId.get(existingId) ?? {};
-      const payload = toPersonPayload(p);
       const updates: Partial<Record<MergeField, string | null>> = {};
 
       for (const [fieldKey, choice] of Object.entries(fieldChoices)) {
@@ -244,13 +387,13 @@ export async function POST(request: NextRequest) {
         updates[fieldKey] = valueForMergeUpdate(payload, fieldKey);
       }
 
-      const existingBirthPlace = (row as { birth_place?: string | null })
-        .birth_place;
+      const existingBirthPlaceId = (row as { birth_place_id?: string | null })
+        .birth_place_id;
       if (
-        isEmptyDbField(existingBirthPlace) &&
-        !isEmptyDbField(payload.birth_place)
+        isEmptyDbField(existingBirthPlaceId) &&
+        !isEmptyDbField(payload.birth_place_id)
       ) {
-        updates.birth_place = payload.birth_place;
+        updates.birth_place_id = payload.birth_place_id;
       }
 
       if (Object.keys(updates).length > 0) {
@@ -267,7 +410,6 @@ export async function POST(request: NextRequest) {
 
       resolvedIds.push(existingId);
     } else {
-      const payload = toPersonPayload(p);
       if (!payload.first_name || !payload.last_name) {
         return NextResponse.json(
           { error: "First and last name are required for each new person." },
@@ -282,7 +424,7 @@ export async function POST(request: NextRequest) {
         last_name: payload.last_name,
         birth_date: payload.birth_date,
         death_date: payload.death_date,
-        birth_place: payload.birth_place,
+        birth_place_id: payload.birth_place_id,
         gender: payload.gender,
         notes: payload.notes,
       };
@@ -423,6 +565,10 @@ export async function POST(request: NextRequest) {
       const storyShort =
         String(e.story_short ?? "").trim() || null;
       const storyFull = String(e.story_full ?? "").trim() || null;
+      const evPlaceRes = await resolveEventPlaceIdFromEvent(supabase, e);
+      if (evPlaceRes.error) {
+        return NextResponse.json({ error: evPlaceRes.error }, { status: 500 });
+      }
       const { error: evSaveErr } = await savePersonEventWithDedupe(
         supabase,
         user.id,
@@ -431,7 +577,7 @@ export async function POST(request: NextRequest) {
         {
           event_type: String(e.event_type ?? "").trim() || "other",
           event_date: String(e.event_date ?? "").trim() || null,
-          event_place: String(e.event_place ?? "").trim() || null,
+          event_place_id: evPlaceRes.id,
           notes: noteText,
           story_short: storyShort,
           story_full: storyFull,
@@ -441,37 +587,6 @@ export async function POST(request: NextRequest) {
       if (evSaveErr) {
         return NextResponse.json({ error: evSaveErr }, { status: 500 });
       }
-    }
-  }
-
-  for (const pe of extractParentEventsFromAi(recordRow.ai_response)) {
-    const parentName = String(pe.person_name ?? "").trim();
-    if (!parentName) continue;
-
-    const parentId = nameToId.get(normalizeFullName(parentName));
-    if (!parentId) continue;
-
-    const descText = String(pe.description ?? "").trim() || null;
-    const pStoryShort = String(pe.story_short ?? "").trim() || null;
-    const pStoryFull = String(pe.story_full ?? "").trim() || null;
-
-    const { error: peSaveErr } = await savePersonEventWithDedupe(
-      supabase,
-      user.id,
-      parentId,
-      recordId,
-      {
-        event_type: String(pe.event_type ?? "").trim() || "child born",
-        event_date: String(pe.event_date ?? "").trim() || null,
-        event_place: String(pe.event_place ?? "").trim() || null,
-        notes: descText,
-        story_short: pStoryShort,
-        story_full: pStoryFull,
-      }
-    );
-
-    if (peSaveErr) {
-      return NextResponse.json({ error: peSaveErr }, { status: 500 });
     }
   }
 

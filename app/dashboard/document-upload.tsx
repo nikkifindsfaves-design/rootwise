@@ -133,6 +133,11 @@ export default function DocumentUploadSection({
       });
 
       const data = await response.json();
+      console.log("[document-upload] process-document response", {
+        ok: response.ok,
+        status: response.status,
+        body: data,
+      });
 
       if (!response.ok) {
         const message =
@@ -163,7 +168,8 @@ export default function DocumentUploadSection({
       }
 
       router.push(`/review/${recordId}`);
-    } catch {
+    } catch (err) {
+      console.log("[document-upload] process-document error", err);
       setError("Something went wrong while uploading your document.");
     } finally {
       setIsLoading(false);
@@ -188,6 +194,11 @@ export default function DocumentUploadSection({
       });
 
       const data = await response.json();
+      console.log("[document-upload] process-document response", {
+        ok: response.ok,
+        status: response.status,
+        body: data,
+      });
 
       if (!response.ok) {
         const message =
@@ -206,7 +217,8 @@ export default function DocumentUploadSection({
 
       resetMultiPersonModal();
       router.push(`/review/${newRecordId}`);
-    } catch {
+    } catch (err) {
+      console.log("[document-upload] process-document error", err);
       setError("Something went wrong while processing your document.");
     } finally {
       setMultiPersonProcessing(false);

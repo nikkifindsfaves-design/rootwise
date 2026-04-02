@@ -61,7 +61,7 @@ export async function savePersonEventWithDedupe(
   fields: {
     event_type: string;
     event_date: string | null;
-    event_place: string | null;
+    event_place_id: string | null;
     notes: string | null;
     story_short: string | null;
     story_full: string | null;
@@ -92,7 +92,7 @@ export async function savePersonEventWithDedupe(
       record_id: recordId,
       event_type: fields.event_type,
       event_date: fields.event_date,
-      event_place: fields.event_place,
+      event_place_id: fields.event_place_id,
       notes: fields.notes,
       story_short: fields.story_short,
       story_full: fields.story_full,
