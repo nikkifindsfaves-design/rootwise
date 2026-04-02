@@ -630,6 +630,8 @@ export default function ReviewRecordClient({
           .map((e) => ({ cardKey: card.key, eventKey: e.key }));
       });
 
+      console.log("[review continue] staleTargets", staleTargets);
+
       if (recordTreeId && staleTargets.length > 0) {
         const regenerated = await Promise.all(
           staleTargets.map(async (target) => {
@@ -719,6 +721,18 @@ export default function ReviewRecordClient({
           }),
         }));
         setCards(workingCards);
+        console.log(
+          "[review continue] workingCards events after regenerate",
+          workingCards.flatMap((card) =>
+            card.events.map((e) => ({
+              cardKey: card.key,
+              eventType: e.eventType,
+              stale: e.stale,
+              eventStoryShort: e.eventStoryShort,
+              eventDate: e.eventDate,
+            }))
+          )
+        );
       }
 
       const checked = workingCards.filter((c) => c.include);
@@ -949,15 +963,22 @@ export default function ReviewRecordClient({
                           <input
                             className={inputClass}
                             value={item.form.birth_date}
-                            onChange={(e) =>
-                              updateCard(item.key, {
-                                ...markAllEventsStale(item),
-                                form: {
-                                  ...item.form,
-                                  birth_date: e.target.value,
-                                },
-                              })
-                            }
+                            onChange={(e) => {
+                              const nextDate = e.target.value;
+                              setCards((prev) =>
+                                markEveryCardEventsStale(prev).map((c) => ({
+                                  ...c,
+                                  form:
+                                    c.key === item.key
+                                      ? { ...c.form, birth_date: nextDate }
+                                      : c.form,
+                                  events: c.events.map((ev) => ({
+                                    ...ev,
+                                    eventDate: nextDate,
+                                  })),
+                                }))
+                              );
+                            }}
                           />
                         </div>
                         <div>
@@ -980,26 +1001,46 @@ export default function ReviewRecordClient({
                           <label className={labelClass}>Birth place</label>
                           <PlaceInput
                             value={item.form.birth_place_display}
-                            onChange={(v) =>
-                              updateCard(item.key, {
-                                ...markAllEventsStale(item),
-                                form: {
-                                  ...item.form,
-                                  birth_place_display: v,
-                                  birth_place_id: null,
-                                },
-                              })
-                            }
-                            onPlaceSelect={(place) =>
-                              updateCard(item.key, {
-                                ...markAllEventsStale(item),
-                                form: {
-                                  ...item.form,
-                                  birth_place_display: place.display,
-                                  birth_place_id: place.id,
-                                },
-                              })
-                            }
+                            onChange={(v) => {
+                              setCards((prev) =>
+                                markEveryCardEventsStale(prev).map((c) => ({
+                                  ...c,
+                                  form:
+                                    c.key === item.key
+                                      ? {
+                                          ...c.form,
+                                          birth_place_display: v,
+                                          birth_place_id: null,
+                                        }
+                                      : c.form,
+                                  events: c.events.map((ev) => ({
+                                    ...ev,
+                                    event_place_display: v,
+                                    event_place_id: null,
+                                  })),
+                                }))
+                              );
+                            }}
+                            onPlaceSelect={(place) => {
+                              setCards((prev) =>
+                                markEveryCardEventsStale(prev).map((c) => ({
+                                  ...c,
+                                  form:
+                                    c.key === item.key
+                                      ? {
+                                          ...c.form,
+                                          birth_place_display: place.display,
+                                          birth_place_id: place.id,
+                                        }
+                                      : c.form,
+                                  events: c.events.map((ev) => ({
+                                    ...ev,
+                                    event_place_display: place.display,
+                                    event_place_id: place.id,
+                                  })),
+                                }))
+                              );
+                            }}
                           />
                         </div>
                         <div className="sm:col-span-2">
