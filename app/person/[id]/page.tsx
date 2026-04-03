@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,6 +29,7 @@ const colors = {
   parchment: "var(--dg-parchment)",
   cream: "var(--dg-cream)",
   avatarBg: "var(--dg-avatar-bg)",
+  avatarInitials: "var(--dg-avatar-initials)",
   forest: "var(--dg-forest)",
 };
 
@@ -926,7 +928,7 @@ function FamilyMemberCard({
         ) : (
           <span
             className="flex h-full w-full items-center justify-center text-xs font-bold"
-            style={{ fontFamily: serif, color: colors.brownMid }}
+            style={{ fontFamily: serif, color: colors.avatarInitials }}
           >
             {initials(p)}
           </span>
@@ -1008,6 +1010,100 @@ function FamilyGroup({
   );
 }
 
+function TimelineEventStoryBlock({
+  storyText,
+  typ,
+  expanded,
+  onToggleExpanded,
+}: {
+  storyText: string;
+  typ: string;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [hasOverflow, setHasOverflow] = useState(false);
+  const trimmed = storyText.trim();
+  const isFallback = trimmed === "";
+
+  useLayoutEffect(() => {
+    if (isFallback) {
+      setHasOverflow(false);
+      return;
+    }
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (expanded) return;
+      setHasOverflow(el.scrollHeight > el.clientHeight + 1);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [trimmed, expanded, isFallback]);
+
+  if (isFallback) {
+    return (
+      <p
+        className="text-sm italic leading-relaxed"
+        style={{
+          fontFamily: sans,
+          color: colors.brownMuted,
+        }}
+      >
+        {typ}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="relative">
+        <div
+          ref={bodyRef}
+          className="whitespace-pre-wrap text-sm leading-relaxed"
+          style={{
+            fontFamily: sans,
+            color: colors.brownMid,
+            maxHeight: expanded ? undefined : "6rem",
+            overflow: expanded ? "visible" : "hidden",
+          }}
+        >
+          {trimmed}
+        </div>
+        {!expanded && hasOverflow ? (
+          <div
+            className="pointer-events-none absolute bottom-0 left-0 right-0 h-12"
+            style={{
+              background: `linear-gradient(to bottom, transparent, ${colors.cream})`,
+            }}
+            aria-hidden
+          />
+        ) : null}
+      </div>
+      {hasOverflow ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+            style={{
+              fontFamily: sans,
+              color: colors.forest,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export default function PersonProfilePage() {
   const params = useParams();
   const router = useRouter();
@@ -1078,7 +1174,7 @@ export default function PersonProfilePage() {
   >(() => new Set());
   const [expandedTimelineSourcesKeys, setExpandedTimelineSourcesKeys] =
     useState<Set<string>>(() => new Set());
-  const [expandedStoryFullIds, setExpandedStoryFullIds] = useState<
+  const [expandedTimelineStoryKeys, setExpandedTimelineStoryKeys] = useState<
     Set<string>
   >(() => new Set());
   const [researchNoteId, setResearchNoteId] = useState<string | null>(null);
@@ -1256,7 +1352,7 @@ export default function PersonProfilePage() {
   useEffect(() => {
     setExpandedTimelineNotesKeys(new Set());
     setExpandedTimelineSourcesKeys(new Set());
-    setExpandedStoryFullIds(new Set());
+    setExpandedTimelineStoryKeys(new Set());
     setEditingEventId(null);
     setEventEditDraft(null);
     setEventDeleteConfirmId(null);
@@ -2249,15 +2345,6 @@ export default function PersonProfilePage() {
     () => sortEventsChronologically(dedupeTimelineEvents(events)),
     [events]
   );
-
-  function toggleStoryFullExpanded(eventId: string) {
-    setExpandedStoryFullIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(eventId)) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
-  }
 
   function extFromImageFile(file: File): string {
     const t = (file.type || "").toLowerCase();
@@ -3848,7 +3935,7 @@ export default function PersonProfilePage() {
       next.delete(eventId);
       return next;
     });
-    setExpandedStoryFullIds((prev) => {
+    setExpandedTimelineStoryKeys((prev) => {
       const next = new Set(prev);
       next.delete(eventId);
       return next;
@@ -3866,6 +3953,15 @@ export default function PersonProfilePage() {
 
   function toggleTimelineSourcesForEvent(eventId: string) {
     setExpandedTimelineSourcesKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
+  }
+
+  function toggleTimelineStoryExpanded(eventId: string) {
+    setExpandedTimelineStoryKeys((prev) => {
       const next = new Set(prev);
       if (next.has(eventId)) next.delete(eventId);
       else next.add(eventId);
@@ -4259,7 +4355,7 @@ export default function PersonProfilePage() {
             ) : (
               <span
                 className="flex h-full w-full items-center justify-center text-5xl font-bold"
-                style={{ fontFamily: serif, color: colors.brownMid }}
+                style={{ fontFamily: serif, color: colors.avatarInitials }}
               >
                 {initials(person)}
               </span>
@@ -4580,12 +4676,8 @@ export default function PersonProfilePage() {
                         events: mergeGroup,
                       };
                       const typ = (ev.event_type || "Event").trim();
-                      const headline = ev.story_short?.trim() || typ;
-                      const fullPick = firstStoryFullInCluster(mergeCluster);
-                      const full = fullPick.text;
-                      const storyOpen = expandedStoryFullIds.has(
-                        fullPick.eventId
-                      );
+                      const mergeClusterStoryFull =
+                        firstStoryFullInCluster(mergeCluster);
                       const placesLine = clusterPlacesLine(mergeCluster);
                       const noteSegments = clusterNotesSegmentsForTimeline(
                         mergeCluster,
@@ -4907,15 +4999,16 @@ export default function PersonProfilePage() {
                                 </div>
                               ) : (
                                 <div className="pr-12 md:pr-14">
-                                  <p
-                                    className="text-lg font-bold leading-snug"
-                                    style={{
-                                      fontFamily: serif,
-                                      color: colors.brownDark,
-                                    }}
-                                  >
-                                    {headline}
-                                  </p>
+                                  <TimelineEventStoryBlock
+                                    storyText={mergeClusterStoryFull.text}
+                                    typ={typ}
+                                    expanded={expandedTimelineStoryKeys.has(
+                                      ev.id
+                                    )}
+                                    onToggleExpanded={() =>
+                                      toggleTimelineStoryExpanded(ev.id)
+                                    }
+                                  />
                                   <p
                                     className="mt-1 text-sm italic"
                                     style={{
@@ -4925,60 +5018,6 @@ export default function PersonProfilePage() {
                                   >
                                     {placesLine}
                                   </p>
-                                  {full ? (
-                                    <div className="mt-2">
-                                      {!storyOpen ? (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            toggleStoryFullExpanded(
-                                              fullPick.eventId
-                                            )
-                                          }
-                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                          style={{
-                                            fontFamily: sans,
-                                            color: colors.forest,
-                                            fontWeight: 600,
-                                            cursor: "pointer",
-                                          }}
-                                          aria-expanded={false}
-                                        >
-                                          Read more
-                                        </button>
-                                      ) : (
-                                        <div>
-                                          <p
-                                            className="whitespace-pre-wrap text-sm leading-relaxed"
-                                            style={{
-                                              fontFamily: sans,
-                                              color: colors.brownMid,
-                                            }}
-                                          >
-                                            {full}
-                                          </p>
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              toggleStoryFullExpanded(
-                                                fullPick.eventId
-                                              )
-                                            }
-                                            className="mt-2 border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                            style={{
-                                              fontFamily: sans,
-                                              color: colors.forest,
-                                              fontWeight: 600,
-                                              cursor: "pointer",
-                                            }}
-                                            aria-expanded={true}
-                                          >
-                                            Show less
-                                          </button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : null}
                                   {descLines.map((line, di) => (
                                     <p
                                       key={`${listKey}-d-${di}`}

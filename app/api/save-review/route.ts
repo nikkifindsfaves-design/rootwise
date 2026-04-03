@@ -562,8 +562,6 @@ export async function POST(request: NextRequest) {
       const e = ev as Record<string, unknown>;
       const noteText =
         String(e.notes ?? e.description ?? "").trim() || null;
-      const storyShort =
-        String(e.story_short ?? "").trim() || null;
       const storyFull = String(e.story_full ?? "").trim() || null;
       const evPlaceRes = await resolveEventPlaceIdFromEvent(supabase, e);
       if (evPlaceRes.error) {
@@ -579,7 +577,6 @@ export async function POST(request: NextRequest) {
           event_date: String(e.event_date ?? "").trim() || null,
           event_place_id: evPlaceRes.id,
           notes: noteText,
-          story_short: storyShort,
           story_full: storyFull,
         }
       );

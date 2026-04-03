@@ -1,9 +1,10 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { formatPlace, type PlaceObject } from "@/lib/utils/places";
 import type { PendingReviewPayload } from "../review-record-client";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 const PENDING_REVIEW_KEY = "pendingReview";
 
@@ -20,6 +21,11 @@ const MERGE_FIELDS = [
 
 type MergeField = (typeof MERGE_FIELDS)[number];
 
+/** Shown in the duplicate comparison UI; merge/save still uses full `MERGE_FIELDS`. */
+const COMPARISON_FIELDS = MERGE_FIELDS.filter(
+  (f): f is Exclude<MergeField, "notes"> => f !== "notes"
+);
+
 type DbPerson = {
   id: string;
   first_name: string;
@@ -28,11 +34,14 @@ type DbPerson = {
   birth_date: string | null;
   death_date: string | null;
   birth_place_id: string | null;
+  birth_place: PlaceObject | null;
   gender: string | null;
   notes: string | null;
 };
 
-type PendingPerson = PendingReviewPayload["people"][number];
+type PendingPerson = PendingReviewPayload["people"][number] & {
+  birth_place_display?: string | null;
+};
 
 type PersonWithMatch = {
   pendingIndex: number;
@@ -40,7 +49,10 @@ type PersonWithMatch = {
   match: DbPerson;
 };
 
-type FieldChoice = "existing" | "record" | "new";
+/** Per duplicate card: merge using field-level choices vs add extracted person as new. */
+type DuplicateCardMode = "merge" | "new";
+
+type FieldMergePick = "existing" | "record";
 
 function levenshtein(a: string, b: string): number {
   const m = a.length;
@@ -126,10 +138,10 @@ function displayValue(
           ? fieldStr(pending.middle_name)
           : field === "birth_date"
             ? fieldStr(pending.birth_date)
-            : field === "death_date"
+              : field === "death_date"
               ? fieldStr(pending.death_date)
               : field === "birth_place_id"
-                ? fieldStr(pending.birth_place_id)
+                ? fieldStr(pending.birth_place_display)
                 : field === "gender"
                   ? fieldStr(pending.gender)
                   : fieldStr(pending.notes);
@@ -146,7 +158,9 @@ function displayValue(
             : field === "death_date"
               ? fieldStr(existing.death_date)
               : field === "birth_place_id"
-                ? fieldStr(existing.birth_place_id)
+                ? existing.birth_place
+                  ? formatPlace(existing.birth_place)
+                  : ""
                 : field === "gender"
                   ? fieldStr(existing.gender)
                   : fieldStr(existing.notes);
@@ -154,13 +168,24 @@ function displayValue(
   return { record: r || "—", tree: e || "—" };
 }
 
-/** One card-level choice applies to every merge field for the API (merge path only). */
-function fieldChoicesForCard(
-  mode: "existing" | "record"
+function fieldRowNeedsChoice(
+  pending: PendingPerson,
+  match: DbPerson,
+  field: MergeField
+): boolean {
+  const { record: rv, tree: tv } = displayValue(pending, match, field);
+  if (rv === "—" || tv === "—") return false;
+  return rv !== tv;
+}
+
+function buildFieldChoicesForMatch(
+  matchId: string,
+  fieldMergeChoices: Record<string, Partial<Record<MergeField, FieldMergePick>>>
 ): Record<string, "existing" | "record"> {
+  const chosen = fieldMergeChoices[matchId] ?? {};
   const out: Record<string, "existing" | "record"> = {};
   for (const field of MERGE_FIELDS) {
-    out[field] = mode;
+    out[field] = chosen[field] ?? "existing";
   }
   return out;
 }
@@ -179,8 +204,13 @@ function fullNameFromDbPerson(p: DbPerson): string {
     .join(" ");
 }
 
-const inputClass =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600";
+const newPersonCardClass =
+  "w-full rounded-lg border px-3 py-2 text-sm shadow-sm";
+
+const newPersonCardStyle: CSSProperties = {
+  backgroundColor: "var(--dg-cream)",
+  borderColor: "var(--dg-brown-border)",
+};
 
 export default function ReviewDuplicatesPage() {
   const params = useParams();
@@ -200,9 +230,13 @@ export default function ReviewDuplicatesPage() {
   const [newPeople, setNewPeople] = useState<
     { pendingIndex: number; pending: PendingPerson }[]
   >([]);
-  /** Per matched tree person: keep DB as-is vs overwrite from the record. */
+  /** Per matched tree person: merge (field-level picks) vs add as new person. */
   const [cardMergeChoice, setCardMergeChoice] = useState<
-    Record<string, FieldChoice>
+    Record<string, DuplicateCardMode>
+  >({});
+  /** Per match id + field: when values conflict, "record" vs "existing" (tree). */
+  const [fieldMergeChoices, setFieldMergeChoices] = useState<
+    Record<string, Partial<Record<MergeField, FieldMergePick>>>
   >({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -297,7 +331,7 @@ export default function ReviewDuplicatesPage() {
       let personsQuery = supabase
         .from("persons")
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, gender, notes"
+          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, gender, notes, birth_place:places!birth_place_id(township, county, state, country)"
         )
         .eq("user_id", user.id);
       if (returnTreeId) {
@@ -313,7 +347,15 @@ export default function ReviewDuplicatesPage() {
         return;
       }
 
-      const tree = (persons ?? []) as DbPerson[];
+      const tree = (persons ?? []).map((row) => {
+        const r = row as typeof row & {
+          birth_place?: PlaceObject | PlaceObject[] | null;
+        };
+        const bp = r.birth_place;
+        const birth_place: PlaceObject | null =
+          bp == null ? null : Array.isArray(bp) ? (bp[0] ?? null) : bp;
+        return { ...r, birth_place } as DbPerson;
+      });
       const usedMatchIds = new Set<string>();
       const withMatches: PersonWithMatch[] = [];
       const fresh: { pendingIndex: number; pending: PendingPerson }[] = [];
@@ -328,9 +370,22 @@ export default function ReviewDuplicatesPage() {
         }
       });
 
-      const initialMerge: Record<string, FieldChoice> = {};
+      const initialCard: Record<string, DuplicateCardMode> = {};
+      const initialField: Record<
+        string,
+        Partial<Record<MergeField, FieldMergePick>>
+      > = {};
       for (const row of withMatches) {
-        initialMerge[row.match.id] = "existing";
+        initialCard[row.match.id] = "merge";
+        const perField: Partial<Record<MergeField, FieldMergePick>> = {};
+        for (const field of MERGE_FIELDS) {
+          if (fieldRowNeedsChoice(row.pending, row.match, field)) {
+            perField[field] = "existing";
+          }
+        }
+        if (Object.keys(perField).length > 0) {
+          initialField[row.match.id] = perField;
+        }
       }
 
       if (cancelled) return;
@@ -338,7 +393,8 @@ export default function ReviewDuplicatesPage() {
       setPendingReview(payload);
       setPeopleWithMatches(withMatches);
       setNewPeople(fresh);
-      setCardMergeChoice(initialMerge);
+      setCardMergeChoice(initialCard);
+      setFieldMergeChoices(initialField);
       setLoadState("ready");
     }
 
@@ -351,24 +407,19 @@ export default function ReviewDuplicatesPage() {
   const mergeDecisionsPayload = useMemo(() => {
     if (!pendingReview) return [];
     return peopleWithMatches
-      .filter(({ match }) => {
-        const c = cardMergeChoice[match.id] ?? "existing";
-        return c === "existing" || c === "record";
-      })
+      .filter(({ match }) => (cardMergeChoice[match.id] ?? "merge") === "merge")
       .map(({ match }) => ({
         existingPersonId: match.id,
-        fieldChoices: fieldChoicesForCard(
-          (cardMergeChoice[match.id] ?? "existing") as "existing" | "record"
-        ),
+        fieldChoices: buildFieldChoicesForMatch(match.id, fieldMergeChoices),
       }));
-  }, [pendingReview, peopleWithMatches, cardMergeChoice]);
+  }, [pendingReview, peopleWithMatches, cardMergeChoice, fieldMergeChoices]);
 
   const pendingPersonsPayload = useMemo(() => {
     if (!pendingReview) return [];
     const matchByIndex = new Map<number, DbPerson>();
     const addAsNewIndex = new Set<number>();
     for (const row of peopleWithMatches) {
-      const c = cardMergeChoice[row.match.id] ?? "existing";
+      const c = cardMergeChoice[row.match.id] ?? "merge";
       if (c === "new") {
         addAsNewIndex.add(row.pendingIndex);
       } else {
@@ -389,6 +440,17 @@ export default function ReviewDuplicatesPage() {
       return { ...person };
     });
   }, [pendingReview, peopleWithMatches, cardMergeChoice]);
+
+  function setFieldMergePick(
+    matchId: string,
+    field: MergeField,
+    pick: FieldMergePick
+  ) {
+    setFieldMergeChoices((prev) => ({
+      ...prev,
+      [matchId]: { ...prev[matchId], [field]: pick },
+    }));
+  }
 
   async function handleAddToTree() {
     if (!pendingReview || submitting) return;
@@ -428,11 +490,8 @@ export default function ReviewDuplicatesPage() {
     }
   }
 
-  function setCardMergeChoiceForPerson(
-    matchPersonId: string,
-    choice: FieldChoice
-  ) {
-    setCardMergeChoice((prev) => ({ ...prev, [matchPersonId]: choice }));
+  function setDuplicateCardMode(matchPersonId: string, mode: DuplicateCardMode) {
+    setCardMergeChoice((prev) => ({ ...prev, [matchPersonId]: mode }));
   }
 
   if (loadState === "unauthorized") {
@@ -441,9 +500,14 @@ export default function ReviewDuplicatesPage() {
 
   if (loadState === "loading") {
     return (
-      <div className="min-h-screen bg-zinc-50 px-4 py-12">
+      <div
+        className="min-h-screen px-4 py-12"
+        style={{ backgroundColor: "var(--dg-bg-main)" }}
+      >
         <div className="mx-auto max-w-4xl">
-          <p className="text-sm text-zinc-600">Loading…</p>
+          <p className="text-sm" style={{ color: "var(--dg-brown-muted)" }}>
+            Loading…
+          </p>
         </div>
       </div>
     );
@@ -451,9 +515,15 @@ export default function ReviewDuplicatesPage() {
 
   if (loadState === "error") {
     return (
-      <div className="min-h-screen bg-zinc-50 px-4 py-12">
+      <div
+        className="min-h-screen px-4 py-12"
+        style={{ backgroundColor: "var(--dg-bg-main)" }}
+      >
         <div className="mx-auto max-w-4xl">
-          <h1 className="text-2xl font-semibold text-zinc-900">
+          <h1
+            className="text-2xl font-semibold"
+            style={{ color: "var(--dg-brown-dark)" }}
+          >
             Review your records
           </h1>
           <p className="mt-4 text-sm text-red-600">{loadError}</p>
@@ -463,15 +533,28 @@ export default function ReviewDuplicatesPage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-zinc-50 px-4 py-12">
+    <div
+      className="relative min-h-screen px-4 py-12"
+      style={{ backgroundColor: "var(--dg-bg-main)" }}
+    >
       {submitting ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/50 backdrop-blur-[1px]"
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-[1px]"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="status"
           aria-live="polite"
         >
-          <div className="rounded-xl border border-zinc-200 bg-white px-8 py-6 shadow-lg">
-            <p className="text-base font-medium text-zinc-900">
+          <div
+            className="rounded-xl border px-8 py-6 shadow-lg"
+            style={{
+              backgroundColor: "var(--dg-cream)",
+              borderColor: "var(--dg-brown-border)",
+            }}
+          >
+            <p
+              className="text-base font-medium"
+              style={{ color: "var(--dg-brown-dark)" }}
+            >
               Adding to your tree…
             </p>
           </div>
@@ -480,10 +563,13 @@ export default function ReviewDuplicatesPage() {
 
       <div className="mx-auto max-w-5xl space-y-10">
         <header>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+          <h1
+            className="text-2xl font-semibold tracking-tight"
+            style={{ color: "var(--dg-brown-dark)" }}
+          >
             Review your records
           </h1>
-          <p className="mt-2 text-sm text-zinc-600">
+          <p className="mt-2 text-sm" style={{ color: "var(--dg-brown-muted)" }}>
             Compare extracted people with your tree. For each suggested duplicate,
             choose whether to keep your existing record, update it from this
             document, or add the extracted person as someone new if they are not
@@ -499,135 +585,269 @@ export default function ReviewDuplicatesPage() {
 
         {peopleWithMatches.length > 0 ? (
           <section className="space-y-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            <h2
+              className="text-sm font-semibold uppercase tracking-wide"
+              style={{ color: "var(--dg-brown-muted)" }}
+            >
               Possible duplicates
             </h2>
             {peopleWithMatches.map(
               ({ pending, match, pendingIndex }) => {
-                const cardChoice = cardMergeChoice[match.id] ?? "existing";
-                const addAsNew = cardChoice === "new";
+                const cardMode = cardMergeChoice[match.id] ?? "merge";
+                const addAsNew = cardMode === "new";
                 return (
                 <article
                   key={`${pendingIndex}-${match.id}`}
-                  className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm"
+                  className="overflow-hidden rounded-xl border shadow-sm"
+                  style={{
+                    backgroundColor: "var(--dg-cream)",
+                    borderColor: "var(--dg-brown-border)",
+                  }}
                 >
-                  <div className="border-b border-zinc-100 bg-zinc-50/80 px-4 py-3">
-                    <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  <div
+                    className="border-b px-4 py-3"
+                    style={{
+                      borderBottomColor: "var(--dg-brown-border)",
+                      backgroundColor: "var(--dg-parchment)",
+                    }}
+                  >
+                    <p
+                      className="text-xs font-medium uppercase tracking-wide"
+                      style={{ color: "var(--dg-brown-muted)" }}
+                    >
                       Match suggestion
                     </p>
-                    <p className="mt-1 text-sm text-zinc-800">
-                      Record:{" "}
-                      <span className="font-medium">
-                        {fullNameFromPending(pending)}
-                      </span>
-                      {!addAsNew ? (
-                        <>
-                          <span className="mx-2 text-zinc-300">·</span>
+                    {!addAsNew ? (
+                      <div
+                        className="mt-1 grid grid-cols-2 gap-4 text-left text-sm"
+                        style={{
+                          color: "var(--dg-brown-muted)",
+                          gridTemplateColumns: "1fr 1fr",
+                        }}
+                      >
+                        <p className="min-w-0">
+                          Record:{" "}
+                          <span
+                            className="font-medium"
+                            style={{ color: "var(--dg-brown-dark)" }}
+                          >
+                            {fullNameFromPending(pending)}
+                          </span>
+                        </p>
+                        <p className="min-w-0">
                           Tree:{" "}
-                          <span className="font-medium">
+                          <span
+                            className="font-medium"
+                            style={{ color: "var(--dg-brown-dark)" }}
+                          >
                             {fullNameFromDbPerson(match)}
                           </span>
-                        </>
-                      ) : (
-                        <span className="ml-2 text-xs font-normal text-zinc-500">
+                        </p>
+                      </div>
+                    ) : (
+                      <p
+                        className="mt-1 text-sm"
+                        style={{ color: "var(--dg-brown-muted)" }}
+                      >
+                        Record:{" "}
+                        <span
+                          className="font-medium"
+                          style={{ color: "var(--dg-brown-dark)" }}
+                        >
+                          {fullNameFromPending(pending)}
+                        </span>
+                        <span
+                          className="ml-2 text-xs font-normal"
+                          style={{ color: "var(--dg-brown-muted)" }}
+                        >
                           (adding as new person — tree match ignored)
                         </span>
-                      )}
-                    </p>
+                      </p>
+                    )}
                   </div>
 
-                  <div className="space-y-1 p-4">
+                  <div
+                    className={`space-y-1 p-4 ${addAsNew ? "opacity-40" : ""}`}
+                  >
                     <div
-                      className={`mb-3 grid gap-4 border-b border-zinc-100 pb-2 text-xs font-semibold uppercase tracking-wide ${
+                      className={`mb-3 grid gap-4 border-b pb-2 text-left text-xs font-semibold uppercase tracking-wide ${
                         addAsNew ? "grid-cols-1" : "grid-cols-2"
                       }`}
+                      style={{
+                        borderBottomColor: "var(--dg-brown-border)",
+                        gridTemplateColumns: addAsNew ? undefined : "1fr 1fr",
+                      }}
                     >
-                      <span className="text-emerald-700">
+                      <span className="min-w-0 text-left text-emerald-700">
                         {addAsNew
                           ? "From record (will be added as new)"
                           : "From record"}
                       </span>
                       {!addAsNew ? (
-                        <span className="text-zinc-600">In your tree</span>
+                        <span
+                          className="min-w-0 text-left"
+                          style={{ color: "var(--dg-brown-muted)" }}
+                        >
+                          In your tree
+                        </span>
                       ) : null}
                     </div>
-                    {MERGE_FIELDS.map((field) => {
+                    {COMPARISON_FIELDS.map((field) => {
                       const { record: rv, tree: tv } = displayValue(
                         pending,
                         match,
                         field
                       );
+                      const needsChoice = fieldRowNeedsChoice(
+                        pending,
+                        match,
+                        field
+                      );
+                      const pick =
+                        fieldMergeChoices[match.id]?.[field] ?? "existing";
                       return (
                         <div
                           key={field}
-                          className="border-b border-zinc-50 py-3 last:border-b-0"
+                          className="border-b py-3 last:border-b-0"
+                          style={{ borderBottomColor: "var(--dg-brown-border)" }}
                         >
-                          <p className="text-xs font-medium text-zinc-500">
+                          <p
+                            className="text-xs font-medium"
+                            style={{ color: "var(--dg-brown-muted)" }}
+                          >
                             {labelForField(field)}
                           </p>
                           <div
-                            className={`mt-1 grid gap-4 text-sm ${
+                            className={`mt-1 grid gap-4 text-left text-sm ${
                               addAsNew ? "grid-cols-1" : "grid-cols-2"
                             }`}
+                            style={
+                              addAsNew
+                                ? undefined
+                                : { gridTemplateColumns: "1fr 1fr" }
+                            }
                           >
-                            <p className="text-zinc-900">{rv}</p>
+                            <p
+                              className="min-w-0 text-left"
+                              style={{ color: "var(--dg-brown-dark)" }}
+                            >
+                              {rv}
+                            </p>
                             {!addAsNew ? (
-                              <p className="text-zinc-900">{tv}</p>
+                              <p
+                                className="min-w-0 text-left"
+                                style={{ color: "var(--dg-brown-dark)" }}
+                              >
+                                {tv}
+                              </p>
                             ) : null}
                           </div>
+                          {needsChoice && !addAsNew ? (
+                            <div
+                              className="mt-2 grid grid-cols-2 gap-4 text-left text-xs"
+                              style={{ gridTemplateColumns: "1fr 1fr" }}
+                            >
+                              <label
+                                className="flex min-w-0 cursor-pointer items-center justify-start gap-2"
+                                style={{ color: "var(--dg-brown-dark)" }}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`fld-${match.id}-${field}`}
+                                  checked={pick === "record"}
+                                  onChange={() =>
+                                    setFieldMergePick(match.id, field, "record")
+                                  }
+                                  className="shrink-0 text-emerald-600"
+                                />
+                                Use from record
+                              </label>
+                              <label
+                                className="flex min-w-0 cursor-pointer items-center justify-start gap-2"
+                                style={{ color: "var(--dg-brown-dark)" }}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`fld-${match.id}-${field}`}
+                                  checked={pick === "existing"}
+                                  onChange={() =>
+                                    setFieldMergePick(
+                                      match.id,
+                                      field,
+                                      "existing"
+                                    )
+                                  }
+                                  className="shrink-0 text-emerald-600"
+                                />
+                                Keep from tree
+                              </label>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
                   </div>
 
-                  <div className="border-t border-zinc-200 bg-zinc-50/60 px-4 py-4">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+                  <div
+                    className="border-t px-4 py-4"
+                    style={{
+                      borderTopColor: "var(--dg-brown-border)",
+                      backgroundColor: "var(--dg-parchment)",
+                    }}
+                  >
+                    <p
+                      className="mb-3 text-xs font-semibold uppercase tracking-wide"
+                      style={{ color: "var(--dg-brown-muted)" }}
+                    >
                       Merge decision
                     </p>
                     <div className="flex flex-col gap-3">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-8">
-                        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
+                      <div className="flex flex-col gap-3">
+                        <label
+                          className="flex cursor-pointer items-center gap-2 text-sm"
+                          style={{ color: "var(--dg-brown-dark)" }}
+                        >
                           <input
                             type="radio"
-                            name={`merge-card-${match.id}`}
-                            checked={cardChoice === "record"}
+                            name={`dup-card-${match.id}`}
+                            checked={cardMode === "merge"}
                             onChange={() =>
-                              setCardMergeChoiceForPerson(match.id, "record")
+                              setDuplicateCardMode(match.id, "merge")
                             }
                             className="text-emerald-600"
                           />
-                          Use from record
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-800">
-                          <input
-                            type="radio"
-                            name={`merge-card-${match.id}`}
-                            checked={cardChoice === "existing"}
-                            onChange={() =>
-                              setCardMergeChoiceForPerson(match.id, "existing")
-                            }
-                            className="text-emerald-600"
-                          />
-                          Keep from tree
+                          Merge with tree match (use field choices above)
                         </label>
                       </div>
-                      <div className="border-t border-zinc-200/90 pt-4">
-                        <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700">
+                      <div
+                        className="border-t pt-4"
+                        style={{ borderTopColor: "var(--dg-brown-border)" }}
+                      >
+                        <label
+                          className="flex cursor-pointer items-start gap-2 text-sm"
+                          style={{ color: "var(--dg-brown-muted)" }}
+                        >
                           <input
                             type="radio"
-                            name={`merge-card-${match.id}`}
-                            checked={cardChoice === "new"}
+                            name={`dup-card-${match.id}`}
+                            checked={cardMode === "new"}
                             onChange={() =>
-                              setCardMergeChoiceForPerson(match.id, "new")
+                              setDuplicateCardMode(match.id, "new")
                             }
                             className="mt-0.5 text-emerald-600"
                           />
                           <span>
-                            <span className="font-medium text-zinc-900">
+                            <span
+                              className="font-medium"
+                              style={{ color: "var(--dg-brown-dark)" }}
+                            >
                               These are different people — add as new person to
                               my tree
                             </span>
-                            <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                            <span
+                              className="mt-0.5 block text-xs font-normal"
+                              style={{ color: "var(--dg-brown-muted)" }}
+                            >
                               The suggested tree match will not be changed. Only
                               the data from the record will be saved as a new
                               person.
@@ -646,19 +866,29 @@ export default function ReviewDuplicatesPage() {
 
         {newPeople.length > 0 ? (
           <section className="space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            <h2
+              className="text-sm font-semibold uppercase tracking-wide"
+              style={{ color: "var(--dg-brown-muted)" }}
+            >
               New people
             </h2>
             <ul className="space-y-3">
               {newPeople.map(({ pending, pendingIndex }) => (
                 <li
                   key={pendingIndex}
-                  className={`${inputClass} border-zinc-200 bg-white text-zinc-800`}
+                  className={newPersonCardClass}
+                  style={newPersonCardStyle}
                 >
-                  <p className="font-medium text-zinc-900">
+                  <p
+                    className="font-medium"
+                    style={{ color: "var(--dg-brown-dark)" }}
+                  >
                     {fullNameFromPending(pending)}
                   </p>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p
+                    className="mt-1 text-xs"
+                    style={{ color: "var(--dg-brown-muted)" }}
+                  >
                     Will be added as new person
                   </p>
                 </li>
@@ -668,13 +898,16 @@ export default function ReviewDuplicatesPage() {
         ) : null}
 
         {peopleWithMatches.length === 0 && newPeople.length === 0 ? (
-          <p className="text-sm text-zinc-600">
+          <p className="text-sm" style={{ color: "var(--dg-brown-muted)" }}>
             No people in this review. Go back to step 1 and include at least one
             person.
           </p>
         ) : null}
 
-        <div className="border-t border-zinc-200 pt-8">
+        <div
+          className="border-t pt-8"
+          style={{ borderTopColor: "var(--dg-brown-border)" }}
+        >
           <button
             type="button"
             onClick={() => void handleAddToTree()}

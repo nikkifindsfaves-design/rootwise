@@ -4,7 +4,12 @@ import { PlaceInput } from "@/components/ui/place-input";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type MouseEvent } from "react";
+import {
+  useMemo,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from "react";
 
 type PlaceFields = {
   township: string | null;
@@ -31,7 +36,6 @@ type AiEvent = {
   event_date?: string | null;
   event_place?: PlaceFields | string | null;
   description?: string | null;
-  story_short?: string | null;
   story_full?: string | null;
 };
 
@@ -114,7 +118,6 @@ type EventRow = {
   event_place_fields: PlaceFields | null;
   /** From AI `description`; saved to DB as `events.notes`. */
   eventNotes: string;
-  eventStoryShort: string;
   eventStoryFull: string;
   stale: boolean;
 };
@@ -141,6 +144,7 @@ export type PendingReviewPayload = {
     death_date: string | null;
     birth_place_id: string | null;
     birth_place_fields: PlaceFields | null;
+    birth_place_display: string | null;
     occupation: string | null;
     gender: string | null;
     notes: string | null;
@@ -154,7 +158,6 @@ export type PendingReviewPayload = {
       event_place_id: string | null;
       event_place_fields: PlaceFields | null;
       notes: string | null;
-      story_short: string | null;
       story_full: string | null;
     }>;
   }>;
@@ -269,6 +272,17 @@ function normalizeGenderForPendingReview(
   }
   if (s === "Male" || s === "Female" || s === "Unknown") return s;
   return "Unknown";
+}
+
+function birthPlaceDisplayForPendingPayload(form: PersonForm): string | null {
+  const raw = form.birth_place_fields as PlaceFields | string | null;
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    return t.length > 0 ? t : null;
+  }
+  const s = formatPlace(raw).trim();
+  return s.length > 0 ? s : null;
 }
 
 function toForm(p: AiPerson): PersonForm {
@@ -407,7 +421,6 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_id: null,
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
-          eventStoryShort: (e.story_short ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
           stale: false,
         });
@@ -424,7 +437,6 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_id: null,
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
-          eventStoryShort: (e.story_short ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
           stale: false,
         });
@@ -503,15 +515,35 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
     window.addEventListener("mouseup", onUp);
   }
 
+  const zoomChromeStyle: CSSProperties = {
+    borderColor: "var(--dg-brown-border)",
+    backgroundColor: "var(--dg-cream)",
+  };
+  const zoomToolbarBorder: CSSProperties = {
+    borderBottomColor: "var(--dg-brown-border)",
+  };
+  const zoomBtnStyle: CSSProperties = {
+    borderColor: "var(--dg-brown-border)",
+    backgroundColor: "var(--dg-parchment)",
+    color: "var(--dg-brown-dark)",
+  };
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-col rounded-lg border border-zinc-200 bg-white">
-      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-3 py-2">
+    <div
+      className="flex min-h-0 min-w-0 flex-col rounded-lg border"
+      style={zoomChromeStyle}
+    >
+      <div
+        className="flex flex-wrap items-center gap-2 border-b px-3 py-2"
+        style={zoomToolbarBorder}
+      >
         <button
           type="button"
           onClick={zoomOut}
           disabled={atMin}
           aria-label="Zoom out"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-zinc-50 text-base font-semibold text-zinc-800 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border text-base font-semibold hover:bg-[var(--dg-parchment-deep)] disabled:cursor-not-allowed disabled:opacity-40"
+          style={zoomBtnStyle}
         >
           −
         </button>
@@ -520,7 +552,8 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
           onClick={zoomIn}
           disabled={atMax}
           aria-label="Zoom in"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-zinc-50 text-base font-semibold text-zinc-800 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border text-base font-semibold hover:bg-[var(--dg-parchment-deep)] disabled:cursor-not-allowed disabled:opacity-40"
+          style={zoomBtnStyle}
         >
           +
         </button>
@@ -528,14 +561,18 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
           type="button"
           onClick={resetZoom}
           disabled={atMin && pan.x === 0 && pan.y === 0}
-          className="rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-[var(--dg-parchment-deep)] disabled:cursor-not-allowed disabled:opacity-40"
+          style={zoomBtnStyle}
         >
           Reset zoom
         </button>
-        <span className="text-xs text-zinc-500">{Math.round(scale * 100)}%</span>
+        <span className="text-xs" style={{ color: "var(--dg-brown-muted)" }}>
+          {Math.round(scale * 100)}%
+        </span>
       </div>
       <div
-        className="relative h-[min(70vh,720px)] min-h-[240px] w-full touch-none overflow-hidden bg-zinc-100"
+        className="relative h-[min(70vh,720px)] min-h-[240px] w-full touch-none overflow-hidden"
+        style={{ backgroundColor: "var(--dg-parchment)" }}
         onMouseDown={handleMouseDown}
         style={{
           cursor:
@@ -564,12 +601,20 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-const inputClass =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600";
+const inputFieldClass =
+  "w-full rounded-lg border px-3 py-2 text-sm shadow-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 [&::placeholder]:text-[color:var(--dg-brown-muted)]";
 
-const textareaClass = `${inputClass} min-h-[5rem] resize-y`;
+const inputFieldStyle: CSSProperties = {
+  backgroundColor: "var(--dg-cream)",
+  color: "var(--dg-brown-dark)",
+  borderColor: "var(--dg-brown-border)",
+};
 
-const labelClass = "mb-1 block text-xs font-medium text-zinc-600";
+const labelFieldClass = "mb-1 block text-xs font-medium";
+
+const labelFieldStyle: CSSProperties = {
+  color: "var(--dg-brown-muted)",
+};
 
 export default function ReviewRecordClient({
   recordId,
@@ -684,18 +729,13 @@ export default function ReviewRecordClient({
               });
               if (!response.ok) return null;
               const data = (await response.json()) as {
-                story_short?: unknown;
                 story_full?: unknown;
               };
-              if (
-                typeof data.story_short !== "string" ||
-                typeof data.story_full !== "string"
-              ) {
+              if (typeof data.story_full !== "string") {
                 return null;
               }
               return {
                 ...target,
-                storyShort: data.story_short,
                 storyFull: data.story_full,
               };
             } catch {
@@ -714,7 +754,6 @@ export default function ReviewRecordClient({
             if (!match) return { ...event, stale: false };
             return {
               ...event,
-              eventStoryShort: match.storyShort,
               eventStoryFull: match.storyFull,
               stale: false,
             };
@@ -728,7 +767,7 @@ export default function ReviewRecordClient({
               cardKey: card.key,
               eventType: e.eventType,
               stale: e.stale,
-              eventStoryShort: e.eventStoryShort,
+              eventStoryFull: e.eventStoryFull,
               eventDate: e.eventDate,
             }))
           )
@@ -748,6 +787,7 @@ export default function ReviewRecordClient({
           death_date: c.form.death_date.trim() || null,
           birth_place_id: c.form.birth_place_id,
           birth_place_fields: c.form.birth_place_fields,
+          birth_place_display: birthPlaceDisplayForPendingPayload(c.form),
           gender: normalizeGenderForPendingReview(c.form.gender),
           notes: c.form.notes.trim() || null,
           occupation: c.form.occupation.trim() || null,
@@ -772,7 +812,6 @@ export default function ReviewRecordClient({
             event_place_id: e.event_place_id,
             event_place_fields: e.event_place_fields,
             notes: e.eventNotes.trim() || null,
-            story_short: e.eventStoryShort.trim() || null,
             story_full: e.eventStoryFull.trim() || null,
           })),
         })),
@@ -795,27 +834,54 @@ export default function ReviewRecordClient({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen" style={{ backgroundColor: "var(--dg-bg-main)" }}>
       <div className="mx-auto max-w-7xl px-4 py-8">
-        <header className="mb-8 border-b border-zinc-200 pb-6">
+        <header
+          className="mb-8 border-b pb-6"
+          style={{ borderBottomColor: "var(--dg-brown-border)" }}
+        >
           <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
             Step 1 of 3 · Review extraction
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
+          <h1
+            className="mt-1 text-2xl font-semibold tracking-tight"
+            style={{ color: "var(--dg-brown-dark)" }}
+          >
             Edit extracted people
           </h1>
-          <p className="mt-2 text-sm text-zinc-600">
-            <span className="font-medium text-zinc-800">Record type:</span>{" "}
+          <p className="mt-2 text-sm" style={{ color: "var(--dg-brown-muted)" }}>
+            <span className="font-medium" style={{ color: "var(--dg-brown-dark)" }}>
+              Record type:
+            </span>{" "}
             {recordTypeLabel}
-            <span className="mx-2 text-zinc-300">·</span>
-            <span className="font-medium text-zinc-800">ID:</span> {recordId}
+            <span
+              className="mx-2"
+              style={{ color: "var(--dg-brown-border)" }}
+            >
+              ·
+            </span>
+            <span className="font-medium" style={{ color: "var(--dg-brown-dark)" }}>
+              ID:
+            </span>{" "}
+            {recordId}
           </p>
         </header>
 
         <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-zinc-900">Document</h2>
-            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+            <h2
+              className="text-sm font-semibold"
+              style={{ color: "var(--dg-brown-dark)" }}
+            >
+              Document
+            </h2>
+            <div
+              className="overflow-hidden rounded-xl border shadow-sm"
+              style={{
+                backgroundColor: "var(--dg-cream)",
+                borderColor: "var(--dg-brown-border)",
+              }}
+            >
               {signedDocumentUrl ? (
                 isImage ? (
                   <ZoomableDocumentImage
@@ -824,13 +890,21 @@ export default function ReviewRecordClient({
                   />
                 ) : (
                   <div className="flex flex-col">
-                    <div className="border-b border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+                    <div
+                      className="border-b px-3 py-2 text-xs"
+                      style={{
+                        borderBottomColor: "var(--dg-brown-border)",
+                        backgroundColor: "var(--dg-parchment)",
+                        color: "var(--dg-brown-muted)",
+                      }}
+                    >
                       Preview (no zoom for this file type)
                     </div>
                     <iframe
                       title="Document preview"
                       src={signedDocumentUrl}
-                      className="h-[min(70vh,720px)] min-h-[240px] w-full bg-white"
+                      className="h-[min(70vh,720px)] min-h-[240px] w-full"
+                      style={{ backgroundColor: "var(--dg-cream)" }}
                     />
                   </div>
                 )
@@ -844,17 +918,34 @@ export default function ReviewRecordClient({
           </section>
 
           <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-zinc-900">
+            <h2
+              className="text-sm font-semibold"
+              style={{ color: "var(--dg-brown-dark)" }}
+            >
               People ({cards.length})
             </h2>
             {!!parsed.record_type && (
-              <p className="rounded-lg border border-zinc-200 bg-zinc-100/70 px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-600">
+              <p
+                className="rounded-lg border px-3 py-2 text-xs font-medium uppercase tracking-wide"
+                style={{
+                  borderColor: "var(--dg-brown-border)",
+                  backgroundColor: "var(--dg-parchment)",
+                  color: "var(--dg-brown-muted)",
+                }}
+              >
                 {parsed.record_type}
               </p>
             )}
 
             {cards.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-600">
+              <p
+                className="rounded-xl border border-dashed p-8 text-center text-sm"
+                style={{
+                  borderColor: "var(--dg-brown-border)",
+                  backgroundColor: "var(--dg-cream)",
+                  color: "var(--dg-brown-muted)",
+                }}
+              >
                 No people were extracted from this document.
               </p>
             ) : (
@@ -862,18 +953,32 @@ export default function ReviewRecordClient({
                 {cards.map((item) => (
                   <article
                     key={item.key}
-                    className={`rounded-xl border bg-white shadow-sm transition-opacity ${
-                      item.include
-                        ? "border-zinc-200"
-                        : "border-zinc-200 opacity-60"
+                    className={`rounded-xl border shadow-sm transition-opacity ${
+                      item.include ? "" : "opacity-60"
                     }`}
+                    style={{
+                      backgroundColor: "var(--dg-cream)",
+                      borderColor: "var(--dg-brown-border)",
+                    }}
                   >
-                    <div className="flex items-start justify-between gap-3 border-b border-zinc-100 px-4 py-3">
-                      <h3 className="pt-0.5 text-sm font-semibold text-zinc-900">
+                    <div
+                      className="flex items-start justify-between gap-3 border-b px-4 py-3"
+                      style={{ borderBottomColor: "var(--dg-brown-border)" }}
+                    >
+                      <h3
+                        className="pt-0.5 text-sm font-semibold"
+                        style={{ color: "var(--dg-brown-dark)" }}
+                      >
                         Person
                       </h3>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700">
-                        <span className="text-xs font-medium text-zinc-500">
+                      <label
+                        className="flex cursor-pointer items-center gap-2 text-sm"
+                        style={{ color: "var(--dg-brown-muted)" }}
+                      >
+                        <span
+                          className="text-xs font-medium"
+                          style={{ color: "var(--dg-brown-muted)" }}
+                        >
                           Include
                         </span>
                         <input
@@ -885,7 +990,8 @@ export default function ReviewRecordClient({
                               include: e.target.checked,
                             })
                           }
-                          className="h-4 w-4 rounded border-zinc-300 text-emerald-700 focus:ring-emerald-600"
+                          className="h-4 w-4 rounded border text-emerald-700 focus:ring-emerald-600"
+                          style={{ borderColor: "var(--dg-brown-border)" }}
                         />
                       </label>
                     </div>
@@ -893,9 +999,11 @@ export default function ReviewRecordClient({
                     <div className="space-y-4 p-4">
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
-                          <label className={labelClass}>First name</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>First name</label>
                           <input
-                            className={inputClass}
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.first_name}
                             onChange={(e) =>
                               setCards((prev) =>
@@ -915,9 +1023,11 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         <div>
-                          <label className={labelClass}>Middle name</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>Middle name</label>
                           <input
-                            className={inputClass}
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.middle_name}
                             onChange={(e) =>
                               setCards((prev) =>
@@ -937,9 +1047,11 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         <div className="sm:col-span-2">
-                          <label className={labelClass}>Last name</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>Last name</label>
                           <input
-                            className={inputClass}
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.last_name}
                             onChange={(e) =>
                               setCards((prev) =>
@@ -959,9 +1071,11 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         <div>
-                          <label className={labelClass}>Birth date</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>Birth date</label>
                           <input
-                            className={inputClass}
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.birth_date}
                             onChange={(e) => {
                               const nextDate = e.target.value;
@@ -982,9 +1096,11 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         <div>
-                          <label className={labelClass}>Death date</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>Death date</label>
                           <input
-                            className={inputClass}
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.death_date}
                             onChange={(e) =>
                               updateCard(item.key, {
@@ -998,7 +1114,8 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         <div className="sm:col-span-2">
-                          <label className={labelClass}>Birth place</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>Birth place</label>
                           <PlaceInput
                             value={item.form.birth_place_display}
                             onChange={(v) => {
@@ -1044,9 +1161,11 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         <div className="sm:col-span-2">
-                          <label className={labelClass}>Gender</label>
+                          <label className={labelFieldClass}
+                            style={labelFieldStyle}>Gender</label>
                           <select
-                            className={inputClass}
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.gender}
                             onChange={(e) =>
                               updateCard(item.key, {
@@ -1067,9 +1186,11 @@ export default function ReviewRecordClient({
                           (rel) => rel.relationshipType === "parent"
                         ) && (
                           <div className="sm:col-span-2">
-                            <label className={labelClass}>Occupation</label>
+                            <label className={labelFieldClass}
+                            style={labelFieldStyle}>Occupation</label>
                             <input
-                              className={inputClass}
+                              className={inputFieldClass}
+                            style={inputFieldStyle}
                               value={item.form.occupation}
                               onChange={(e) =>
                                 updateCard(item.key, {
@@ -1085,9 +1206,15 @@ export default function ReviewRecordClient({
                         )}
                       </div>
 
-                      <div className="border-t border-zinc-100 pt-4">
+                      <div
+                        className="border-t pt-4"
+                        style={{ borderTopColor: "var(--dg-brown-border)" }}
+                      >
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          <h4
+                            className="text-xs font-semibold uppercase tracking-wide"
+                            style={{ color: "var(--dg-brown-muted)" }}
+                          >
                             Relationships
                           </h4>
                           <button
@@ -1113,7 +1240,10 @@ export default function ReviewRecordClient({
                           </button>
                         </div>
                         {item.relationships.length === 0 ? (
-                          <p className="text-xs text-zinc-500">
+                          <p
+                            className="text-xs"
+                            style={{ color: "var(--dg-brown-muted)" }}
+                          >
                             No relationships linked from the document.
                           </p>
                         ) : (
@@ -1121,19 +1251,30 @@ export default function ReviewRecordClient({
                             {item.relationships.map((rel) => (
                               <li
                                 key={rel.key}
-                                className="flex flex-col gap-2 rounded-lg border border-zinc-100 bg-zinc-50/80 p-3 sm:flex-row sm:items-center"
+                                className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center"
+                                style={{
+                                  borderColor: "var(--dg-brown-border)",
+                                  backgroundColor: "var(--dg-parchment)",
+                                }}
                               >
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+                                  <p
+                                    className="text-[10px] font-medium uppercase tracking-wide"
+                                    style={{ color: "var(--dg-brown-muted)" }}
+                                  >
                                     Related person
                                   </p>
                                   {rel.fromExtracted ? (
-                                    <p className="text-sm text-zinc-900">
+                                    <p
+                                      className="text-sm"
+                                      style={{ color: "var(--dg-brown-dark)" }}
+                                    >
                                       {relatedPersonDisplayLabel(rel, cards)}
                                     </p>
                                   ) : (
                                     <input
-                                      className={inputClass}
+                                      className={inputFieldClass}
+                                      style={inputFieldStyle}
                                       placeholder="Full name"
                                       value={rel.relatedNameExternal}
                                       onChange={(e) =>
@@ -1155,7 +1296,8 @@ export default function ReviewRecordClient({
                                   )}
                                 </div>
                                 <select
-                                  className={`${inputClass} sm:max-w-[11rem] sm:shrink-0`}
+                                  className={`${inputFieldClass} sm:max-w-[11rem] sm:shrink-0`}
+                                  style={inputFieldStyle}
                                   value={rel.relationshipType}
                                   onChange={(e) =>
                                     updateCard(item.key, {
@@ -1190,7 +1332,8 @@ export default function ReviewRecordClient({
                                         ),
                                     })
                                   }
-                                  className="text-xs text-red-600 hover:underline sm:shrink-0"
+                                  className="text-xs hover:underline sm:shrink-0"
+                                  style={{ color: "var(--dg-danger)" }}
                                 >
                                   Remove
                                 </button>
@@ -1206,8 +1349,17 @@ export default function ReviewRecordClient({
               </div>
             )}
 
-            <div className="sticky bottom-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-lg">
-              <p className="mb-3 text-xs text-zinc-600">
+            <div
+              className="sticky bottom-4 rounded-xl border p-4 shadow-lg"
+              style={{
+                backgroundColor: "var(--dg-cream)",
+                borderColor: "var(--dg-brown-border)",
+              }}
+            >
+              <p
+                className="mb-3 text-xs"
+                style={{ color: "var(--dg-brown-muted)" }}
+              >
                 Uncheck <span className="font-medium">Include</span> to skip a
                 person. Continue saves checked people to this device and opens
                 duplicate review.

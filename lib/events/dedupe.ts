@@ -63,7 +63,7 @@ export async function savePersonEventWithDedupe(
     event_date: string | null;
     event_place_id: string | null;
     notes: string | null;
-    story_short: string | null;
+    story_short?: string | null;
     story_full: string | null;
   }
 ): Promise<{ error: string | null }> {
@@ -94,7 +94,7 @@ export async function savePersonEventWithDedupe(
       event_date: fields.event_date,
       event_place_id: fields.event_place_id,
       notes: fields.notes,
-      story_short: fields.story_short,
+      story_short: fields.story_short ?? null,
       story_full: fields.story_full,
     })
     .select("id")

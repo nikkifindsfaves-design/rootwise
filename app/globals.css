@@ -15,6 +15,7 @@
   --dg-brown-outline: #6b4423;
   --dg-forest: #2c4a3e;
   --dg-avatar-bg: #d4c4b0;
+  --dg-avatar-initials: var(--dg-brown-mid);
 
   --dg-paper-border: #c4a882;
   --dg-primary-bg: #3d2914;
@@ -48,7 +49,8 @@
   --dg-brown-border: #6b5540;
   --dg-brown-outline: #7a5c3a;
   --dg-forest: #4a8068;
-  --dg-avatar-bg: #3d3028;
+  --dg-avatar-bg: #8b6f4e;
+  --dg-avatar-initials: #fffcf7;
   --dg-paper-border: #5c4a38;
   --dg-primary-bg: #8b6423;
   --dg-primary-fg: #1a1005;

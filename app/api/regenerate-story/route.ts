@@ -147,13 +147,11 @@ ${getVoiceInstructions(vibe)}
 
 Return ONLY valid JSON with this exact shape:
 {
-  "story_short": "one punchy sentence",
   "story_full": "2-3 sentences"
 }
 
 Requirements:
 - Use only the provided event details; do not invent facts.
-- story_short must be exactly one sentence.
 - story_full must be 2-3 sentences.
 - Keep the person the event is about as the subject.
 - Never include markdown fences or extra keys.`,
@@ -198,16 +196,12 @@ Use these exact names when referring to these people in the story. Do not use an
     typeof parsed === "object" && parsed !== null
       ? (parsed as Record<string, unknown>)
       : null;
-  const storyShort =
-    record && typeof record.story_short === "string"
-      ? record.story_short.trim()
-      : "";
   const storyFull =
     record && typeof record.story_full === "string"
       ? record.story_full.trim()
       : "";
 
-  if (!storyShort || !storyFull) {
+  if (!storyFull) {
     return NextResponse.json(
       { error: "Model did not return required story fields." },
       { status: 502 }
@@ -215,7 +209,6 @@ Use these exact names when referring to these people in the story. Do not use an
   }
 
   return NextResponse.json({
-    story_short: storyShort,
     story_full: storyFull,
   });
 }

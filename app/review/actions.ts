@@ -715,7 +715,6 @@ export async function acceptPersonCard(params: {
         event_date: ev.event_date?.trim() || null,
         event_place_id: placeRes.id,
         notes: ev.notes?.trim() || null,
-        story_short: ev.story_short?.trim() || null,
         story_full: ev.story_full?.trim() || null,
       }
     );
