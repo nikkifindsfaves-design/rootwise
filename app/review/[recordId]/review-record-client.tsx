@@ -1,6 +1,7 @@
 "use client";
 
 import { PlaceInput } from "@/components/ui/place-input";
+import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
 import { useRouter } from "next/navigation";
@@ -1073,12 +1074,11 @@ export default function ReviewRecordClient({
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth date</label>
-                          <input
+                          <SmartDateInput
                             className={inputFieldClass}
                             style={inputFieldStyle}
                             value={item.form.birth_date}
-                            onChange={(e) => {
-                              const nextDate = e.target.value;
+                            onChange={(nextDate) => {
                               setCards((prev) =>
                                 markEveryCardEventsStale(prev).map((c) => ({
                                   ...c,
@@ -1098,17 +1098,14 @@ export default function ReviewRecordClient({
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Death date</label>
-                          <input
+                          <SmartDateInput
                             className={inputFieldClass}
                             style={inputFieldStyle}
                             value={item.form.death_date}
-                            onChange={(e) =>
+                            onChange={(val) =>
                               updateCard(item.key, {
                                 ...item,
-                                form: {
-                                  ...item.form,
-                                  death_date: e.target.value,
-                                },
+                                form: { ...item.form, death_date: val },
                               })
                             }
                           />

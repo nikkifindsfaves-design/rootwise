@@ -1,8 +1,11 @@
 "use client";
 
+import { PlaceInput } from "@/components/ui/place-input";
+import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
+import { formatPlace } from "@/lib/utils/places";
 import DocumentUploadSection from "../../dashboard/document-upload";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -41,6 +44,7 @@ type PersonRow = {
   birth_date: string | null;
   death_date: string | null;
   birth_place_id: string | null;
+  death_place_id?: string | null;
   photo_url: string | null;
   crop_x?: number | null;
   crop_y?: number | null;
@@ -50,6 +54,18 @@ type PersonRow = {
   gender: string | null;
   notes: string | null;
   tree_id?: string | null;
+  birth_place?: {
+    township: string | null;
+    county: string | null;
+    state: string | null;
+    country: string;
+  } | null;
+  death_place?: {
+    township: string | null;
+    county: string | null;
+    state: string | null;
+    country: string;
+  } | null;
 };
 
 type FamilyRelationshipChoice = "parent" | "child" | "spouse" | "sibling";
@@ -395,13 +411,6 @@ function eventDateLabel(ev: EventRow): string {
   } catch {
     return formatDateString(d);
   }
-}
-
-function autoFormatDateInput(value: string): string {
-  const digits = value.replace(/\D/g, "").slice(0, 8);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
 }
 
 function normalizeDateToMMDDYYYY(raw: string | null): string {
@@ -1212,6 +1221,9 @@ export default function PersonProfilePage() {
     birth_date: string;
     death_date: string;
     birth_place_id: string | null;
+    birth_place_display: string;
+    death_place_id: string | null;
+    death_place_display: string;
     gender: string;
     notes: string;
   } | null>(null);
@@ -1561,7 +1573,7 @@ export default function PersonProfilePage() {
     const { data: personData, error: personErr } = await supabase
       .from("persons")
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, photo_url, gender, notes, tree_id"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
       .eq("id", personId)
       .eq("user_id", user.id)
@@ -1580,7 +1592,16 @@ export default function PersonProfilePage() {
 
     const raw = personData as PersonRow & {
       birth_place_id?: string | null;
+      death_place_id?: string | null;
       tree_id?: string | null;
+      birth_place?:
+        | PersonRow["birth_place"]
+        | NonNullable<PersonRow["birth_place"]>[]
+        | null;
+      death_place?:
+        | PersonRow["death_place"]
+        | NonNullable<PersonRow["death_place"]>[]
+        | null;
     };
     const personTreeId =
       raw.tree_id != null && String(raw.tree_id).trim() !== ""
@@ -1588,10 +1609,29 @@ export default function PersonProfilePage() {
         : "";
     const effectiveTreeForRels = treeId || personTreeId;
 
+    const bpJoin = raw.birth_place;
+    const birth_place: PersonRow["birth_place"] =
+      bpJoin == null
+        ? null
+        : Array.isArray(bpJoin)
+          ? (bpJoin[0] ?? null)
+          : bpJoin;
+
+    const dpJoin = raw.death_place;
+    const death_place: PersonRow["death_place"] =
+      dpJoin == null
+        ? null
+        : Array.isArray(dpJoin)
+          ? (dpJoin[0] ?? null)
+          : dpJoin;
+
     const p: PersonRow = {
       ...raw,
       birth_place_id: raw.birth_place_id ?? null,
+      death_place_id: raw.death_place_id ?? null,
       tree_id: raw.tree_id ?? null,
+      birth_place,
+      death_place,
     };
 
     const { data: eventData, error: eventErr } = await supabase
@@ -3343,6 +3383,9 @@ export default function PersonProfilePage() {
       birth_date: normalizeDateToMMDDYYYY(person.birth_date),
       death_date: normalizeDateToMMDDYYYY(person.death_date),
       birth_place_id: person.birth_place_id ?? null,
+      birth_place_display: person.birth_place ? formatPlace(person.birth_place) : "",
+      death_place_display: person.death_place ? formatPlace(person.death_place) : "",
+      death_place_id: person.death_place_id ?? null,
       gender: genderVal,
       notes: person.notes ?? "",
     });
@@ -3357,6 +3400,26 @@ export default function PersonProfilePage() {
   }
 
   async function savePersonFromModal() {
+    async function resolvePlace(
+      display: string,
+      id: string | null
+    ): Promise<string | null> {
+      if (!display.trim()) return null;
+      if (id) return id;
+      try {
+        const res = await fetch("/api/places/find-or-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display: display.trim() }),
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as { id?: string };
+        return data.id ?? null;
+      } catch {
+        return null;
+      }
+    }
+
     if (!editPersonDraft || !personId) return;
     const supabase = createClient();
     const {
@@ -3367,6 +3430,14 @@ export default function PersonProfilePage() {
     setPersonEditSaving(true);
     setPersonEditError(null);
     const d = editPersonDraft;
+    const resolvedBirthPlaceId = await resolvePlace(
+      d.birth_place_display,
+      d.birth_place_id
+    );
+    const resolvedDeathPlaceId = await resolvePlace(
+      d.death_place_display,
+      d.death_place_id
+    );
     const { data, error } = await supabase
       .from("persons")
       .update({
@@ -3375,14 +3446,15 @@ export default function PersonProfilePage() {
         last_name: d.last_name.trim(),
         birth_date: d.birth_date.trim() || null,
         death_date: d.death_date.trim() || null,
-        birth_place_id: d.birth_place_id ?? null,
+        birth_place_id: resolvedBirthPlaceId,
+        death_place_id: resolvedDeathPlaceId,
         gender: d.gender.trim() || null,
         notes: d.notes.trim() || null,
       })
       .eq("id", personId)
       .eq("user_id", user.id)
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, photo_url, gender, notes"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
       .single();
 
@@ -3392,10 +3464,22 @@ export default function PersonProfilePage() {
       return;
     }
     if (data) {
-      const row = data as PersonRow & { birth_place_id?: string | null };
+      const row = data as PersonRow & {
+        birth_place_id?: string | null;
+        death_place_id?: string | null;
+        birth_place?: { township: string | null; county: string | null; state: string | null; country: string } | { township: string | null; county: string | null; state: string | null; country: string }[] | null;
+        death_place?: { township: string | null; county: string | null; state: string | null; country: string } | { township: string | null; county: string | null; state: string | null; country: string }[] | null;
+      };
+      const bp = row.birth_place;
+      const dp = row.death_place;
+      const normBp = bp == null ? null : Array.isArray(bp) ? (bp[0] ?? null) : bp;
+      const normDp = dp == null ? null : Array.isArray(dp) ? (dp[0] ?? null) : dp;
       setPerson({
         ...row,
         birth_place_id: row.birth_place_id ?? null,
+        death_place_id: row.death_place_id ?? null,
+        birth_place: normBp,
+        death_place: normDp,
       });
     }
     closeEditPersonModal();
@@ -4155,23 +4239,23 @@ export default function PersonProfilePage() {
     .join(" ");
 
   const headerGenderBadge = genderBadgeLabel(person.gender);
-  const headerBirthPlaceStr = "";
-  const headerHasBirthPlace = false;
-  const headerDateBits: string[] = [];
-  if (person.birth_date && headerHasBirthPlace) {
-    headerDateBits.push(
-      `b. ${formatDateString(person.birth_date)}  ·  ${headerBirthPlaceStr}`
-    );
-  } else if (person.birth_date) {
-    headerDateBits.push(`b. ${formatDateString(person.birth_date)}`);
-  } else if (headerHasBirthPlace) {
-    headerDateBits.push(headerBirthPlaceStr);
-  }
-  if (person.death_date) {
-    headerDateBits.push(`d. ${formatDateString(person.death_date)}`);
-  }
-  const headerDateSegment = headerDateBits.join("  ·  ");
-  const headerNoDates = headerDateBits.length === 0;
+  const headerBirthPlaceStr = person.birth_place ? formatPlace(person.birth_place) : "";
+  const headerHasBirthPlace = headerBirthPlaceStr.trim().length > 0;
+
+  const birthLine = [
+    person.birth_date ? `b. ${formatDateString(person.birth_date)}` : null,
+    headerHasBirthPlace ? headerBirthPlaceStr : null,
+  ].filter(Boolean).join("  ·  ");
+
+  const headerDeathPlaceStr = person.death_place
+    ? formatPlace(person.death_place)
+    : "";
+  const deathLine = [
+    person.death_date ? `d. ${formatDateString(person.death_date)}` : null,
+    headerDeathPlaceStr || null,
+  ].filter(Boolean).join("  ·  ");
+
+  const headerNoDates = !birthLine && !deathLine;
 
   const personFullName = [
     person.first_name,
@@ -4399,8 +4483,9 @@ export default function PersonProfilePage() {
               className="mt-4 text-sm italic sm:text-base"
               style={{ fontFamily: sans, color: colors.brownMuted }}
             >
-              {headerDateSegment ? headerDateSegment : null}
-              {headerNoDates ? "Dates unknown" : null}
+              {birthLine ? <span style={{ display: "block" }}>{birthLine}</span> : null}
+              {deathLine ? <span style={{ display: "block" }}>{deathLine}</span> : null}
+              {headerNoDates ? <span>Dates unknown</span> : null}
             </p>
           </div>
           <div
@@ -4828,19 +4913,13 @@ export default function PersonProfilePage() {
                                     >
                                       Event date
                                     </label>
-                                    <input
+                                    <SmartDateInput
                                       id={`ev-date-${ev.id}`}
-                                      type="text"
                                       value={eventEditDraft.event_date}
-                                      onChange={(e) =>
+                                      onChange={(val) =>
                                         setEventEditDraft((prev) =>
                                           prev
-                                            ? {
-                                                ...prev,
-                                                event_date: autoFormatDateInput(
-                                                  e.target.value
-                                                ),
-                                              }
+                                            ? { ...prev, event_date: val }
                                             : null
                                         )
                                       }
@@ -5758,18 +5837,12 @@ export default function PersonProfilePage() {
                 >
                   Birth date
                 </label>
-                <input
+                <SmartDateInput
                   id="edit-bd"
-                  type="text"
                   value={editPersonDraft.birth_date}
-                  onChange={(e) =>
+                  onChange={(val) =>
                     setEditPersonDraft((d) =>
-                      d
-                        ? {
-                            ...d,
-                            birth_date: autoFormatDateInput(e.target.value),
-                          }
-                        : null
+                      d ? { ...d, birth_date: val } : null
                     )
                   }
                   style={modalInputStyle}
@@ -5784,18 +5857,12 @@ export default function PersonProfilePage() {
                 >
                   Death date
                 </label>
-                <input
+                <SmartDateInput
                   id="edit-dd"
-                  type="text"
                   value={editPersonDraft.death_date}
-                  onChange={(e) =>
+                  onChange={(val) =>
                     setEditPersonDraft((d) =>
-                      d
-                        ? {
-                            ...d,
-                            death_date: autoFormatDateInput(e.target.value),
-                          }
-                        : null
+                      d ? { ...d, death_date: val } : null
                     )
                   }
                   style={modalInputStyle}
@@ -5806,15 +5873,55 @@ export default function PersonProfilePage() {
                 <label
                   className="mb-1 block text-xs font-bold uppercase tracking-wide"
                   style={{ fontFamily: sans, color: colors.brownMuted }}
-                  htmlFor="edit-bp"
+                >
+                  Death place
+                </label>
+                <PlaceInput
+                  value={editPersonDraft.death_place_display}
+                  onChange={(v) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, death_place_display: v, death_place_id: null } : null
+                    )
+                  }
+                  onPlaceSelect={(place) =>
+                    setEditPersonDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            death_place_display: place.display,
+                            death_place_id: place.id,
+                          }
+                        : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
                 >
                   Birth place
                 </label>
-                <input
-                  id="edit-bp"
-                  type="text"
-                  value=""
-                  readOnly
+                <PlaceInput
+                  value={editPersonDraft.birth_place_display}
+                  onChange={(v) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, birth_place_display: v, birth_place_id: null } : null
+                    )
+                  }
+                  onPlaceSelect={(place) =>
+                    setEditPersonDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            birth_place_display: place.display,
+                            birth_place_id: place.id,
+                          }
+                        : null
+                    )
+                  }
                   style={modalInputStyle}
                 />
               </div>

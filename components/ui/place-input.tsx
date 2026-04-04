@@ -2,7 +2,13 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { formatPlace } from "@/lib/utils/places";
-import { useEffect, useId, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 const sans = "var(--font-dg-body), Lato, sans-serif";
 
@@ -29,6 +35,7 @@ type PlaceInputProps = {
   onPlaceSelect: (place: PlaceInputSelection) => void;
   placeholder?: string;
   className?: string;
+  style?: CSSProperties;
 };
 
 /** PostgREST-safe `ilike` value for `...contains term...` (no user-supplied `%` / `_`). */
@@ -50,6 +57,7 @@ export function PlaceInput({
   onPlaceSelect,
   placeholder,
   className,
+  style: styleProp,
 }: PlaceInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const blurCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -164,7 +172,7 @@ export function PlaceInput({
         placeholder={placeholder}
         autoComplete="off"
         className={inputClass}
-        style={inputStyle}
+        style={{ ...inputStyle, ...styleProp }}
         aria-autocomplete="list"
         aria-controls={listboxId}
         aria-expanded={listOpen}
