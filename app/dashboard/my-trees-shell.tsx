@@ -123,6 +123,15 @@ export default function MyTreesShell({
   const [vibeChanging, setVibeChanging] = useState(false);
   const [vibeChangeError, setVibeChangeError] = useState<string | null>(null);
 
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteModalTreeId, setDeleteModalTreeId] = useState<string | null>(
+    null
+  );
+  const [deleteModalTreeName, setDeleteModalTreeName] = useState("");
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -283,6 +292,62 @@ export default function MyTreesShell({
     }
   }
 
+  function handleDeleteTree(treeId: string, treeName: string) {
+    setDeleteModalTreeId(treeId);
+    setDeleteModalTreeName(treeName);
+    setDeleteConfirmInput("");
+    setDeleteError(null);
+    setDeleteModalOpen(true);
+  }
+
+  function closeDeleteModal() {
+    if (deleting) return;
+    setDeleteModalOpen(false);
+    setDeleteModalTreeId(null);
+    setDeleteModalTreeName("");
+    setDeleteConfirmInput("");
+    setDeleteError(null);
+  }
+
+  async function confirmDeleteTree() {
+    if (
+      deleteModalTreeId === null ||
+      deleteConfirmInput !== deleteModalTreeName
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(
+        `/api/trees/${deleteModalTreeId}/delete`,
+        { method: "DELETE" }
+      );
+      let data: { error?: string } = {};
+      try {
+        data = (await res.json()) as { error?: string };
+      } catch {
+        /* non-JSON body */
+      }
+      if (!res.ok) {
+        setDeleteError(
+          typeof data.error === "string" && data.error.trim() !== ""
+            ? data.error
+            : `Request failed (${res.status})`
+        );
+        return;
+      }
+      setDeleteModalOpen(false);
+      setDeleteModalTreeId(null);
+      setDeleteModalTreeName("");
+      setDeleteConfirmInput("");
+      setDeleteError(null);
+      router.refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <>
       <style
@@ -295,6 +360,9 @@ export default function MyTreesShell({
             .dg-signout:hover {
               background-color: var(--dg-parchment) !important;
               border-color: var(--dg-brown-border) !important;
+            }
+            .dg-delete-tree-btn:hover {
+              color: var(--dg-danger) !important;
             }
           `,
         }}
@@ -539,11 +607,48 @@ export default function MyTreesShell({
                 key={tree.id}
                 className="flex flex-col rounded-lg border p-8"
                 style={{
+                  position: "relative",
                   borderColor: colors.brownBorder,
                   backgroundColor: colors.cream,
                   boxShadow: "0 4px 16px rgb(var(--dg-shadow-rgb) / 0.06)",
                 }}
               >
+                <button
+                  type="button"
+                  className="dg-delete-tree-btn"
+                  aria-label="Delete tree"
+                  style={{
+                    position: "absolute",
+                    top: "0.6rem",
+                    right: "0.6rem",
+                    backgroundColor: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    color: colors.brownMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "0.35rem",
+                    borderRadius: 4,
+                  }}
+                  onClick={() => handleDeleteTree(tree.id, tree.name)}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
+                    />
+                  </svg>
+                </button>
                 <h3
                   className="font-bold leading-snug"
                   style={{
@@ -754,6 +859,121 @@ export default function MyTreesShell({
                 role="alert"
               >
                 {vibeChangeError}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {deleteModalOpen ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-tree-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              closeDeleteModal();
+            }
+          }}
+        >
+          <div
+            className="my-8 w-full max-w-2xl rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="delete-tree-modal-title"
+              className="text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Delete this tree?
+            </h2>
+            <p
+              className="mt-2"
+              style={{
+                fontFamily: sans,
+                fontSize: "0.9375rem",
+                color: colors.brownMuted,
+              }}
+            >
+              This will permanently delete{" "}
+              <strong style={{ color: colors.brownDark }}>
+                {deleteModalTreeName}
+              </strong>{" "}
+              and all its ancestors, documents, photos, and relationships. This
+              cannot be undone.
+            </p>
+            <label
+              htmlFor="delete-tree-confirm-name"
+              className="mb-1 mt-6 block font-bold uppercase tracking-wide"
+              style={{
+                fontFamily: sans,
+                fontSize: "0.85rem",
+                color: colors.brownMuted,
+              }}
+            >
+              Type the tree name to confirm
+            </label>
+            <input
+              id="delete-tree-confirm-name"
+              type="text"
+              value={deleteConfirmInput}
+              onChange={(e) => setDeleteConfirmInput(e.target.value)}
+              disabled={deleting}
+              autoComplete="off"
+              style={{ ...inputStyle, maxWidth: "none" }}
+            />
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={
+                  deleting ||
+                  deleteConfirmInput !== deleteModalTreeName
+                }
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: "#8B3A3A",
+                  color: "white",
+                  border: "none",
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 700,
+                  borderRadius: 2,
+                  cursor:
+                    deleting || deleteConfirmInput !== deleteModalTreeName
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity:
+                    deleting || deleteConfirmInput !== deleteModalTreeName
+                      ? 0.65
+                      : 1,
+                }}
+                onClick={() => void confirmDeleteTree()}
+              >
+                {deleting ? "Deleting…" : "Delete tree"}
+              </button>
+              <button
+                type="button"
+                style={btnOutline}
+                disabled={deleting}
+                onClick={closeDeleteModal}
+              >
+                Cancel
+              </button>
+            </div>
+            {deleteError ? (
+              <p
+                className="mt-3 text-sm"
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                role="alert"
+              >
+                {deleteError}
               </p>
             ) : null}
           </div>

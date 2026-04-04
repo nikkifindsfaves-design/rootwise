@@ -240,6 +240,11 @@ export default function ReviewDuplicatesPage() {
   >({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [treePeople, setTreePeople] = useState<DbPerson[]>([]);
+  const [manualMatchModalIndex, setManualMatchModalIndex] = useState<
+    number | null
+  >(null);
+  const [manualMatchSearch, setManualMatchSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -356,6 +361,7 @@ export default function ReviewDuplicatesPage() {
           bp == null ? null : Array.isArray(bp) ? (bp[0] ?? null) : bp;
         return { ...r, birth_place } as DbPerson;
       });
+      setTreePeople(tree);
       const usedMatchIds = new Set<string>();
       const withMatches: PersonWithMatch[] = [];
       const fresh: { pendingIndex: number; pending: PendingPerson }[] = [];
@@ -492,6 +498,34 @@ export default function ReviewDuplicatesPage() {
 
   function setDuplicateCardMode(matchPersonId: string, mode: DuplicateCardMode) {
     setCardMergeChoice((prev) => ({ ...prev, [matchPersonId]: mode }));
+  }
+
+  function handleManualMatch(pendingIndex: number, selectedPerson: DbPerson) {
+    const entry = newPeople.find((p) => p.pendingIndex === pendingIndex);
+    if (!entry) return;
+
+    // Move from newPeople to peopleWithMatches
+    setNewPeople((prev) => prev.filter((p) => p.pendingIndex !== pendingIndex));
+    setPeopleWithMatches((prev) => [
+      ...prev,
+      { pendingIndex: entry.pendingIndex, pending: entry.pending, match: selectedPerson },
+    ]);
+
+    // Initialize card and field merge choices
+    setCardMergeChoice((prev) => ({ ...prev, [selectedPerson.id]: "merge" }));
+    const perField: Partial<Record<MergeField, FieldMergePick>> = {};
+    for (const field of MERGE_FIELDS) {
+      if (fieldRowNeedsChoice(entry.pending, selectedPerson, field)) {
+        perField[field] = "existing";
+      }
+    }
+    if (Object.keys(perField).length > 0) {
+      setFieldMergeChoices((prev) => ({ ...prev, [selectedPerson.id]: perField }));
+    }
+
+    // Close modal
+    setManualMatchModalIndex(null);
+    setManualMatchSearch("");
   }
 
   if (loadState === "unauthorized") {
@@ -879,18 +913,42 @@ export default function ReviewDuplicatesPage() {
                   className={newPersonCardClass}
                   style={newPersonCardStyle}
                 >
-                  <p
-                    className="font-medium"
-                    style={{ color: "var(--dg-brown-dark)" }}
-                  >
-                    {fullNameFromPending(pending)}
-                  </p>
-                  <p
-                    className="mt-1 text-xs"
-                    style={{ color: "var(--dg-brown-muted)" }}
-                  >
-                    Will be added as new person
-                  </p>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p
+                        className="font-medium truncate"
+                        style={{ color: "var(--dg-brown-dark)" }}
+                      >
+                        {fullNameFromPending(pending)}
+                      </p>
+                      <span
+                        className="mt-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium"
+                        style={{
+                          backgroundColor: "var(--dg-parchment)",
+                          color: "var(--dg-brown-muted)",
+                          border: "1px solid var(--dg-brown-border)",
+                        }}
+                      >
+                        New to tree
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualMatchModalIndex(pendingIndex);
+                        setManualMatchSearch("");
+                      }}
+                      className="shrink-0 rounded border px-3 py-1.5 text-xs font-medium transition hover:border-[var(--dg-brown-outline)] hover:text-[var(--dg-brown-dark)]"
+                      style={{
+                        borderColor: "var(--dg-brown-border)",
+                        backgroundColor: "transparent",
+                        color: "var(--dg-brown-muted)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      This is an existing person
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -922,6 +980,101 @@ export default function ReviewDuplicatesPage() {
           </button>
         </div>
       </div>
+
+      {manualMatchModalIndex !== null ? (() => {
+        const modalPendingIndex = manualMatchModalIndex!;
+        const filtered = treePeople.filter((p) => {
+          const q = manualMatchSearch.trim().toLowerCase();
+          if (!q) return true;
+          const full = [p.first_name, p.middle_name, p.last_name]
+            .map((x) => (x ?? "").trim())
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return full.includes(q);
+        });
+
+        return (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+            onClick={() => {
+              setManualMatchModalIndex(null);
+              setManualMatchSearch("");
+            }}
+          >
+            <div
+              className="w-full max-w-md rounded-lg border p-6 shadow-xl"
+              style={{
+                backgroundColor: "var(--dg-parchment)",
+                borderColor: "var(--dg-brown-border)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                className="mb-4 text-lg font-bold"
+                style={{ fontFamily: "var(--font-dg-display), 'Playfair Display', Georgia, serif", color: "var(--dg-brown-dark)" }}
+              >
+                Find existing person
+              </h2>
+              <input
+                type="text"
+                autoFocus
+                placeholder="Search by name…"
+                value={manualMatchSearch}
+                onChange={(e) => setManualMatchSearch(e.target.value)}
+                className="mb-4 w-full rounded border px-3 py-2 text-sm"
+                style={{
+                  backgroundColor: "var(--dg-cream)",
+                  borderColor: "var(--dg-brown-border)",
+                  color: "var(--dg-brown-dark)",
+                  outline: "none",
+                }}
+              />
+              {filtered.length === 0 ? (
+                <p className="text-sm" style={{ color: "var(--dg-brown-muted)" }}>
+                  No people found.
+                </p>
+              ) : (
+                <ul className="max-h-64 space-y-2 overflow-y-auto">
+                  {filtered.map((person) => (
+                    <li key={person.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleManualMatch(modalPendingIndex, person)}
+                        className="w-full rounded-lg border px-3 py-2 text-left text-sm transition hover:border-[var(--dg-brown-outline)]"
+                        style={{
+                          backgroundColor: "var(--dg-cream)",
+                          borderColor: "var(--dg-brown-border)",
+                          color: "var(--dg-brown-dark)",
+                        }}
+                      >
+                        <span className="font-medium">{fullNameFromDbPerson(person)}</span>
+                        {person.birth_date ? (
+                          <span className="ml-2 text-xs" style={{ color: "var(--dg-brown-muted)" }}>
+                            b. {person.birth_date}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setManualMatchModalIndex(null);
+                  setManualMatchSearch("");
+                }}
+                className="mt-4 text-xs underline-offset-2 hover:underline"
+                style={{ color: "var(--dg-brown-muted)", background: "none", border: "none", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })() : null}
     </div>
   );
 }

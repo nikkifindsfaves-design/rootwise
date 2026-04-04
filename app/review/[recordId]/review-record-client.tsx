@@ -868,7 +868,7 @@ export default function ReviewRecordClient({
         </header>
 
         <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-          <section className="space-y-3">
+          <section className="space-y-3 lg:sticky lg:top-8 lg:self-start">
             <h2
               className="text-sm font-semibold"
               style={{ color: "var(--dg-brown-dark)" }}
@@ -917,7 +917,7 @@ export default function ReviewRecordClient({
             </div>
           </section>
 
-          <section className="space-y-4">
+          <section className="space-y-4 lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto lg:pr-2">
             <h2
               className="text-sm font-semibold"
               style={{ color: "var(--dg-brown-dark)" }}
