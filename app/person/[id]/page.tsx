@@ -1186,6 +1186,8 @@ export default function PersonProfilePage() {
     string | null
   >(null);
   const [eventDeletingId, setEventDeletingId] = useState<string | null>(null);
+  const [sourceDeleteConfirmKey, setSourceDeleteConfirmKey] = useState<string | null>(null);
+  const [sourceDeletingKey, setSourceDeletingKey] = useState<string | null>(null);
 
   const [editPersonOpen, setEditPersonOpen] = useState(false);
   const [editPersonDraft, setEditPersonDraft] = useState<{
@@ -2966,7 +2968,7 @@ export default function PersonProfilePage() {
         setPhotoSetupTagSearching(false);
       }
     }
-  }, []);
+  }, [effectiveTreeIdForFamily]);
 
   useEffect(() => {
     if (!photoSetupModal) return;
@@ -3044,7 +3046,7 @@ export default function PersonProfilePage() {
         setTagModalResults([]);
       }
     }
-  }, []);
+  }, [effectiveTreeIdForFamily]);
 
   useEffect(() => {
     if (!tagModalPhoto) return;
@@ -3985,6 +3987,48 @@ export default function PersonProfilePage() {
       );
     }
     cancelEditEvent();
+  }
+
+  async function deleteSourceLink(
+    recordId: string,
+    clusterEventIds: string[]
+  ) {
+    if (!clusterEventIds.length) return;
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    setSourceDeletingKey(recordId);
+    try {
+      await supabase
+        .from("event_sources")
+        .delete()
+        .eq("record_id", recordId)
+        .in("event_id", clusterEventIds);
+      await supabase
+        .from("events")
+        .update({ record_id: null })
+        .eq("record_id", recordId)
+        .eq("user_id", user.id)
+        .in("id", clusterEventIds);
+      setEventSources((prev) =>
+        prev.filter(
+          (s) =>
+            !(s.record_id === recordId && clusterEventIds.includes(s.event_id))
+        )
+      );
+      setEvents((prev) =>
+        prev.map((e) =>
+          clusterEventIds.includes(e.id) && e.record_id === recordId
+            ? { ...e, record_id: null }
+            : e
+        )
+      );
+      setSourceDeleteConfirmKey(null);
+    } finally {
+      setSourceDeletingKey(null);
+    }
   }
 
   async function deleteEventById(eventId: string) {
@@ -5604,33 +5648,129 @@ export default function PersonProfilePage() {
                                       <ul className="mt-1 w-full space-y-1.5 pl-0.5">
                                         {linkedSources.map((src) => (
                                           <li key={src.id}>
-                                            {src.url ? (
-                                              <a
-                                                href={src.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                                style={{
-                                                  fontFamily: sans,
-                                                  color: colors.forest,
-                                                  fontWeight: 600,
-                                                }}
-                                              >
-                                                {src.label}
-                                              </a>
-                                            ) : (
-                                              <span
-                                                className="text-sm"
-                                                style={{
-                                                  fontFamily: sans,
-                                                  color: colors.brownMuted,
-                                                }}
-                                              >
-                                                {src.label}
-                                                <span className="ml-1 text-xs italic">
-                                                  (link unavailable)
+                                            <div className="flex items-center gap-2">
+                                              {src.url ? (
+                                                <a
+                                                  href={src.url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    color: colors.forest,
+                                                    fontWeight: 600,
+                                                  }}
+                                                >
+                                                  {src.label}
+                                                </a>
+                                              ) : (
+                                                <span
+                                                  className="text-sm"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    color: colors.brownMuted,
+                                                  }}
+                                                >
+                                                  {src.label}
+                                                  <span className="ml-1 text-xs italic">
+                                                    (link unavailable)
+                                                  </span>
                                                 </span>
-                                              </span>
+                                              )}
+                                              {sourceDeleteConfirmKey !==
+                                                src.id && (
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    sourceDeletingKey ===
+                                                    src.id
+                                                  }
+                                                  onClick={() =>
+                                                    setSourceDeleteConfirmKey(
+                                                      src.id
+                                                    )
+                                                  }
+                                                  className="border-none bg-transparent p-0 text-xs leading-none"
+                                                  style={{
+                                                    color: colors.brownMuted,
+                                                    cursor: "pointer",
+                                                    opacity: 0.6,
+                                                    fontFamily: sans,
+                                                  }}
+                                                  aria-label="Remove source"
+                                                  title="Remove source"
+                                                >
+                                                  ✕
+                                                </button>
+                                              )}
+                                            </div>
+                                            {sourceDeleteConfirmKey ===
+                                              src.id && (
+                                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                                <span
+                                                  className="text-xs"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    color: colors.brownDark,
+                                                  }}
+                                                >
+                                                  Remove this source?
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    sourceDeletingKey ===
+                                                    src.id
+                                                  }
+                                                  onClick={() =>
+                                                    void deleteSourceLink(
+                                                      src.id,
+                                                      mergeCluster.events.map(
+                                                        (e) => e.id
+                                                      )
+                                                    )
+                                                  }
+                                                  className="rounded px-2 py-0.5 text-xs font-bold"
+                                                  style={{
+                                                    backgroundColor:
+                                                      "var(--dg-danger)",
+                                                    color: "var(--dg-cream)",
+                                                    border: "none",
+                                                    cursor:
+                                                      sourceDeletingKey ===
+                                                      src.id
+                                                        ? "wait"
+                                                        : "pointer",
+                                                    fontFamily: sans,
+                                                  }}
+                                                >
+                                                  {sourceDeletingKey === src.id
+                                                    ? "Removing…"
+                                                    : "Yes"}
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    sourceDeletingKey ===
+                                                    src.id
+                                                  }
+                                                  onClick={() =>
+                                                    setSourceDeleteConfirmKey(
+                                                      null
+                                                    )
+                                                  }
+                                                  className="text-xs"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    color: colors.brownMuted,
+                                                    background: "none",
+                                                    border: "none",
+                                                    cursor: "pointer",
+                                                  }}
+                                                >
+                                                  Cancel
+                                                </button>
+                                              </div>
                                             )}
                                           </li>
                                         ))}
