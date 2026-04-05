@@ -232,6 +232,7 @@ type EventRow = {
   description: string | null;
   record_id: string | null;
   notes: string | null;
+  research_notes: string | null;
   story_short: string | null;
   story_full: string | null;
   created_at: string | null;
@@ -329,37 +330,6 @@ function eventsSortedByDate(cluster: EventCluster): EventRow[] {
     if (mb == null) return -1;
     return ma - mb;
   });
-}
-
-/**
- * One expandable Notes block: all `event_sources.notes` for every `event_id` in
- * this cluster, ordered by `created_at`. If none, falls back to legacy `events.notes`
- * (chronological) so older rows still show something.
- */
-function clusterNotesSegmentsForTimeline(
-  cluster: EventCluster,
-  sourcesByEventId: Map<string, EventSourceRow[]>
-): string[] {
-  type Item = { t: number; text: string };
-  const items: Item[] = [];
-  for (const ev of eventsSortedByDate(cluster)) {
-    for (const s of sourcesByEventId.get(ev.id) ?? []) {
-      const text = s.notes?.trim();
-      if (!text) continue;
-      items.push({
-        t: new Date(s.created_at).getTime(),
-        text,
-      });
-    }
-  }
-  items.sort((a, b) => a.t - b.t);
-  if (items.length > 0) return items.map((i) => i.text);
-
-  const legacy: string[] = [];
-  for (const ev of eventsSortedByDate(cluster)) {
-    if (ev.notes?.trim()) legacy.push(ev.notes.trim());
-  }
-  return legacy;
 }
 
 function clusterLinkedSources(
@@ -743,6 +713,9 @@ function sortEventsChronologically(events: EventRow[]): EventRow[] {
     if (!da && !db) return 0;
     if (!da) return 1;
     if (!db) return -1;
+    const ma = parseEventDateMs(da);
+    const mb = parseEventDateMs(db);
+    if (ma != null && mb != null) return ma - mb;
     return da.localeCompare(db, undefined, { numeric: true });
   });
 }
@@ -1055,7 +1028,7 @@ function TimelineEventStoryBlock({
   if (isFallback) {
     return (
       <p
-        className="text-sm italic leading-relaxed"
+        className="text-xs font-semibold uppercase tracking-wider"
         style={{
           fontFamily: sans,
           color: colors.brownMuted,
@@ -1289,6 +1262,24 @@ export default function PersonProfilePage() {
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [recordUploadModalOpen, setRecordUploadModalOpen] = useState(false);
+  const [addEventOpen, setAddEventOpen] = useState(false);
+  const [addEventDraft, setAddEventDraft] = useState({
+    event_type: "",
+    event_date: "",
+    description: "",
+    notes: "",
+    event_place_id: null as string | null,
+    event_place_display: "",
+    event_place_fields: null as {
+      township: string | null;
+      county: string | null;
+      state: string | null;
+      country: string;
+    } | null,
+  });
+  const [addEventSaving, setAddEventSaving] = useState(false);
+  const [editingResearchNotesEventId, setEditingResearchNotesEventId] =
+    useState<string | null>(null);
   const headerActionsDropdownRef = useRef<HTMLDivElement>(null);
   const headerPhotoFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1637,7 +1628,7 @@ export default function PersonProfilePage() {
     const { data: eventData, error: eventErr } = await supabase
       .from("events")
       .select(
-        "id, event_type, event_date, event_place_id, description, record_id, notes, story_short, story_full, created_at"
+        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at"
       )
       .eq("person_id", personId)
       .eq("user_id", user.id)
@@ -3962,7 +3953,7 @@ export default function PersonProfilePage() {
       .eq("id", eventId)
       .eq("user_id", user.id)
       .select(
-        "id, event_type, event_date, event_place_id, description, record_id, notes, story_short, story_full, created_at"
+        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at"
       )
       .single();
 
@@ -4024,6 +4015,110 @@ export default function PersonProfilePage() {
       next.delete(eventId);
       return next;
     });
+  }
+
+  async function handleAddEventSave() {
+    if (!addEventDraft.event_type.trim()) return;
+    setAddEventSaving(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      let placeId: string | null = addEventDraft.event_place_id;
+      if (!placeId && addEventDraft.event_place_fields) {
+        const res = await fetch("/api/places/find-or-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(addEventDraft.event_place_fields),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          placeId = data.id ?? null;
+        }
+      }
+
+      const { data: insertedEvent, error } = await supabase
+        .from("events")
+        .insert({
+          user_id: user.id,
+          person_id: personId,
+          event_type: addEventDraft.event_type.trim(),
+          event_date: addEventDraft.event_date.trim() || null,
+          event_place_id: placeId,
+          notes: addEventDraft.notes.trim() || null,
+        })
+        .select("id")
+        .single();
+
+      if (error) throw error;
+
+      // Generate story in Dead Gossip voice
+      if (person && insertedEvent?.id) {
+        const personName = [
+          person.first_name,
+          person.middle_name,
+          person.last_name,
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        const placeString = addEventDraft.event_place_fields
+          ? [
+              addEventDraft.event_place_fields.township,
+              addEventDraft.event_place_fields.county,
+              addEventDraft.event_place_fields.state,
+              addEventDraft.event_place_fields.country,
+            ]
+              .filter(Boolean)
+              .join(", ")
+          : null;
+
+        try {
+          const storyRes = await fetch("/api/regenerate-story", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tree_id: person.tree_id,
+              person_name: personName,
+              event_type: addEventDraft.event_type.trim(),
+              event_date: addEventDraft.event_date.trim() || null,
+              event_place: placeString,
+              event_notes: addEventDraft.notes.trim() || null,
+              related_people: [],
+            }),
+          });
+
+          if (storyRes.ok) {
+            const storyData = await storyRes.json();
+            if (storyData.story_full) {
+              await supabase
+                .from("events")
+                .update({ story_full: storyData.story_full })
+                .eq("id", insertedEvent.id);
+            }
+          }
+        } catch {
+          // Story generation failure is silent — event is already saved
+        }
+      }
+
+      setAddEventOpen(false);
+      setAddEventDraft({
+        event_type: "",
+        event_date: "",
+        description: "",
+        notes: "",
+        event_place_id: null,
+        event_place_fields: null,
+        event_place_display: "",
+      });
+      await load();
+    } finally {
+      setAddEventSaving(false);
+    }
   }
 
   function toggleTimelineNotesForEvent(eventId: string) {
@@ -4726,16 +4821,30 @@ export default function PersonProfilePage() {
         {activeTab === "details" ? (
           <div className="grid gap-10 lg:grid-cols-[1fr_280px] lg:gap-12">
             <section>
-              <h2
-                className="mb-6 border-b pb-2 text-2xl font-bold"
-                style={{
-                  fontFamily: serif,
-                  color: colors.brownDark,
-                  borderColor: colors.brownBorder,
-                }}
+              <div
+                className="mb-6 flex items-center justify-between border-b pb-2"
+                style={{ borderColor: colors.brownBorder }}
               >
-                Life &amp; records
-              </h2>
+                <h2
+                  className="text-2xl font-bold"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Life &amp; records
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setAddEventOpen(true)}
+                  className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+                  style={{
+                    fontFamily: sans,
+                    backgroundColor: "var(--dg-parchment)",
+                    color: colors.brownDark,
+                    border: `1px solid ${colors.brownBorder}`,
+                  }}
+                >
+                  + Add Event
+                </button>
+              </div>
               {timelineEvents.length === 0 ? (
                 <p
                   className="text-sm italic"
@@ -4764,10 +4873,6 @@ export default function PersonProfilePage() {
                       const mergeClusterStoryFull =
                         firstStoryFullInCluster(mergeCluster);
                       const placesLine = clusterPlacesLine(mergeCluster);
-                      const noteSegments = clusterNotesSegmentsForTimeline(
-                        mergeCluster,
-                        eventSourcesByEventId
-                      );
                       const notesOpen = expandedTimelineNotesKeys.has(ev.id);
                       const linkedSources = clusterLinkedSources(
                         mergeCluster,
@@ -5109,51 +5214,138 @@ export default function PersonProfilePage() {
                                       {line}
                                     </p>
                                   ))}
-                                  {noteSegments.length > 0 ? (
-                                    <div className="mt-3">
+                                  <div className="mt-3">
+                                    {ev.research_notes?.trim() ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            toggleTimelineNotesForEvent(ev.id)
+                                          }
+                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                          style={{
+                                            fontFamily: sans,
+                                            color: colors.forest,
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                          }}
+                                          aria-expanded={notesOpen}
+                                        >
+                                          {notesOpen
+                                            ? "Hide research notes"
+                                            : "Research notes"}
+                                        </button>
+                                        {notesOpen ? (
+                                          <div
+                                            className="mt-2 pl-0.5 text-sm leading-relaxed"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.brownMid,
+                                            }}
+                                          >
+                                            <p className="whitespace-pre-wrap">
+                                              {ev.research_notes.trim()}
+                                            </p>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setEditingResearchNotesEventId(
+                                                  ev.id
+                                                )
+                                              }
+                                              className="mt-2 border-none bg-transparent p-0 text-left text-xs underline decoration-dotted underline-offset-2"
+                                              style={{
+                                                fontFamily: sans,
+                                                color: colors.brownMuted,
+                                                cursor: "pointer",
+                                              }}
+                                            >
+                                              Edit
+                                            </button>
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    ) : (
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          toggleTimelineNotesForEvent(ev.id)
+                                          setEditingResearchNotesEventId(ev.id)
                                         }
                                         className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
                                         style={{
                                           fontFamily: sans,
-                                          color: colors.forest,
+                                          color: colors.brownMuted,
                                           fontWeight: 600,
                                           cursor: "pointer",
                                         }}
-                                        aria-expanded={notesOpen}
                                       >
-                                        {notesOpen ? "Hide notes" : "Notes"}
+                                        + Add research notes
                                       </button>
-                                      {notesOpen ? (
-                                        <div
-                                          className="mt-2 pl-0.5 text-sm leading-relaxed"
+                                    )}
+                                    {editingResearchNotesEventId === ev.id ? (
+                                      <div className="mt-2 space-y-2">
+                                        <textarea
+                                          rows={3}
+                                          defaultValue={ev.research_notes ?? ""}
+                                          id={`research-notes-${ev.id}`}
+                                          className="w-full rounded-md border px-3 py-2 text-sm"
                                           style={{
                                             fontFamily: sans,
-                                            color: colors.brownMid,
+                                            backgroundColor: "var(--dg-cream)",
+                                            color: colors.brownDark,
+                                            borderColor: colors.brownBorder,
                                           }}
-                                        >
-                                          {noteSegments.map((chunk, ni) => (
-                                            <div key={`${listKey}-n-${ni}`}>
-                                              {ni > 0 ? (
-                                                <hr
-                                                  className="my-3 border-0 border-t"
-                                                  style={{
-                                                    borderColor: `${colors.brownBorder}99`,
-                                                  }}
-                                                />
-                                              ) : null}
-                                              <p className="whitespace-pre-wrap">
-                                                {chunk}
-                                              </p>
-                                            </div>
-                                          ))}
+                                        />
+                                        <div className="flex gap-3">
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              const el = document.getElementById(
+                                                `research-notes-${ev.id}`
+                                              ) as HTMLTextAreaElement;
+                                              const val = el?.value ?? "";
+                                              const supabase = createClient();
+                                              await supabase
+                                                .from("events")
+                                                .update({
+                                                  research_notes:
+                                                    val.trim() || null,
+                                                })
+                                                .eq("id", ev.id);
+                                              setEditingResearchNotesEventId(
+                                                null
+                                              );
+                                              await load();
+                                            }}
+                                            className="rounded-md px-3 py-1.5 text-sm font-medium"
+                                            style={{
+                                              backgroundColor:
+                                                "var(--dg-brown-mid, #8B6F4E)",
+                                              color: "white",
+                                              fontFamily: sans,
+                                            }}
+                                          >
+                                            Save
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setEditingResearchNotesEventId(
+                                                null
+                                              )
+                                            }
+                                            className="rounded-md px-3 py-1.5 text-sm font-medium"
+                                            style={{
+                                              color: colors.brownMuted,
+                                              fontFamily: sans,
+                                            }}
+                                          >
+                                            Cancel
+                                          </button>
                                         </div>
-                                      ) : null}
-                                    </div>
-                                  ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
                                   {linkedSources.length > 0 ? (
                                     <div className="mt-3">
                                       <button
@@ -7703,6 +7895,179 @@ export default function PersonProfilePage() {
           </div>
         </div>
       ) : null}
+      {addEventOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl shadow-xl"
+            style={{
+              backgroundColor: "var(--dg-cream)",
+              border: `1px solid ${colors.brownBorder}`,
+            }}
+          >
+            <div
+              className="flex items-center justify-between border-b px-6 py-4"
+              style={{ borderColor: colors.brownBorder }}
+            >
+              <h3
+                className="text-lg font-semibold"
+                style={{ fontFamily: serif, color: colors.brownDark }}
+              >
+                Add Event
+              </h3>
+              <button
+                type="button"
+                onClick={() => setAddEventOpen(false)}
+                className="text-xl leading-none"
+                style={{ color: colors.brownMuted }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Event Type <span style={{ color: "red" }}>*</span>
+                </label>
+                <select
+                  value={addEventDraft.event_type}
+                  onChange={(e) =>
+                    setAddEventDraft((d) => ({
+                      ...d,
+                      event_type: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  style={{
+                    fontFamily: sans,
+                    backgroundColor: "var(--dg-cream)",
+                    color: colors.brownDark,
+                    borderColor: colors.brownBorder,
+                  }}
+                >
+                  <option value="">Select an event type…</option>
+                  {buildEventTypeSelectOptions([], false).map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Date
+                </label>
+                <SmartDateInput
+                  value={addEventDraft.event_date}
+                  onChange={(val) =>
+                    setAddEventDraft((d) => ({ ...d, event_date: val }))
+                  }
+                  style={modalInputStyle}
+                  placeholder="MM/DD/YYYY"
+                />
+              </div>
+
+              <div>
+                <label
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Place
+                </label>
+                <PlaceInput
+                  value={addEventDraft.event_place_display}
+                  onChange={(v) =>
+                    setAddEventDraft((d) => ({
+                      ...d,
+                      event_place_display: v,
+                      event_place_id: null,
+                      event_place_fields: null,
+                    }))
+                  }
+                  onPlaceSelect={(place) =>
+                    setAddEventDraft((d) => ({
+                      ...d,
+                      event_place_display: place.display,
+                      event_place_id: place.id,
+                      event_place_fields: {
+                        township: place.township,
+                        county: place.county,
+                        state: place.state,
+                        country: place.country,
+                      },
+                    }))
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+
+              <div>
+                <label
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Notes
+                </label>
+                <textarea
+                  value={addEventDraft.notes}
+                  onChange={(e) =>
+                    setAddEventDraft((d) => ({ ...d, notes: e.target.value }))
+                  }
+                  rows={3}
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  style={{
+                    fontFamily: sans,
+                    backgroundColor: "var(--dg-cream)",
+                    color: colors.brownDark,
+                    borderColor: colors.brownBorder,
+                  }}
+                  placeholder="What happened? Family story, oral history, or document summary…"
+                />
+              </div>
+            </div>
+
+            <div
+              className="flex justify-end gap-3 border-t px-6 py-4"
+              style={{ borderColor: colors.brownBorder }}
+            >
+              <button
+                type="button"
+                onClick={() => setAddEventOpen(false)}
+                className="rounded-md px-4 py-2 text-sm font-medium"
+                style={{ fontFamily: sans, color: colors.brownMuted }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAddEventSave()}
+                disabled={addEventSaving || !addEventDraft.event_type.trim()}
+                className="rounded-md px-4 py-2 text-sm font-medium"
+                style={{
+                  fontFamily: sans,
+                  backgroundColor: addEventDraft.event_type.trim()
+                    ? "var(--dg-brown-mid, #8B6F4E)"
+                    : "var(--dg-brown-border)",
+                  color: "white",
+                  opacity: addEventSaving ? 0.7 : 1,
+                }}
+              >
+                {addEventSaving ? "Saving…" : "Save Event"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

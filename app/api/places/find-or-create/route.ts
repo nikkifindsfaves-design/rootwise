@@ -10,6 +10,24 @@ type ParsedPlaceFields = {
   country: string;
 };
 
+function parseStructuredPlaceBody(body: unknown): ParsedPlaceFields | null {
+  if (body === null || typeof body !== "object") return null;
+  const o = body as Record<string, unknown>;
+  if (typeof o.country !== "string" || o.country.trim() === "") return null;
+  const opt = (v: unknown): string | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t === "" ? null : t;
+  };
+  return {
+    township: opt(o.township),
+    county: opt(o.county),
+    state: opt(o.state),
+    country: o.country.trim(),
+  };
+}
+
 function parseDisplayToFields(display: string): ParsedPlaceFields | null {
   const parts = display
     .trim()
@@ -77,17 +95,18 @@ export async function POST(request: NextRequest) {
         : null;
 
     const display = rawDisplay != null ? rawDisplay.trim() : "";
-    if (display === "") {
-      return NextResponse.json(
-        { error: "display is required and must be non-empty" },
-        { status: 400 }
-      );
-    }
 
-    const fields = parseDisplayToFields(display);
+    let fields: ParsedPlaceFields | null =
+      display !== "" ? parseDisplayToFields(display) : null;
+    if (fields === null) {
+      fields = parseStructuredPlaceBody(body);
+    }
     if (fields === null || fields.country.trim() === "") {
       return NextResponse.json(
-        { error: "Could not parse a valid country from display" },
+        {
+          error:
+            "Provide a non-empty display string, or structured place fields including country.",
+        },
         { status: 400 }
       );
     }
