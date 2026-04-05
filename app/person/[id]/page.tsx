@@ -3,6 +3,7 @@
 import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
+import { RECORD_TYPES } from "@/lib/records/record-types";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
@@ -1278,6 +1279,15 @@ export default function PersonProfilePage() {
     } | null,
   });
   const [addEventSaving, setAddEventSaving] = useState(false);
+  const [addingSourceEventId, setAddingSourceEventId] = useState<string | null>(
+    null
+  );
+  const [sourceUploading, setSourceUploading] = useState(false);
+  const [pendingSourceFile, setPendingSourceFile] = useState<{
+    eventId: string;
+    file: File;
+  } | null>(null);
+  const [pendingSourceName, setPendingSourceName] = useState("");
   const [editingResearchNotesEventId, setEditingResearchNotesEventId] =
     useState<string | null>(null);
   const headerActionsDropdownRef = useRef<HTMLDivElement>(null);
@@ -4121,6 +4131,62 @@ export default function PersonProfilePage() {
     }
   }
 
+  async function handleAddSource(eventId: string, file: File) {
+    setSourceUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const tempId = crypto.randomUUID();
+      const path = `${user.id}/${tempId}/${file.name}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from("documents")
+        .upload(path, file, { contentType: file.type, upsert: false });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: urlData } = supabase.storage
+        .from("documents")
+        .getPublicUrl(path);
+
+      const { data: recordRow, error: recordErr } = await supabase
+        .from("records")
+        .insert({
+          user_id: user.id,
+          tree_id: person?.tree_id ?? null,
+          file_type: file.type,
+          file_url: urlData.publicUrl,
+          record_type: pendingSourceName.trim() || null,
+        })
+        .select("id")
+        .single();
+
+      if (recordErr || !recordRow) throw recordErr;
+
+      await supabase.from("event_sources").insert({
+        event_id: eventId,
+        record_id: recordRow.id,
+        notes: pendingSourceName.trim() || null,
+        user_id: user.id,
+      });
+
+      setAddingSourceEventId(null);
+      setPendingSourceFile(null);
+      setPendingSourceName("");
+      await load();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.error("Source upload failed:", msg);
+      alert("Upload failed: " + msg);
+    } finally {
+      setSourceUploading(false);
+    }
+  }
+
   function toggleTimelineNotesForEvent(eventId: string) {
     setExpandedTimelineNotesKeys((prev) => {
       const next = new Set(prev);
@@ -5217,24 +5283,44 @@ export default function PersonProfilePage() {
                                   <div className="mt-3">
                                     {ev.research_notes?.trim() ? (
                                       <>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            toggleTimelineNotesForEvent(ev.id)
-                                          }
-                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                          style={{
-                                            fontFamily: sans,
-                                            color: colors.forest,
-                                            fontWeight: 600,
-                                            cursor: "pointer",
-                                          }}
-                                          aria-expanded={notesOpen}
-                                        >
-                                          {notesOpen
-                                            ? "Hide research notes"
-                                            : "Research notes"}
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              toggleTimelineNotesForEvent(ev.id)
+                                            }
+                                            className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.forest,
+                                              fontWeight: 600,
+                                              cursor: "pointer",
+                                            }}
+                                            aria-expanded={notesOpen}
+                                          >
+                                            {notesOpen
+                                              ? "Hide research notes"
+                                              : "Research notes"}
+                                          </button>
+                                          {notesOpen ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setEditingResearchNotesEventId(
+                                                  ev.id
+                                                )
+                                              }
+                                              title="Edit research notes"
+                                              className="border-none bg-transparent p-0 text-sm leading-none"
+                                              style={{
+                                                color: colors.brownMuted,
+                                                cursor: "pointer",
+                                              }}
+                                            >
+                                              ✎
+                                            </button>
+                                          ) : null}
+                                        </div>
                                         {notesOpen ? (
                                           <div
                                             className="mt-2 pl-0.5 text-sm leading-relaxed"
@@ -5246,22 +5332,6 @@ export default function PersonProfilePage() {
                                             <p className="whitespace-pre-wrap">
                                               {ev.research_notes.trim()}
                                             </p>
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                setEditingResearchNotesEventId(
-                                                  ev.id
-                                                )
-                                              }
-                                              className="mt-2 border-none bg-transparent p-0 text-left text-xs underline decoration-dotted underline-offset-2"
-                                              style={{
-                                                fontFamily: sans,
-                                                color: colors.brownMuted,
-                                                cursor: "pointer",
-                                              }}
-                                            >
-                                              Edit
-                                            </button>
                                           </div>
                                         ) : null}
                                       </>
@@ -5300,9 +5370,10 @@ export default function PersonProfilePage() {
                                           <button
                                             type="button"
                                             onClick={async () => {
-                                              const el = document.getElementById(
-                                                `research-notes-${ev.id}`
-                                              ) as HTMLTextAreaElement;
+                                              const el =
+                                                document.getElementById(
+                                                  `research-notes-${ev.id}`
+                                                ) as HTMLTextAreaElement;
                                               const val = el?.value ?? "";
                                               const supabase = createClient();
                                               await supabase
@@ -5346,64 +5417,226 @@ export default function PersonProfilePage() {
                                       </div>
                                     ) : null}
                                   </div>
-                                  {linkedSources.length > 0 ? (
-                                    <div className="mt-3">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          toggleTimelineSourcesForEvent(ev.id)
-                                        }
-                                        className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
-                                        style={{
-                                          fontFamily: sans,
-                                          color: colors.forest,
-                                          fontWeight: 600,
-                                          cursor: "pointer",
-                                        }}
-                                        aria-expanded={sourcesOpen}
-                                      >
-                                        {sourcesOpen
-                                          ? "Hide sources"
-                                          : `Sources (${linkedSources.length})`}
-                                      </button>
-                                      {sourcesOpen ? (
-                                        <ul className="mt-2 space-y-1.5 pl-0.5">
-                                          {linkedSources.map((src) => (
-                                            <li key={src.id}>
-                                              {src.url ? (
-                                                <a
-                                                  href={src.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                                  style={{
-                                                    fontFamily: sans,
-                                                    color: colors.forest,
-                                                    fontWeight: 600,
-                                                  }}
-                                                >
-                                                  {src.label}
-                                                </a>
-                                              ) : (
-                                                <span
-                                                  className="text-sm"
-                                                  style={{
-                                                    fontFamily: sans,
-                                                    color: colors.brownMuted,
-                                                  }}
-                                                >
-                                                  {src.label}
-                                                  <span className="ml-1 text-xs italic">
-                                                    (link unavailable)
-                                                  </span>
-                                                </span>
-                                              )}
-                                            </li>
-                                          ))}
-                                        </ul>
+                                  <div className="mt-3">
+                                    <div className="flex items-center gap-3">
+                                      {linkedSources.length > 0 ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            toggleTimelineSourcesForEvent(
+                                              ev.id
+                                            )
+                                          }
+                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                          style={{
+                                            fontFamily: sans,
+                                            color: colors.forest,
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                          }}
+                                          aria-expanded={sourcesOpen}
+                                        >
+                                          {sourcesOpen
+                                            ? "Hide sources"
+                                            : `Sources (${linkedSources.length})`}
+                                        </button>
+                                      ) : null}
+                                      {linkedSources.length > 0 &&
+                                      sourcesOpen &&
+                                      !addingSourceEventId ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setAddingSourceEventId(ev.id)
+                                          }
+                                          title="Add source"
+                                          className="border-none bg-transparent p-0 text-base leading-none font-bold"
+                                          style={{
+                                            color: colors.brownMuted,
+                                            cursor: "pointer",
+                                            fontSize: "1.1rem",
+                                          }}
+                                        >
+                                          +
+                                        </button>
+                                      ) : null}
+                                      {linkedSources.length === 0 &&
+                                      addingSourceEventId !== ev.id ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setAddingSourceEventId(ev.id)
+                                          }
+                                          className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
+                                          style={{
+                                            fontFamily: sans,
+                                            color: colors.brownMuted,
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                          }}
+                                        >
+                                          + Add source
+                                        </button>
                                       ) : null}
                                     </div>
-                                  ) : null}
+                                    {addingSourceEventId === ev.id ? (
+                                      <div className="mt-2">
+                                        <div className="flex items-center gap-2">
+                                          <label
+                                            className="cursor-pointer text-sm underline decoration-dotted underline-offset-2"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.forest,
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            {sourceUploading
+                                              ? "Uploading…"
+                                              : "Choose file"}
+                                            <input
+                                              type="file"
+                                              accept=".jpg,.jpeg,.png,.pdf"
+                                              className="hidden"
+                                              disabled={sourceUploading}
+                                              onChange={(e) => {
+                                                const file =
+                                                  e.target.files?.[0];
+                                                if (file) {
+                                                  setPendingSourceFile({
+                                                    eventId: ev.id,
+                                                    file,
+                                                  });
+                                                  setPendingSourceName(
+                                                    file.name.replace(
+                                                      /\.[^/.]+$/,
+                                                      ""
+                                                    )
+                                                  );
+                                                }
+                                              }}
+                                            />
+                                          </label>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setAddingSourceEventId(null)
+                                            }
+                                            className="text-xs"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.brownMuted,
+                                            }}
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                        {pendingSourceFile?.eventId ===
+                                        ev.id ? (
+                                          <div className="mt-2 space-y-2">
+                                            <select
+                                              value={pendingSourceName}
+                                              onChange={(e) =>
+                                                setPendingSourceName(
+                                                  e.target.value
+                                                )
+                                              }
+                                              className="w-full rounded-md border px-3 py-2 text-sm"
+                                              style={{
+                                                fontFamily: sans,
+                                                backgroundColor:
+                                                  "var(--dg-cream)",
+                                                color: colors.brownDark,
+                                                borderColor: colors.brownBorder,
+                                              }}
+                                            >
+                                              <option value="">
+                                                Select record type…
+                                              </option>
+                                              {RECORD_TYPES.map((rt) => (
+                                                <option key={rt} value={rt}>
+                                                  {rt}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            <div className="flex gap-2">
+                                              <button
+                                                type="button"
+                                                disabled={sourceUploading}
+                                                onClick={() => {
+                                                  if (pendingSourceFile)
+                                                    void handleAddSource(
+                                                      ev.id,
+                                                      pendingSourceFile.file
+                                                    );
+                                                }}
+                                                className="rounded-md px-3 py-1.5 text-sm font-medium"
+                                                style={{
+                                                  backgroundColor:
+                                                    "var(--dg-brown-mid, #8B6F4E)",
+                                                  color: "white",
+                                                  fontFamily: sans,
+                                                }}
+                                              >
+                                                {sourceUploading
+                                                  ? "Uploading…"
+                                                  : "Upload"}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setPendingSourceFile(null);
+                                                  setPendingSourceName("");
+                                                }}
+                                                className="rounded-md px-3 py-1.5 text-sm font-medium"
+                                                style={{
+                                                  color: colors.brownMuted,
+                                                  fontFamily: sans,
+                                                }}
+                                              >
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                    {sourcesOpen && linkedSources.length > 0 ? (
+                                      <ul className="mt-1 w-full space-y-1.5 pl-0.5">
+                                        {linkedSources.map((src) => (
+                                          <li key={src.id}>
+                                            {src.url ? (
+                                              <a
+                                                href={src.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                                style={{
+                                                  fontFamily: sans,
+                                                  color: colors.forest,
+                                                  fontWeight: 600,
+                                                }}
+                                              >
+                                                {src.label}
+                                              </a>
+                                            ) : (
+                                              <span
+                                                className="text-sm"
+                                                style={{
+                                                  fontFamily: sans,
+                                                  color: colors.brownMuted,
+                                                }}
+                                              >
+                                                {src.label}
+                                                <span className="ml-1 text-xs italic">
+                                                  (link unavailable)
+                                                </span>
+                                              </span>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
+                                  </div>
                                   {eventDeleteConfirmId === ev.id ? (
                                     <div
                                       className="mt-4 flex flex-wrap items-center gap-2 border-t pt-3"

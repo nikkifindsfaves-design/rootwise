@@ -1,20 +1,8 @@
 "use client";
 
+import { RECORD_TYPES } from "@/lib/records/record-types";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
-
-const RECORD_TYPES = [
-  "Birth Record",
-  "Death Record",
-  "Marriage Record",
-  "Census Record",
-  "Church Record",
-  "Military Record",
-  "Land Record",
-  "Court Record",
-  "Story or Letter",
-  "Other",
-] as const;
 
 const sans = "var(--font-dg-body), Lato, sans-serif";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
