@@ -723,7 +723,7 @@ export default function ReviewRecordClient({
                     .filter(
                       (
                         rp
-                      ): rp is { name: string; relationship_type: string } =>
+                      ): rp is { name: string; relationship_type: RelOption } =>
                         rp !== null && rp.name !== ""
                     ),
                 }),
