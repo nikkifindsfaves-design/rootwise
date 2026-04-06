@@ -573,9 +573,8 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
       </div>
       <div
         className="relative h-[min(70vh,720px)] min-h-[240px] w-full touch-none overflow-hidden"
-        style={{ backgroundColor: "var(--dg-parchment)" }}
-        onMouseDown={handleMouseDown}
         style={{
+          backgroundColor: "var(--dg-parchment)",
           cursor:
             scale > ZOOM_MIN + 0.001
               ? dragging
@@ -583,6 +582,7 @@ function ZoomableDocumentImage({ src, alt }: { src: string; alt: string }) {
                 : "grab"
               : "default",
         }}
+        onMouseDown={handleMouseDown}
       >
         <div className="flex h-full w-full items-center justify-center p-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1114,6 +1114,8 @@ export default function ReviewRecordClient({
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth place</label>
                           <PlaceInput
+                            className={inputFieldClass}
+                            style={inputFieldStyle}
                             value={item.form.birth_place_display}
                             onChange={(v) => {
                               setCards((prev) =>
@@ -1357,7 +1359,14 @@ export default function ReviewRecordClient({
                 className="mb-3 text-xs"
                 style={{ color: "var(--dg-brown-muted)" }}
               >
-                Uncheck <span className="font-medium">Include</span> to skip a
+                Uncheck{" "}
+                <span
+                  className="font-medium"
+                  style={{ color: "var(--dg-brown-dark)" }}
+                >
+                  Include
+                </span>{" "}
+                to skip a
                 person. Continue saves checked people to this device and opens
                 duplicate review.
               </p>
