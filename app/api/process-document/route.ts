@@ -47,9 +47,9 @@ If this is a single-subject document (certificate, obituary, etc.):
   is_multi_person: boolean,
   document_subtype: string,
   record_type: string,
-  people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, birth_place: { township, county, state, country }, notes }],
-  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description, story_full }],
-  parent_events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description, story_full }],
+  people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, occupation, birth_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description }],
+  parent_events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description }],
   relationships: [{ person_a, person_b, relationship_type }]
 }
 
@@ -67,26 +67,42 @@ Places — birth_place on each person and event_place on each event and parent_e
 Always parse place text from the document into these four separate fields rather than stuffing an undifferentiated string into one field. Spell out abbreviations fully in every field — for example "West River" not "W. River", "Randolph County" not "Randolph Co."
 birth_place for each person is where that individual was born, taken from wherever the document states their personal birthplace — not the location of the event being recorded unless the document equates them. On a birth certificate, the child's birth_place is typically found in the upper left of the document showing township and county, with state listed separately; the father's birth_place and mother's birth_place are their own stated birthplaces, usually listed separately as biographical details about the parents.
 
-Story fields — ${getVoiceInstructions(vibe)}
-
-- story_full: 2–3 sentences including every detail from the document: all people present, full location, time if stated, and any other context.
-
-For each birth event, also add parent_events: one object per named parent. Each parent event uses event_type exactly "child born", the same event_date and event_place as the birth, person_name set to that parent's full name, description mentioning the child's name and the other parent if known, story_full 2–3 sentences from the parent's perspective. Omit parent_events if parents are unknown.
+For each birth event, also add parent_events: one object per named parent. Each parent event uses event_type exactly "child born", the same event_date and event_place as the birth, person_name set to that parent's full name, description mentioning the child's name and the other parent if known. Omit parent_events if parents are unknown.
 
 Always populate the relationships array with parent/child links the document supports: use relationship_type exactly "parent" where person_a is the parent and person_b is the child (e.g. { person_a: 'John Smith', person_b: 'Baby Smith', relationship_type: 'parent' }). Never put relationship information only in notes.
 
 Gender must be read explicitly from document text only. Use these indicators: 'male', 'female', 'son', 'daughter', 'his', 'her', 'he', 'she', 'Mr.', 'Mrs.', 'father', 'mother', 'husband', 'wife', 'brother', 'sister'. Never infer gender from a person's name alone. If the document contains no explicit gender indicator for a person, return null for gender.
 
+- occupation: the person's stated occupation exactly as written in the document. Return null if not stated. Do not infer or guess an occupation.
+
 Spouse relationships (relationship_type "spouse"): include ONLY when the source text explicitly states a marriage, wedding, or spousal bond (e.g. "married", "husband", "wife", "spouse", "wedding", "marriage certificate", wording that clearly indicates a legal or stated marital relationship). Do NOT add "spouse" entries solely because two people are both listed as parents of the same child on a birth, baptism, census, or similar record. Do NOT infer marriage from shared parentage, shared surname, or co-appearance as parents. If the document only names two parents without stating they are married, use only "parent" rows toward the child—no "spouse" between those parents unless marriage is explicitly stated.${anchorSuffix}`;
 }
 
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-opus-4-5";
 
 function parseJsonFromText(text: string): unknown {
   const trimmed = text.trim();
-  const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
-  const raw = fence ? fence[1].trim() : trimmed;
-  return JSON.parse(raw);
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+  }
+
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) {
+    try {
+      return JSON.parse(fence[1].trim());
+    } catch {
+    }
+  }
+
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    return JSON.parse(trimmed.slice(first, last + 1));
+  }
+
+  throw new Error("No valid JSON found in model response");
 }
 
 function inferImageMediaType(file: File): string {
@@ -361,7 +377,7 @@ export async function POST(request: NextRequest) {
   try {
     message = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 8192,
+      max_tokens: 16000,
       system: buildSystemPrompt(resolvedVibe, anchorPersonName),
       messages: [{ role: "user", content: userContent }],
     });

@@ -423,7 +423,7 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
-          stale: false,
+          stale: true,
         });
       }
     }
@@ -439,7 +439,7 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
-          stale: false,
+          stale: true,
         });
       }
     }
