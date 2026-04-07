@@ -413,9 +413,9 @@ export async function POST(request: NextRequest) {
 
       resolvedIds.push(existingId);
     } else {
-      if (!payload.first_name || !payload.last_name) {
+      if (!payload.first_name && !payload.last_name) {
         return NextResponse.json(
-          { error: "First and last name are required for each new person." },
+          { error: "At least a first or last name is required for each new person." },
           { status: 400 }
         );
       }

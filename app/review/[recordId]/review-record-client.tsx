@@ -73,8 +73,11 @@ const RELATIONSHIP_OPTIONS = [
 const EVENT_TYPE_OPTIONS = [
   "birth",
   "baptism",
+  "child born",
   "death",
   "burial",
+  "child died",
+  "spouse died",
   "marriage",
   "census appearance",
   "military service",
@@ -138,6 +141,7 @@ type EventRow = {
 type PersonCardState = {
   key: string;
   include: boolean;
+  generateStory: boolean;
   form: PersonForm;
   relationships: RelationshipRow[];
   events: EventRow[];
@@ -385,7 +389,10 @@ function normalizeEventType(raw: string): EvOption {
   if (n.includes("birth")) return "birth";
   if (n.includes("baptism") || n.includes("baptized") || n.includes("christening")) return "baptism";
   if (n.includes("death")) return "death";
+  if (n === "child born" || n.includes("child born")) return "child born";
   if (n.includes("burial") || n.includes("buried") || n.includes("interment")) return "burial";
+  if (n === "child died" || n.includes("child died")) return "child died";
+  if (n === "spouse died" || n.includes("spouse died")) return "spouse died";
   if (n.includes("marriage") || n.includes("married")) return "marriage";
   if (n.includes("census")) return "census appearance";
   if (n.includes("military")) return "military service";
@@ -483,6 +490,7 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
       form,
       relationships,
       events,
+      generateStory: relationships.some((r) => r.relationshipType === "spouse"),
     };
   });
 }
@@ -693,8 +701,48 @@ export default function ReviewRecordClient({
     if (isRegeneratingStories) return;
     setIsRegeneratingStories(true);
     try {
-      let workingCards = cards;
-      const staleTargets = cards.flatMap((card) => {
+      const isDeathRecord = recordTypeLabel === "Death Record";
+      const primaryCard = cards.find((c) =>
+        c.events.some((e) => e.eventType === "death")
+      );
+      const primaryName = primaryCard
+        ? fullNameFromForm(primaryCard.form).trim()
+        : "";
+      const primaryDeathDate = primaryCard
+        ? primaryCard.events.find((e) => e.eventType === "death")?.eventDate ?? ""
+        : "";
+
+      const cardsWithSynthesized = cards.map((card) => {
+        const isSecondary =
+          isDeathRecord &&
+          !card.events.some((e) => e.eventType === "death");
+        if (!isSecondary || !card.include || !card.generateStory) return card;
+        const isSpouse = card.relationships.some(
+          (r) => r.relationshipType === "spouse"
+        );
+        const eventType = isSpouse ? "spouse died" : "child died";
+        const description = isSpouse
+          ? `Death of spouse ${primaryName}`
+          : `Death of child ${primaryName}`;
+        const synthesized: EventRow = {
+          key: newKey("ev"),
+          eventType: eventType as EvOption,
+          eventDate: primaryDeathDate,
+          event_place_display: "",
+          event_place_id: null,
+          event_place_fields: null,
+          eventNotes: description,
+          eventStoryFull: "",
+          stale: true,
+        };
+        return {
+          ...card,
+          events: [...card.events, synthesized],
+        };
+      });
+
+      let workingCards = cardsWithSynthesized;
+      const staleTargets = cardsWithSynthesized.flatMap((card) => {
         if (!card.include)
           return [] as Array<{ cardKey: string; eventKey: string }>;
         return card.events
@@ -707,7 +755,7 @@ export default function ReviewRecordClient({
       if (recordTreeId && staleTargets.length > 0) {
         const regenerated = await Promise.all(
           staleTargets.map(async (target) => {
-            const card = cards.find((c) => c.key === target.cardKey);
+            const card = cardsWithSynthesized.find((c) => c.key === target.cardKey);
             const event = card?.events.find((e) => e.key === target.eventKey);
             if (!card || !event) return null;
 
@@ -725,7 +773,7 @@ export default function ReviewRecordClient({
                   related_people: card.relationships
                     .map((rel) => {
                       if (rel.relatedPeerIndex != null) {
-                        const peer = cards[rel.relatedPeerIndex];
+                        const peer = cardsWithSynthesized[rel.relatedPeerIndex];
                         if (!peer) return null;
                         return {
                           name: fullNameFromForm(peer.form).trim(),
@@ -734,7 +782,7 @@ export default function ReviewRecordClient({
                       }
                       const external = rel.relatedNameExternal.trim();
                       let name = external;
-                      for (const c of cards) {
+                      for (const c of cardsWithSynthesized) {
                         const fn = fullNameFromForm(c.form);
                         if (namesMatch(fn, external)) {
                           name = fn.trim();
@@ -771,7 +819,7 @@ export default function ReviewRecordClient({
           })
         );
 
-        workingCards = cards.map((card) => ({
+        workingCards = cardsWithSynthesized.map((card) => ({
           ...card,
           events: card.events.map((event) => {
             const match = regenerated.find(
@@ -983,7 +1031,13 @@ export default function ReviewRecordClient({
               </p>
             ) : (
               <div className="space-y-5">
-                {cards.map((item) => (
+                {cards.map((item) => {
+                  const isDeathRecord = recordTypeLabel === "Death Record";
+                  const isPrimaryPerson = item.events.some(
+                    (e) => e.eventType === "death"
+                  );
+                  const isSecondaryPerson = isDeathRecord && !isPrimaryPerson;
+                  return (
                   <article
                     key={item.key}
                     className={`rounded-xl border shadow-sm transition-opacity ${
@@ -1004,36 +1058,66 @@ export default function ReviewRecordClient({
                       >
                         Person
                       </h3>
-                      <label
-                        className="flex cursor-pointer items-center gap-2 text-sm"
-                        style={{ color: "var(--dg-brown-muted)" }}
-                      >
-                        <span
-                          className="text-xs font-medium"
+                      <div className="flex flex-col items-end gap-2">
+                        <label
+                          className="flex cursor-pointer items-center gap-2 text-sm"
                           style={{ color: "var(--dg-brown-muted)" }}
                         >
-                          Include
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={item.include}
-                          onChange={(e) =>
-                            updateCard(item.key, {
-                              ...item,
-                              include: e.target.checked,
-                            })
-                          }
-                          className="h-4 w-4 rounded border text-emerald-700 focus:ring-emerald-600"
-                          style={{ borderColor: "var(--dg-brown-border)" }}
-                        />
-                      </label>
+                          <span
+                            className="text-xs font-medium"
+                            style={{ color: "var(--dg-brown-muted)" }}
+                          >
+                            Include
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={item.include}
+                            onChange={(e) =>
+                              updateCard(item.key, {
+                                ...item,
+                                include: e.target.checked,
+                                generateStory: e.target.checked
+                                  ? item.generateStory
+                                  : false,
+                              })
+                            }
+                            className="h-4 w-4 rounded border text-emerald-700 focus:ring-emerald-600"
+                            style={{ borderColor: "var(--dg-brown-border)" }}
+                          />
+                        </label>
+                        {isSecondaryPerson && (
+                          <label
+                            className="flex cursor-pointer items-center gap-2 text-sm"
+                            style={{
+                              color: item.include
+                                ? "var(--dg-brown-muted)"
+                                : "var(--dg-brown-border)",
+                              pointerEvents: item.include ? "auto" : "none",
+                            }}
+                          >
+                            <span className="text-xs font-medium">
+                              Generate story
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={item.include ? item.generateStory : false}
+                              onChange={(e) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  generateStory: e.target.checked,
+                                })
+                              }
+                              disabled={!item.include}
+                              className="h-4 w-4 rounded border text-emerald-700 focus:ring-emerald-600"
+                              style={{ borderColor: "var(--dg-brown-border)" }}
+                            />
+                          </label>
+                        )}
+                      </div>
                     </div>
 
                     <div className="space-y-4 p-4">
                       {(() => {
-                        const isDeathRecord = recordTypeLabel === "Death Record";
-                        const isPrimaryPerson = item.events.some((e) => e.eventType === "death");
-                        const isSecondaryPerson = isDeathRecord && !isPrimaryPerson;
                         return (
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
@@ -1475,7 +1559,8 @@ export default function ReviewRecordClient({
 
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             )}
 
