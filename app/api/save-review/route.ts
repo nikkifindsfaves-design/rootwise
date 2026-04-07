@@ -31,6 +31,9 @@ type PendingPersonBody = {
   death_date?: unknown;
   birth_place_id?: unknown;
   birth_place_fields?: unknown;
+  marital_status?: string | null;
+  cause_of_death?: string | null;
+  surviving_spouse?: string | null;
   gender?: unknown;
   notes?: unknown;
   relationships?: unknown;
@@ -425,6 +428,9 @@ export async function POST(request: NextRequest) {
         birth_date: payload.birth_date,
         death_date: payload.death_date,
         birth_place_id: payload.birth_place_id,
+        marital_status: p.marital_status ?? null,
+        cause_of_death: p.cause_of_death ?? null,
+        surviving_spouse: p.surviving_spouse ?? null,
         gender: payload.gender,
         notes: payload.notes,
       };

@@ -26,7 +26,11 @@ type AiPerson = {
   birth_date?: string | null;
   death_date?: string | null;
   birth_place?: PlaceFields | string | null;
+  death_place?: PlaceFields | string | null;
   occupation?: string | null;
+  marital_status?: string | null;
+  cause_of_death?: string | null;
+  surviving_spouse?: string | null;
   gender?: string | null;
   notes?: string | null;
 };
@@ -68,7 +72,9 @@ const RELATIONSHIP_OPTIONS = [
 
 const EVENT_TYPE_OPTIONS = [
   "birth",
+  "baptism",
   "death",
+  "burial",
   "marriage",
   "census appearance",
   "military service",
@@ -90,7 +96,13 @@ type PersonForm = {
   birth_place_display: string;
   birth_place_id: string | null;
   birth_place_fields: PlaceFields | null;
+  death_place_display: string;
+  death_place_id: string | null;
+  death_place_fields: PlaceFields | null;
   occupation: string;
+  marital_status: string;
+  cause_of_death: string;
+  surviving_spouse: string;
   gender: string;
   notes: string;
 };
@@ -146,7 +158,13 @@ export type PendingReviewPayload = {
     birth_place_id: string | null;
     birth_place_fields: PlaceFields | null;
     birth_place_display: string | null;
+    death_place_id: string | null;
+    death_place_fields: PlaceFields | null;
+    death_place_display: string | null;
     occupation: string | null;
+    marital_status: string | null;
+    cause_of_death: string | null;
+    surviving_spouse: string | null;
     gender: string | null;
     notes: string | null;
     relationships: Array<{
@@ -296,7 +314,13 @@ function toForm(p: AiPerson): PersonForm {
     birth_place_display: placeFromAiField(p.birth_place),
     birth_place_id: null,
     birth_place_fields: placeFieldsFromAi(p.birth_place),
+    death_place_display: placeFromAiField(p.death_place),
+    death_place_id: null,
+    death_place_fields: placeFieldsFromAi(p.death_place),
     occupation: p.occupation ?? "",
+    marital_status: p.marital_status ?? "",
+    cause_of_death: p.cause_of_death ?? "",
+    surviving_spouse: p.surviving_spouse ?? "",
     gender: normalizeGenderForPendingReview(p.gender),
     notes: p.notes ?? "",
   };
@@ -359,7 +383,9 @@ function normalizeEventType(raw: string): EvOption {
   const n = raw.trim().toLowerCase();
   if (EVENT_TYPE_OPTIONS.includes(n as EvOption)) return n as EvOption;
   if (n.includes("birth")) return "birth";
+  if (n.includes("baptism") || n.includes("baptized") || n.includes("christening")) return "baptism";
   if (n.includes("death")) return "death";
+  if (n.includes("burial") || n.includes("buried") || n.includes("interment")) return "burial";
   if (n.includes("marriage") || n.includes("married")) return "marriage";
   if (n.includes("census")) return "census appearance";
   if (n.includes("military")) return "military service";
@@ -789,9 +815,15 @@ export default function ReviewRecordClient({
           birth_place_id: c.form.birth_place_id,
           birth_place_fields: c.form.birth_place_fields,
           birth_place_display: birthPlaceDisplayForPendingPayload(c.form),
+          death_place_id: c.form.death_place_id,
+          death_place_fields: c.form.death_place_fields,
+          death_place_display: c.form.death_place_display.trim() || null,
           gender: normalizeGenderForPendingReview(c.form.gender),
           notes: c.form.notes.trim() || null,
           occupation: c.form.occupation.trim() || null,
+          marital_status: c.form.marital_status.trim() || null,
+          cause_of_death: c.form.cause_of_death.trim() || null,
+          surviving_spouse: c.form.surviving_spouse.trim() || null,
           relationships: c.relationships
             .map((r) => ({
               related_name: resolveRelationshipExportName(r, workingCards),
@@ -998,6 +1030,11 @@ export default function ReviewRecordClient({
                     </div>
 
                     <div className="space-y-4 p-4">
+                      {(() => {
+                        const isDeathRecord = recordTypeLabel === "Death Record";
+                        const isPrimaryPerson = item.events.some((e) => e.eventType === "death");
+                        const isSecondaryPerson = isDeathRecord && !isPrimaryPerson;
+                        return (
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <label className={labelFieldClass}
@@ -1071,6 +1108,7 @@ export default function ReviewRecordClient({
                             }
                           />
                         </div>
+                        {!isSecondaryPerson && (
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth date</label>
@@ -1095,6 +1133,8 @@ export default function ReviewRecordClient({
                             }}
                           />
                         </div>
+                        )}
+                        {!isSecondaryPerson && (
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Death date</label>
@@ -1110,6 +1150,8 @@ export default function ReviewRecordClient({
                             }
                           />
                         </div>
+                        )}
+                        {!isSecondaryPerson && (
                         <div className="sm:col-span-2">
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth place</label>
@@ -1159,6 +1201,38 @@ export default function ReviewRecordClient({
                             }}
                           />
                         </div>
+                        )}
+                        {isDeathRecord && isPrimaryPerson && (
+                          <div className="sm:col-span-2">
+                            <label className={labelFieldClass} style={labelFieldStyle}>Death place</label>
+                            <PlaceInput
+                              value={item.form.death_place_display}
+                              onChange={(v) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  form: {
+                                    ...item.form,
+                                    death_place_display: v,
+                                    death_place_id: null,
+                                    death_place_fields: null,
+                                  },
+                                })
+                              }
+                              onPlaceSelect={(place) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  form: {
+                                    ...item.form,
+                                    death_place_display: place.display,
+                                    death_place_id: place.id,
+                                    death_place_fields: null,
+                                  },
+                                })
+                              }
+                            />
+                          </div>
+                        )}
+                        {!isSecondaryPerson && (
                         <div className="sm:col-span-2">
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Gender</label>
@@ -1181,29 +1255,86 @@ export default function ReviewRecordClient({
                             <option value="Unknown">Unknown</option>
                           </select>
                         </div>
-                        {item.relationships.some(
-                          (rel) => rel.relationshipType === "parent"
-                        ) && (
-                          <div className="sm:col-span-2">
-                            <label className={labelFieldClass}
-                            style={labelFieldStyle}>Occupation</label>
-                            <input
-                              className={inputFieldClass}
-                            style={inputFieldStyle}
-                              value={item.form.occupation}
-                              onChange={(e) =>
-                                updateCard(item.key, {
-                                  ...item,
-                                  form: {
-                                    ...item.form,
-                                    occupation: e.target.value,
-                                  },
-                                })
-                              }
-                            />
-                          </div>
+                        )}
+                        {(!isDeathRecord || isPrimaryPerson) && (
+                          <>
+                            <div className="sm:col-span-2">
+                              <label className={labelFieldClass}
+                              style={labelFieldStyle}>Occupation</label>
+                              <input
+                                className={inputFieldClass}
+                              style={inputFieldStyle}
+                                value={item.form.occupation}
+                                onChange={(e) =>
+                                  updateCard(item.key, {
+                                    ...item,
+                                    form: {
+                                      ...item.form,
+                                      occupation: e.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelFieldClass}
+                              style={labelFieldStyle}>Marital status</label>
+                              <input
+                                className={inputFieldClass}
+                              style={inputFieldStyle}
+                                value={item.form.marital_status}
+                                onChange={(e) =>
+                                  updateCard(item.key, {
+                                    ...item,
+                                    form: {
+                                      ...item.form,
+                                      marital_status: e.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelFieldClass}
+                              style={labelFieldStyle}>Cause of death</label>
+                              <input
+                                className={inputFieldClass}
+                              style={inputFieldStyle}
+                                value={item.form.cause_of_death}
+                                onChange={(e) =>
+                                  updateCard(item.key, {
+                                    ...item,
+                                    form: {
+                                      ...item.form,
+                                      cause_of_death: e.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelFieldClass}
+                              style={labelFieldStyle}>Surviving spouse</label>
+                              <input
+                                className={inputFieldClass}
+                              style={inputFieldStyle}
+                                value={item.form.surviving_spouse}
+                                onChange={(e) =>
+                                  updateCard(item.key, {
+                                    ...item,
+                                    form: {
+                                      ...item.form,
+                                      surviving_spouse: e.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </div>
+                          </>
                         )}
                       </div>
+                        );
+                      })()}
 
                       <div
                         className="border-t pt-4"

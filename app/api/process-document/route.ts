@@ -22,7 +22,7 @@ function getVoiceInstructions(vibe: string): string {
   }
 }
 
-function buildSystemPrompt(
+function buildBirthRecordPrompt(
   vibe: string,
   anchorPersonName: string | null
 ): string {
@@ -76,6 +76,74 @@ Gender must be read explicitly from document text only. Use these indicators: 'm
 - occupation: the person's stated occupation exactly as written in the document. Return null if not stated. Do not infer or guess an occupation.
 
 Spouse relationships (relationship_type "spouse"): include ONLY when the source text explicitly states a marriage, wedding, or spousal bond (e.g. "married", "husband", "wife", "spouse", "wedding", "marriage certificate", wording that clearly indicates a legal or stated marital relationship). Do NOT add "spouse" entries solely because two people are both listed as parents of the same child on a birth, baptism, census, or similar record. Do NOT infer marriage from shared parentage, shared surname, or co-appearance as parents. If the document only names two parents without stating they are married, use only "parent" rows toward the child—no "spouse" between those parents unless marriage is explicitly stated.${anchorSuffix}`;
+}
+
+function buildDeathRecordPrompt(vibe: string, anchorPersonName: string | null): string {
+  const anchorSuffix =
+    anchorPersonName != null
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".
+
+If this is a multi-person document (register page, list, or ledger with multiple entries):
+- Scan the document to find the entry that matches "${anchorPersonName}"
+- Extract ALL people named within that entry only — the deceased, their parents, spouse, and informant
+- Do NOT extract any other entries or individuals from other entries on the document
+- The people array, events array, and relationships array must contain only people from that one matched entry
+
+If this is a single-subject document (death certificate, obituary, etc.):
+- Treat "${anchorPersonName}" as the primary subject as normal
+- Extract all people and events as usual`
+      : "";
+
+  return `You are a genealogy expert specializing in death records. Analyze this document and extract all people, events and relationships. Return ONLY a JSON object with this exact structure:
+{
+  is_multi_person: boolean,
+  document_subtype: string,
+  record_type: string,
+  people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, occupation, marital_status, cause_of_death, surviving_spouse, birth_place: { township, county, state, country }, death_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description }],
+  parent_events: [],
+  relationships: [{ person_a, person_b, relationship_type }]
+}
+
+- is_multi_person: true if the document contains multiple unrelated individuals (e.g. a death register page with multiple entries). false if it is a single-subject document (e.g. a death certificate or obituary).
+- document_subtype: a short label for the specific format, e.g. "death certificate", "obituary", "death register", "coroner's record".
+
+People — extract the deceased as the primary person. Also extract the father, mother, and surviving spouse as separate people entries if named. Extract the informant only if they are a named family member.
+- first_name, middle_name, last_name: exactly as written. Spell out abbreviations — "Frederick" not "Fredk.", "John" not "Joh."
+- birth_date: stated birth date if present, in YYYY-MM-DD format. Null if not stated. Do not calculate from age.
+- death_date: date of death in YYYY-MM-DD format. Null if not stated.
+- gender: read explicitly from document text only. Use indicators: male, female, Mr., Mrs., his, her, he, she, husband, wife, father, mother, son, daughter, brother, sister, widow, widower. Never infer gender from a name alone. Return null if not explicitly stated.
+- occupation: the deceased's stated occupation exactly as written. Null if not stated. Do not infer.
+- marital_status: the deceased's stated marital status exactly as written, e.g. "married", "widowed", "single". Null if not stated.
+- cause_of_death: the stated cause of death exactly as written. Include contributing causes if listed. Null if not stated.
+- surviving_spouse: the full name of the surviving spouse exactly as written. Null if not stated or if the spouse predeceased.
+- birth_place: where the deceased was born, not where they died. Parse into { township, county, state, country }. Null fields where not stated.
+- notes: include age at death here if stated and birth date is unknown, e.g. "Age at death: 72". Otherwise null.
+- death_place: the city and county where the person died, parsed into { township, county, state, country }. township is the city or town of death. county is the county of death. Use the same place rules as birth_place — spell out abbreviations, reflect the political entity at the time of the record. Null fields where not stated. This is distinct from burial place — death_place is where the person died, not where they were buried.
+
+Places — event_place on each event must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable; country is required.
+- township is the most local jurisdiction. For burial events, put the cemetery name in the township field, e.g. "Oak Hill Cemetery".
+- county is the county or county-equivalent.
+- state is the state, province, or colony.
+- country must reflect the political entity at the time of the record. Records before 1776 in American colonies use "British Colonial America". Never default to "United States" for records that predate its existence.
+Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West River" not "W. River".
+
+Events — produce exactly two events for the deceased when both dates are present: one death event and one burial event. Omit the burial event if no burial date or cemetery is stated.
+- Death event: event_type exactly "death". event_date is the date of death. event_place is the city and county where death occurred. description includes cause of death, informant name if stated, and any other relevant detail from the document.
+- Burial event: event_type exactly "burial". event_date is the burial date. event_place township is the cemetery name, county and state are the burial location. description includes any additional burial detail stated.
+parent_events must always be an empty array for death records.
+
+Relationships — populate for every named family member:
+- Father: { person_a: "Father Full Name", person_b: "Deceased Full Name", relationship_type: "parent" }
+- Mother: { person_a: "Mother Full Name", person_b: "Deceased Full Name", relationship_type: "parent" }
+- Surviving spouse: { person_a: "Spouse Full Name", person_b: "Deceased Full Name", relationship_type: "spouse" } — only when explicitly stated as spouse, husband, or wife on the document.
+Never put relationship information only in notes.${anchorSuffix}`;
+}
+
+function buildSystemPrompt(vibe: string, anchorPersonName: string | null, recordType: string | null): string {
+  const normalized = (recordType ?? "").toLowerCase().trim();
+  if (normalized === "death record") return buildDeathRecordPrompt(vibe, anchorPersonName);
+  return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 
 const MODEL = "claude-opus-4-5";
@@ -373,12 +441,18 @@ export async function POST(request: NextRequest) {
           },
         ];
 
+  const recordTypeField = formData.get("record_type");
+  const recordTypeStr =
+    recordTypeField != null && String(recordTypeField).trim() !== ""
+      ? String(recordTypeField).trim()
+      : null;
+
   let message: Anthropic.Messages.Message;
   try {
     message = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 16000,
-      system: buildSystemPrompt(resolvedVibe, anchorPersonName),
+      system: buildSystemPrompt(resolvedVibe, anchorPersonName, recordTypeStr),
       messages: [{ role: "user", content: userContent }],
     });
     console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", ((message.usage.input_tokens * 3 + message.usage.output_tokens * 15) / 1_000_000).toFixed(5));
@@ -407,12 +481,6 @@ export async function POST(request: NextRequest) {
       { status: 502 }
     );
   }
-
-  const recordTypeField = formData.get("record_type");
-  const recordTypeStr =
-    recordTypeField != null && String(recordTypeField).trim() !== ""
-      ? String(recordTypeField).trim()
-      : null;
 
   // Sole `records` row for this upload: `tree_id` comes from multipart field
   // `tree_id` (validated above). Omit when null/missing so non-tree uploads unchanged.
