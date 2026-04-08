@@ -1077,6 +1077,7 @@ export default function ReviewRecordClient({
                 {cards.map((item) => {
                   const isDeathRecord = recordTypeLabel === "Death Record";
                   const isMarriageRecord = recordTypeLabel === "Marriage Record";
+                  const isBirthRecordChild = !isDeathRecord && !isMarriageRecord && item.events.some((e) => e.eventType === "birth");
                   const isPrimaryPerson = item.events.some(
                     (e) => e.eventType === "death"
                   );
@@ -1384,26 +1385,28 @@ export default function ReviewRecordClient({
                           </select>
                         </div>
                         )}
-                        {(!isDeathRecord || isPrimaryPerson) && !isMarriageRecord && (
+                        {(!isDeathRecord || isPrimaryPerson) && !isMarriageRecord && !isBirthRecordChild && (
+                          <div className="sm:col-span-2">
+                            <label className={labelFieldClass}
+                            style={labelFieldStyle}>Occupation</label>
+                            <input
+                              className={inputFieldClass}
+                            style={inputFieldStyle}
+                              value={item.form.occupation}
+                              onChange={(e) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  form: {
+                                    ...item.form,
+                                    occupation: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </div>
+                        )}
+                        {isDeathRecord && isPrimaryPerson && (
                           <>
-                            <div className="sm:col-span-2">
-                              <label className={labelFieldClass}
-                              style={labelFieldStyle}>Occupation</label>
-                              <input
-                                className={inputFieldClass}
-                              style={inputFieldStyle}
-                                value={item.form.occupation}
-                                onChange={(e) =>
-                                  updateCard(item.key, {
-                                    ...item,
-                                    form: {
-                                      ...item.form,
-                                      occupation: e.target.value,
-                                    },
-                                  })
-                                }
-                              />
-                            </div>
                             <div className="sm:col-span-2">
                               <label className={labelFieldClass}
                               style={labelFieldStyle}>Marital status</label>
