@@ -375,9 +375,32 @@ function computeExplicitTreeLayout(
     maxConnectedY = Math.max(...[...posById.values()].map((p) => p.y));
   }
 
+  const spouseOf = new Map<string, string>();
+  for (const r of relationships) {
+    if (normRelType(r.relationship_type) === "spouse") {
+      spouseOf.set(r.person_a_id, r.person_b_id);
+      spouseOf.set(r.person_b_id, r.person_a_id);
+    }
+  }
+
+  const handledFloaters = new Set<string>();
+  for (const id of floaterIds) {
+    const spouseId = spouseOf.get(id);
+    if (!spouseId) continue;
+    const spousePos = posById.get(spouseId);
+    if (!spousePos || floaterSet.has(spouseId)) continue;
+    posById.set(id, {
+      x: spousePos.x + LAYOUT_NODE_W + LAYOUT_MIN_NODE_GAP,
+      y: spousePos.y,
+      generation: spousePos.generation,
+    });
+    handledFloaters.add(id);
+  }
+
+  const remainingFloaters = floaterIds.filter((id) => !handledFloaters.has(id));
   const floaterY = maxConnectedY + LAYOUT_GEN_DY * 2;
   const floaterStep = LAYOUT_NODE_W + LAYOUT_MIN_NODE_GAP;
-  const sortedFloaters = [...floaterIds].sort((a, b) => a.localeCompare(b));
+  const sortedFloaters = [...remainingFloaters].sort((a, b) => a.localeCompare(b));
   for (let i = 0; i < sortedFloaters.length; i++) {
     const id = sortedFloaters[i]!;
     posById.set(id, {

@@ -140,9 +140,55 @@ Relationships — populate for every named family member:
 Never put relationship information only in notes.${anchorSuffix}`;
 }
 
+function buildMarriageRecordPrompt(vibe: string, anchorPersonName: string | null): string {
+  const anchorSuffix =
+    anchorPersonName != null
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".\n\nIf this is a multi-person document (register page or ledger with multiple entries):\n- Scan the document to find the entry where "${anchorPersonName}" appears as either the husband or the wife\n- Extract only that couple — the husband and wife from that specific entry\n- Do NOT extract any other couples or individuals from other entries on the document\n\nIf this is a single-subject document (marriage certificate or license):\n- Treat "${anchorPersonName}" as one of the parties as normal\n- Extract both parties as usual`
+      : "";
+
+  return `You are a genealogy expert specializing in marriage records. Analyze this document and extract the married couple, marriage event, and relationship. Return ONLY a JSON object with this exact structure:
+{
+  is_multi_person: boolean,
+  document_subtype: string,
+  record_type: string,
+  people: [{ first_name, middle_name, last_name, birth_date, gender, birth_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description }],
+  parent_events: [],
+  relationships: [{ person_a, person_b, relationship_type }]
+}
+
+PEOPLE — always return exactly two people: the husband first, then the wife.
+- Do not extract witnesses, officiants, parents of the parties, or any other named individuals as separate people entries. Include any such individuals in the notes field of the most relevant party instead.
+- first_name, middle_name, last_name: exactly as written. Spell out abbreviations — "Frederick" not "Fredk.", "William" not "Wm."
+- birth_date: stated birth date in YYYY-MM-DD format. Null if not stated. Do not calculate from age.
+- gender: husband is always "male", wife is always "female".
+- birth_place: where the person was born if stated, not the marriage location. Parse into { township, county, state, country }. Null fields where not stated.
+- notes: include age at marriage if stated (e.g. "Age at marriage: 24"), father's name, mother's name, witnesses, residence, or any other detail from the document about that specific party. Null if nothing additional.
+
+EVENTS — return exactly two marriage events, one per party.
+- Return one event with person_name set to the husband's full name and a second event with person_name set to the wife's full name.
+- Both events must have identical event_type, event_date, event_place, and description.
+- event_type: exactly "marriage"
+- event_date: the marriage date in YYYY-MM-DD format. Null if not stated.
+- event_place: the location of the marriage, parsed into { township, county, state, country }
+- description: include the officiant name and title if stated, witness names if stated, and any other relevant detail from the document.
+
+RELATIONSHIPS — return exactly one entry:
+{ person_a: "Husband Full Name", person_b: "Wife Full Name", relationship_type: "spouse" }
+
+is_multi_person: true if this is a register page or ledger containing multiple marriage entries. false if this is a single marriage certificate or license for one couple.
+document_subtype: a short label for the specific format, e.g. "marriage certificate", "marriage register", "marriage license", "marriage bond".
+parent_events must always be an empty array for marriage records.
+
+Places — event_place on each event and birth_place on each person must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable; country is required.
+- country must reflect the political entity at the time of the record. Records before 1776 in American colonies use "British Colonial America". Never default to "United States" for records that predate its existence.
+Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West River" not "W. River".${anchorSuffix}`;
+}
+
 function buildSystemPrompt(vibe: string, anchorPersonName: string | null, recordType: string | null): string {
   const normalized = (recordType ?? "").toLowerCase().trim();
   if (normalized === "death record") return buildDeathRecordPrompt(vibe, anchorPersonName);
+  if (normalized === "marriage record") return buildMarriageRecordPrompt(vibe, anchorPersonName);
   return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 

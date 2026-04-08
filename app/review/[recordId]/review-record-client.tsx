@@ -1018,6 +1018,49 @@ export default function ReviewRecordClient({
               </p>
             )}
 
+            {recordTypeLabel === "Marriage Record" && (() => {
+              const sharedMarriageEvent = cards
+                .flatMap((c) => c.events)
+                .find((e) => e.eventType === "marriage") ?? null;
+              return (
+                <div
+                  className="rounded-xl border p-4 space-y-3"
+                  style={{
+                    backgroundColor: "var(--dg-cream)",
+                    borderColor: "var(--dg-brown-border)",
+                  }}
+                >
+                  <h3
+                    className="text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: "var(--dg-brown-muted)" }}
+                  >
+                    Marriage details
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className={labelFieldClass} style={labelFieldStyle}>
+                        Marriage date
+                      </label>
+                      <p className={inputFieldClass} style={{ ...inputFieldStyle, cursor: "default" }}>
+                        {sharedMarriageEvent?.eventDate || "—"}
+                      </p>
+                      <p className="mt-1 text-xs" style={{ color: "var(--dg-brown-muted)" }}>
+                        Edit in the Events section on the husband card below
+                      </p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className={labelFieldClass} style={labelFieldStyle}>
+                        Marriage place
+                      </label>
+                      <p className={inputFieldClass} style={{ ...inputFieldStyle, cursor: "default" }}>
+                        {sharedMarriageEvent?.event_place_display || "—"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {cards.length === 0 ? (
               <p
                 className="rounded-xl border border-dashed p-8 text-center text-sm"
@@ -1033,6 +1076,7 @@ export default function ReviewRecordClient({
               <div className="space-y-5">
                 {cards.map((item) => {
                   const isDeathRecord = recordTypeLabel === "Death Record";
+                  const isMarriageRecord = recordTypeLabel === "Marriage Record";
                   const isPrimaryPerson = item.events.some(
                     (e) => e.eventType === "death"
                   );
@@ -1192,7 +1236,7 @@ export default function ReviewRecordClient({
                             }
                           />
                         </div>
-                        {!isSecondaryPerson && (
+                        {!isSecondaryPerson && !isMarriageRecord && (
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth date</label>
@@ -1218,7 +1262,7 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         )}
-                        {!isSecondaryPerson && (
+                        {!isSecondaryPerson && !isMarriageRecord && (
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Death date</label>
@@ -1235,7 +1279,7 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         )}
-                        {!isSecondaryPerson && (
+                        {!isSecondaryPerson && !isMarriageRecord && (
                         <div className="sm:col-span-2">
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth place</label>
@@ -1340,7 +1384,7 @@ export default function ReviewRecordClient({
                           </select>
                         </div>
                         )}
-                        {(!isDeathRecord || isPrimaryPerson) && (
+                        {(!isDeathRecord || isPrimaryPerson) && !isMarriageRecord && (
                           <>
                             <div className="sm:col-span-2">
                               <label className={labelFieldClass}
