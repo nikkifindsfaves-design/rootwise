@@ -11,6 +11,7 @@ export const EVENT_TYPES = [
   "spouse died",
   "census",
   "immigration",
+  "residence",
   "emigration",
   "military service",
   "occupation",

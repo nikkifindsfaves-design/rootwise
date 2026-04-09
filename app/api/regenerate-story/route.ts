@@ -139,7 +139,8 @@ Requirements:
 - Use only the provided event details; do not invent facts.
 - story_full must be 2-3 sentences.
 - Keep the person the event is about as the subject.
-- Never include markdown fences or extra keys.`,
+- Never include markdown fences or extra keys.
+- If event_type is "residence", derive all relationship language exclusively from event_notes. Do not use the related_people block for relationship labels on residence events. Never call anyone a sibling unless event_notes explicitly uses that word.`,
     messages: [
       {
         role: "user",

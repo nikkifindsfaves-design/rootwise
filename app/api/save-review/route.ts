@@ -137,12 +137,9 @@ async function findOrCreatePlace(
   }
   q = q.eq("country", fields.country);
 
-  const { data: found, error: findErr } = await q.maybeSingle();
-
-  if (findErr) {
-    return { ok: false, message: findErr.message };
-  }
-  const fid = (found as { id?: string } | null)?.id;
+  const { data: foundRows, error: findErr } = await q.limit(1);
+  if (findErr) return { ok: false, message: findErr.message };
+  const fid = (foundRows?.[0] as { id?: string } | undefined)?.id;
   if (typeof fid === "string" && fid !== "") {
     return { ok: true, id: fid };
   }
@@ -156,7 +153,7 @@ async function findOrCreatePlace(
       country: fields.country,
     })
     .select("id")
-    .single();
+    .maybeSingle();
 
   if (insErr) {
     return { ok: false, message: insErr.message };
@@ -297,6 +294,11 @@ function extractParentEventsFromAi(ai: unknown): Record<string, unknown>[] {
 
 export async function POST(request: NextRequest) {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.error(
+      "[save-review]",
+      "supabase-env-missing",
+      "Supabase environment variables are not configured"
+    );
     return NextResponse.json(
       { error: "Supabase environment variables are not configured" },
       { status: 500 }
@@ -307,16 +309,19 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
+    console.error("[save-review]", "json-parse", "Invalid JSON body");
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (typeof body !== "object" || body === null) {
+    console.error("[save-review]", "body-not-object", "Expected JSON object");
     return NextResponse.json({ error: "Expected JSON object" }, { status: 400 });
   }
 
   const b = body as Record<string, unknown>;
   const recordId = typeof b.recordId === "string" ? b.recordId.trim() : "";
   if (!recordId) {
+    console.error("[save-review]", "record-id-missing", "recordId is required");
     return NextResponse.json({ error: "recordId is required" }, { status: 400 });
   }
 
@@ -329,6 +334,7 @@ export async function POST(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    console.error("[save-review]", "auth-unauthorized", "Unauthorized");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -340,6 +346,7 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (recordErr || !recordRow) {
+    console.error("[save-review]", "record-fetch", "Record not found.");
     return NextResponse.json({ error: "Record not found." }, { status: 404 });
   }
 
@@ -357,6 +364,7 @@ export async function POST(request: NextRequest) {
 
     const birthRes = await resolveBirthPlaceIdFromBody(supabase, p);
     if (birthRes.error) {
+      console.error("[save-review]", "birth-place-resolve", birthRes.error);
       return NextResponse.json({ error: birthRes.error }, { status: 500 });
     }
     const payload: PersonPayload = {
@@ -373,9 +381,15 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (fetchErr) {
+        console.error("[save-review]", "existing-person-fetch", fetchErr.message);
         return NextResponse.json({ error: fetchErr.message }, { status: 500 });
       }
       if (!row) {
+        console.error(
+          "[save-review]",
+          "existing-person-missing",
+          `Person not found: ${existingId}`
+        );
         return NextResponse.json(
           { error: `Person not found: ${existingId}` },
           { status: 400 }
@@ -407,6 +421,7 @@ export async function POST(request: NextRequest) {
           .eq("user_id", user.id);
 
         if (updErr) {
+          console.error("[save-review]", "person-update", updErr.message);
           return NextResponse.json({ error: updErr.message }, { status: 500 });
         }
       }
@@ -414,6 +429,11 @@ export async function POST(request: NextRequest) {
       resolvedIds.push(existingId);
     } else {
       if (!payload.first_name && !payload.last_name) {
+        console.error(
+          "[save-review]",
+          "new-person-name-required",
+          "At least a first or last name is required for each new person."
+        );
         return NextResponse.json(
           { error: "At least a first or last name is required for each new person." },
           { status: 400 }
@@ -442,9 +462,14 @@ export async function POST(request: NextRequest) {
         .from("persons")
         .insert(newPersonRow)
         .select("id")
-        .single();
+        .maybeSingle();
 
       if (insErr || !inserted) {
+        console.error(
+          "[save-review]",
+          "person-insert",
+          insErr?.message ?? "Failed to create person."
+        );
         return NextResponse.json(
           { error: insErr?.message ?? "Failed to create person." },
           { status: 500 }
@@ -465,6 +490,7 @@ export async function POST(request: NextRequest) {
   const { data: allPersons, error: listErr } = await nameListQuery;
 
   if (listErr) {
+    console.error("[save-review]", "person-name-list", listErr.message);
     return NextResponse.json({ error: listErr.message }, { status: 500 });
   }
 
@@ -501,6 +527,11 @@ export async function POST(request: NextRequest) {
       const relatedKey = normalizeFullName(relatedName);
       const relatedId = nameToId.get(relatedKey);
       if (!relatedId) {
+        console.error(
+          "[save-review]",
+          "relationship-related-name-not-found",
+          `No person found matching "${relatedName}". Save related people first or fix the name.`
+        );
         return NextResponse.json(
           {
             error: `No person found matching "${relatedName}". Save related people first or fix the name.`,
@@ -509,6 +540,11 @@ export async function POST(request: NextRequest) {
         );
       }
       if (relatedId === personId) {
+        console.error(
+          "[save-review]",
+          "relationship-self",
+          "A relationship cannot connect a person to themselves."
+        );
         return NextResponse.json(
           { error: "A relationship cannot connect a person to themselves." },
           { status: 400 }
@@ -537,6 +573,7 @@ export async function POST(request: NextRequest) {
       const { error: r1 } = await supabase.from("relationships").insert(relRow1);
 
       if (r1) {
+        console.error("[save-review]", "relationship-insert-forward", r1.message);
         return NextResponse.json({ error: r1.message }, { status: 500 });
       }
 
@@ -553,6 +590,7 @@ export async function POST(request: NextRequest) {
           del = del.eq("tree_id", recordTreeId);
         }
         await del;
+        console.error("[save-review]", "relationship-insert-inverse", r2.message);
         return NextResponse.json({ error: r2.message }, { status: 500 });
       }
     }
@@ -571,6 +609,7 @@ export async function POST(request: NextRequest) {
       const storyFull = String(e.story_full ?? "").trim() || null;
       const evPlaceRes = await resolveEventPlaceIdFromEvent(supabase, e);
       if (evPlaceRes.error) {
+        console.error("[save-review]", "event-place-resolve", evPlaceRes.error);
         return NextResponse.json({ error: evPlaceRes.error }, { status: 500 });
       }
       const { error: evSaveErr } = await savePersonEventWithDedupe(
@@ -588,6 +627,7 @@ export async function POST(request: NextRequest) {
       );
 
       if (evSaveErr) {
+        console.error("[save-review]", "event-save-dedupe", evSaveErr);
         return NextResponse.json({ error: evSaveErr }, { status: 500 });
       }
     }
@@ -609,6 +649,7 @@ export async function POST(request: NextRequest) {
     const { data: asChildRows, error: asChildErr } = await asChildQ;
 
     if (asChildErr) {
+      console.error("[save-review]", "sibling-parent-query", asChildErr.message);
       return NextResponse.json({ error: asChildErr.message }, { status: 500 });
     }
 
@@ -633,6 +674,7 @@ export async function POST(request: NextRequest) {
       const { data: coChildRows, error: coErr } = await coChildQ;
 
       if (coErr) {
+        console.error("[save-review]", "sibling-cochild-query", coErr.message);
         return NextResponse.json({ error: coErr.message }, { status: 500 });
       }
 
@@ -655,9 +697,11 @@ export async function POST(request: NextRequest) {
         if (recordTreeId) {
           sib1Q = sib1Q.eq("tree_id", recordTreeId);
         }
-        const { data: sib1, error: s1Err } = await sib1Q.maybeSingle();
+        const { data: sib1Rows, error: s1Err } = await sib1Q.limit(1);
+        const sib1 = sib1Rows?.[0] ?? null;
 
         if (s1Err) {
+          console.error("[save-review]", "sibling-exists-query-a", s1Err.message);
           return NextResponse.json({ error: s1Err.message }, { status: 500 });
         }
 
@@ -671,9 +715,11 @@ export async function POST(request: NextRequest) {
         if (recordTreeId) {
           sib2Q = sib2Q.eq("tree_id", recordTreeId);
         }
-        const { data: sib2, error: s2Err } = await sib2Q.maybeSingle();
+        const { data: sib2Rows, error: s2Err } = await sib2Q.limit(1);
+        const sib2 = sib2Rows?.[0] ?? null;
 
         if (s2Err) {
+          console.error("[save-review]", "sibling-exists-query-b", s2Err.message);
           return NextResponse.json({ error: s2Err.message }, { status: 500 });
         }
 
@@ -701,6 +747,7 @@ export async function POST(request: NextRequest) {
           .insert(sibIns1);
 
         if (insSib1) {
+          console.error("[save-review]", "sibling-insert-forward", insSib1.message);
           return NextResponse.json({ error: insSib1.message }, { status: 500 });
         }
 
@@ -720,6 +767,7 @@ export async function POST(request: NextRequest) {
             delS = delS.eq("tree_id", recordTreeId);
           }
           await delS;
+          console.error("[save-review]", "sibling-insert-inverse", insSib2.message);
           return NextResponse.json({ error: insSib2.message }, { status: 500 });
         }
       }

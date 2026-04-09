@@ -166,10 +166,72 @@ Places — event_place on each event and birth_place on each person must always 
 Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West River" not "W. River".${anchorSuffix}`;
 }
 
+function buildCensusRecordPrompt(
+  vibe: string,
+  anchorPersonName: string | null
+): string {
+  const anchorSuffix =
+    anchorPersonName != null
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".
+
+If this is a census page with multiple households:
+- Scan the document to find the household entry that contains "${anchorPersonName}"
+- Extract ONLY the people within that household
+- Do NOT extract people from any other household on the page
+
+If this is a single-household document:
+- Treat "${anchorPersonName}" as a member of the household as normal
+- Extract all household members as usual`
+      : "";
+
+  return `You are a genealogy expert specializing in census records. Analyze this document and extract all people in the household, their relationships, and their residence event. Return ONLY a JSON object with this exact structure:
+{
+  is_multi_person: boolean,
+  document_subtype: string,
+  record_type: string,
+  people: [{ first_name, middle_name, last_name, birth_date, gender, occupation, birth_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description }],
+  parent_events: [],
+  relationships: [{ person_a, person_b, relationship_type }]
+}
+
+PEOPLE — extract every person in the household who appears to be a family member. Exclude boarders, lodgers, and servants unless the document explicitly states a family relationship such as "nephew", "mother-in-law", or similar.
+- first_name, middle_name, last_name: exactly as written. Spell out abbreviations.
+- birth_date: calculate as census year minus stated age, returned as "YYYY" only. If age is not stated, return null.
+- gender: read explicitly from document text only. Use indicators: male, female, M, F, son, daughter, his, her, husband, wife. Never infer gender from a name alone. Return null if not explicitly stated.
+- occupation: exactly as written in the document. Return null if not stated.
+- birth_place: the stated birthplace of this individual, parsed into { township, county, state, country }. Census records typically list only state or country — set township and county to null if not stated. country must reflect the political entity at the time of the record.
+- notes: write a short phrase describing who this person lived with, using relationship labels, e.g. "Lived with wife Mary Smith, sons John Jr. and Thomas, and daughter Clara." Use the relationship roles from the document or inferred relationships — never use the word "sibling" for a spouse, parent, or child. Always populate this field for every person extracted.
+
+EVENTS — produce exactly one residence event per person.
+- event_type: exactly "residence"
+- event_date: the census year as "YYYY" only, e.g. "1880"
+- event_place: the household location parsed into { township, county, state, country }. Use the same place rules as birth_place — spell out abbreviations, reflect the political entity at the time of the record.
+- description: state the person's role in the household (head, wife, son, daughter, etc.) and their occupation if stated.
+- person_name: the full name of the person this event belongs to.
+
+parent_events must always be an empty array for census records.
+
+RELATIONSHIPS — infer from the relationship column when present. When the relationship column is absent or unclear, infer from age and surname patterns:
+- The first listed person is typically the head of household.
+- A person of similar age with a different surname is likely a spouse.
+- Younger people sharing the head's surname are likely children — use relationship_type "parent" with person_a as the parent and person_b as the child.
+- Use relationship_type "spouse" only when the document states it or when strong inference supports it (similar age, different surname, co-head of household).
+- Use relationship_type "sibling" when two people share a surname and appear to be the same generation.
+Always populate relationships for every family member extracted. Never put relationship information only in notes.
+
+is_multi_person: true if this census page contains multiple unrelated households. false if it contains a single household.
+document_subtype: a short label for the specific format, e.g. "federal census", "state census", "census schedule".
+
+Places — event_place on each event and birth_place on each person must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable; country is required.
+Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West Virginia" not "W. Va."${anchorSuffix}`;
+}
+
 function buildSystemPrompt(vibe: string, anchorPersonName: string | null, recordType: string | null): string {
   const normalized = (recordType ?? "").toLowerCase().trim();
   if (normalized === "death record") return buildDeathRecordPrompt(vibe, anchorPersonName);
   if (normalized === "marriage record") return buildMarriageRecordPrompt(vibe, anchorPersonName);
+  if (normalized === "census record") return buildCensusRecordPrompt(vibe, anchorPersonName);
   return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 

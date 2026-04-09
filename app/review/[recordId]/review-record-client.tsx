@@ -82,6 +82,7 @@ const EVENT_TYPE_OPTIONS = [
   "census appearance",
   "military service",
   "immigration",
+  "residence",
   "land record",
   "court record",
   "other",
