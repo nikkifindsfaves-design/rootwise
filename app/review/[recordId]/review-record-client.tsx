@@ -4,6 +4,11 @@ import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
+import {
+  getIsBirthRecordChild,
+  getIsDeathRecord,
+  getIsMarriageRecord,
+} from "@/lib/utils/review-visibility";
 import { useRouter } from "next/navigation";
 import {
   useMemo,
@@ -702,7 +707,7 @@ export default function ReviewRecordClient({
     if (isRegeneratingStories) return;
     setIsRegeneratingStories(true);
     try {
-      const isDeathRecord = recordTypeLabel === "Death Record";
+      const isDeathRecord = getIsDeathRecord(recordTypeLabel);
       const primaryCard = cards.find((c) =>
         c.events.some((e) => e.eventType === "death")
       );
@@ -1019,7 +1024,7 @@ export default function ReviewRecordClient({
               </p>
             )}
 
-            {recordTypeLabel === "Marriage Record" && (() => {
+            {getIsMarriageRecord(recordTypeLabel) && (() => {
               const sharedMarriageEvent = cards
                 .flatMap((c) => c.events)
                 .find((e) => e.eventType === "marriage") ?? null;
@@ -1076,9 +1081,12 @@ export default function ReviewRecordClient({
             ) : (
               <div className="space-y-5">
                 {cards.map((item) => {
-                  const isDeathRecord = recordTypeLabel === "Death Record";
-                  const isMarriageRecord = recordTypeLabel === "Marriage Record";
-                  const isBirthRecordChild = !isDeathRecord && !isMarriageRecord && item.events.some((e) => e.eventType === "birth");
+                  const isDeathRecord = getIsDeathRecord(recordTypeLabel);
+                  const isMarriageRecord = getIsMarriageRecord(recordTypeLabel);
+                  const isBirthRecordChild = getIsBirthRecordChild(
+                    item.events,
+                    recordTypeLabel,
+                  );
                   const isPrimaryPerson = item.events.some(
                     (e) => e.eventType === "death"
                   );
