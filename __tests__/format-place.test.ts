@@ -65,7 +65,7 @@ describe("formatPlace", () => {
       county: "Suffolk County",
       state: "Massachusetts",
       country: "United States",
-    } as PlaceObject;
+    } as unknown as PlaceObject;
 
     expect(formatPlace(withUndefinedTownship)).toBe(
       "Suffolk County, Massachusetts, United States",

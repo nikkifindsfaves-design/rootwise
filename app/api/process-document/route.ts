@@ -169,7 +169,8 @@ Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "
 
 function buildCensusRecordPrompt(
   vibe: string,
-  anchorPersonName: string | null
+  anchorPersonName: string | null,
+  householdSurname: string | null
 ): string {
   const anchorSuffix =
     anchorPersonName != null
@@ -183,6 +184,19 @@ If this is a census page with multiple households:
 If this is a single-household document:
 - Treat "${anchorPersonName}" as a member of the household as normal
 - Extract all household members as usual`
+      : "";
+
+  const householdSurnameSuffix =
+    householdSurname != null && householdSurname.trim() !== ""
+      ? `\n\nHOUSEHOLD SURNAME — STRICT EXTRACTION RULE: The researcher specified this family surname: "${householdSurname.trim()}".
+
+CRITICAL: Scan the ENTIRE document from top to bottom before extracting anyone. Do not stop at the first match. Identify ALL rows where the surname "${householdSurname.trim()}" appears anywhere on the page — they may appear in multiple separate groups, separated by other families or blank rows.
+
+Once you have identified all matching rows:
+- Extract every person in those rows and their immediate household members (spouse, children, others in the same numbered household entry)
+- Include people in the same household cluster even if they have a different surname (for example a wife using a maiden name)
+- Do NOT extract people from households where the surname does not match
+- Set is_multi_person to false in your JSON because you are returning a single household group only`
       : "";
 
   return `You are a genealogy expert specializing in census records. Analyze this document and extract all people in the household, their relationships, and their residence event. Return ONLY a JSON object with this exact structure:
@@ -204,7 +218,7 @@ PEOPLE — extract every person in the household who appears to be a family memb
 - birth_place: the stated birthplace of this individual, parsed into { township, county, state, country }. Census records typically list only state or country — set township and county to null if not stated. country must reflect the political entity at the time of the record.
 - notes: write a short phrase describing who this person lived with, using relationship labels, e.g. "Lived with wife Mary Smith, sons John Jr. and Thomas, and daughter Clara." Use the relationship roles from the document or inferred relationships — never use the word "sibling" for a spouse, parent, or child. Always populate this field for every person extracted.
 
-EVENTS — produce exactly one residence event per person.
+EVENTS — produce exactly one residence event per person, no exceptions. Every single person in the people array must have a corresponding residence event in the events array. If you are uncertain about any detail for a person, still produce their residence event with whatever date and place information is available from the document. A person with no residence event is an extraction error.
 - event_type: exactly "residence"
 - event_date: the census year as "YYYY" only, e.g. "1880"
 - event_place: the household location parsed into { township, county, state, country }. Use the same place rules as birth_place — spell out abbreviations, reflect the political entity at the time of the record.
@@ -225,14 +239,20 @@ is_multi_person: true if this census page contains multiple unrelated households
 document_subtype: a short label for the specific format, e.g. "federal census", "state census", "census schedule".
 
 Places — event_place on each event and birth_place on each person must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable; country is required.
-Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West Virginia" not "W. Va."${anchorSuffix}`;
+Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West Virginia" not "W. Va."${anchorSuffix}${householdSurnameSuffix}`;
 }
 
-function buildSystemPrompt(vibe: string, anchorPersonName: string | null, recordType: string | null): string {
+function buildSystemPrompt(
+  vibe: string,
+  anchorPersonName: string | null,
+  recordType: string | null,
+  censusHouseholdSurname: string | null
+): string {
   const normalized = (recordType ?? "").toLowerCase().trim();
   if (normalized === "death record") return buildDeathRecordPrompt(vibe, anchorPersonName);
   if (normalized === "marriage record") return buildMarriageRecordPrompt(vibe, anchorPersonName);
-  if (normalized === "census record") return buildCensusRecordPrompt(vibe, anchorPersonName);
+  if (normalized === "census record")
+    return buildCensusRecordPrompt(vibe, anchorPersonName, censusHouseholdSurname);
   return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 
@@ -512,12 +532,29 @@ export async function POST(request: NextRequest) {
       ? String(recordTypeField).trim()
       : null;
 
+  const censusSurnameRaw = formData.get("census_surname");
+  const censusSurnameTrim =
+    censusSurnameRaw != null && String(censusSurnameRaw).trim() !== ""
+      ? String(censusSurnameRaw).trim()
+      : "";
+  const censusHouseholdSurnameForPrompt =
+    recordTypeStr != null &&
+    recordTypeStr.toLowerCase().trim() === "census record" &&
+    censusSurnameTrim !== ""
+      ? censusSurnameTrim
+      : null;
+
   let message: Anthropic.Messages.Message;
   try {
     message = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 16000,
-      system: buildSystemPrompt(resolvedVibe, anchorPersonName, recordTypeStr),
+      system: buildSystemPrompt(
+        resolvedVibe,
+        anchorPersonName,
+        recordTypeStr,
+        censusHouseholdSurnameForPrompt
+      ),
       messages: [{ role: "user", content: userContent }],
     });
     console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", ((message.usage.input_tokens * 3 + message.usage.output_tokens * 15) / 1_000_000).toFixed(5));

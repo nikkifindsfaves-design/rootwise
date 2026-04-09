@@ -140,7 +140,7 @@ Requirements:
 - story_full must be 2-3 sentences.
 - Keep the person the event is about as the subject.
 - Never include markdown fences or extra keys.
-- If event_type is "residence", derive all relationship language exclusively from event_notes. Do not use the related_people block for relationship labels on residence events. Never call anyone a sibling unless event_notes explicitly uses that word.`,
+- If event_type is "residence", use event_notes as the primary source for household relationship language. Additionally incorporate any relationships listed in related_people that are not already described in event_notes — for example a sibling, cousin, or neighbor relationship added by the researcher. Never use the word "sibling" unless event_notes or related_people explicitly states it.`,
     messages: [
       {
         role: "user",

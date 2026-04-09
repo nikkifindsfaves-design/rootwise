@@ -141,7 +141,6 @@ type EventRow = {
   /** From AI `description`; saved to DB as `events.notes`. */
   eventNotes: string;
   eventStoryFull: string;
-  stale: boolean;
 };
 
 type PersonCardState = {
@@ -195,7 +194,11 @@ export type PendingReviewPayload = {
 const PENDING_REVIEW_KEY = "pendingReview";
 
 function normalizeName(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
+  return s
+    .trim()
+    .replace(/[^a-zA-Z0-9\s]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function namesMatch(a: string, b: string): boolean {
@@ -228,17 +231,6 @@ function resolveRelationshipExportName(
     if (peer) return fullNameFromForm(peer.form).trim();
   }
   return rel.relatedNameExternal.trim();
-}
-
-function markAllEventsStale(card: PersonCardState): PersonCardState {
-  return {
-    ...card,
-    events: card.events.map((e) => ({ ...e, stale: true })),
-  };
-}
-
-function markEveryCardEventsStale(allCards: PersonCardState[]): PersonCardState[] {
-  return allCards.map((card) => markAllEventsStale(card));
 }
 
 function relatedPersonDisplayLabel(
@@ -462,7 +454,6 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
-          stale: true,
         });
       }
     }
@@ -478,7 +469,6 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
-          stale: true,
         });
       }
     }
@@ -739,7 +729,6 @@ export default function ReviewRecordClient({
           event_place_fields: null,
           eventNotes: description,
           eventStoryFull: "",
-          stale: true,
         };
         return {
           ...card,
@@ -748,19 +737,17 @@ export default function ReviewRecordClient({
       });
 
       let workingCards = cardsWithSynthesized;
-      const staleTargets = cardsWithSynthesized.flatMap((card) => {
+      const eventsToRegenerate = cardsWithSynthesized.flatMap((card) => {
         if (!card.include)
           return [] as Array<{ cardKey: string; eventKey: string }>;
-        return card.events
-          .filter((e) => e.stale)
-          .map((e) => ({ cardKey: card.key, eventKey: e.key }));
+        return card.events.map((e) => ({ cardKey: card.key, eventKey: e.key }));
       });
 
-      console.log("[review continue] staleTargets", staleTargets);
+      console.log("[review continue] eventsToRegenerate", eventsToRegenerate);
 
-      if (recordTreeId && staleTargets.length > 0) {
+      if (recordTreeId && eventsToRegenerate.length > 0) {
         const regenerated = await Promise.all(
-          staleTargets.map(async (target) => {
+          eventsToRegenerate.map(async (target) => {
             const card = cardsWithSynthesized.find((c) => c.key === target.cardKey);
             const event = card?.events.find((e) => e.key === target.eventKey);
             if (!card || !event) return null;
@@ -828,15 +815,14 @@ export default function ReviewRecordClient({
         workingCards = cardsWithSynthesized.map((card) => ({
           ...card,
           events: card.events.map((event) => {
+            if (!card.include) return event;
             const match = regenerated.find(
               (r) => r && r.cardKey === card.key && r.eventKey === event.key
             );
-            if (!event.stale) return event;
-            if (!match) return { ...event, stale: false };
+            if (!match) return event;
             return {
               ...event,
               eventStoryFull: match.storyFull,
-              stale: false,
             };
           }),
         }));
@@ -847,7 +833,6 @@ export default function ReviewRecordClient({
             card.events.map((e) => ({
               cardKey: card.key,
               eventType: e.eventType,
-              stale: e.stale,
               eventStoryFull: e.eventStoryFull,
               eventDate: e.eventDate,
             }))
@@ -1183,7 +1168,7 @@ export default function ReviewRecordClient({
                             value={item.form.first_name}
                             onChange={(e) =>
                               setCards((prev) =>
-                                markEveryCardEventsStale(prev).map((c) =>
+                                prev.map((c) =>
                                   c.key === item.key
                                     ? {
                                         ...c,
@@ -1207,7 +1192,7 @@ export default function ReviewRecordClient({
                             value={item.form.middle_name}
                             onChange={(e) =>
                               setCards((prev) =>
-                                markEveryCardEventsStale(prev).map((c) =>
+                                prev.map((c) =>
                                   c.key === item.key
                                     ? {
                                         ...c,
@@ -1231,7 +1216,7 @@ export default function ReviewRecordClient({
                             value={item.form.last_name}
                             onChange={(e) =>
                               setCards((prev) =>
-                                markEveryCardEventsStale(prev).map((c) =>
+                                prev.map((c) =>
                                   c.key === item.key
                                     ? {
                                         ...c,
@@ -1256,7 +1241,7 @@ export default function ReviewRecordClient({
                             value={item.form.birth_date}
                             onChange={(nextDate) => {
                               setCards((prev) =>
-                                markEveryCardEventsStale(prev).map((c) => ({
+                                prev.map((c) => ({
                                   ...c,
                                   form:
                                     c.key === item.key
@@ -1299,7 +1284,7 @@ export default function ReviewRecordClient({
                             value={item.form.birth_place_display}
                             onChange={(v) => {
                               setCards((prev) =>
-                                markEveryCardEventsStale(prev).map((c) => ({
+                                prev.map((c) => ({
                                   ...c,
                                   form:
                                     c.key === item.key
@@ -1319,7 +1304,7 @@ export default function ReviewRecordClient({
                             }}
                             onPlaceSelect={(place) => {
                               setCards((prev) =>
-                                markEveryCardEventsStale(prev).map((c) => ({
+                                prev.map((c) => ({
                                   ...c,
                                   form:
                                     c.key === item.key
