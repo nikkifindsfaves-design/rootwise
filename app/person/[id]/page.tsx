@@ -2490,6 +2490,8 @@ export default function PersonProfilePage() {
         { primaryTagSample }
       );
 
+      console.log("photo upload user:", user?.id);
+
       const { data: newRow, error: insErr } = await supabase
         .from("photos")
         .insert({
@@ -3985,6 +3987,15 @@ export default function PersonProfilePage() {
           prev.map((e) => (e.id === eventId ? { ...e, ...merged } : e))
         )
       );
+      if (d.event_type.trim() === "birth") {
+        await supabase
+          .from("persons")
+          .update({ birth_date: d.event_date.trim() || null })
+          .eq("id", personId);
+        setPerson((prev) =>
+          prev ? { ...prev, birth_date: d.event_date.trim() || null } : prev
+        );
+      }
     }
     cancelEditEvent();
   }
