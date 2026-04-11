@@ -242,6 +242,77 @@ Places — event_place on each event and birth_place on each person must always 
 Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West Virginia" not "W. Va."${anchorSuffix}${householdSurnameSuffix}`;
 }
 
+function buildMilitaryRecordPrompt(vibe: string, anchorPersonName: string | null): string {
+  const anchorSuffix =
+    anchorPersonName != null
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".
+
+If this is a multi-person document (muster roll, personnel roster, roll, roster of dead, report of changes, or similar):
+- Scan the document to find the entry that matches "${anchorPersonName}"
+- Extract ONLY that person and any individuals directly named in relation to them in that entry
+- Do NOT extract any other individuals from other entries on the document
+
+If this is a single-subject document (draft card, discharge paper, award citation, etc.):
+- Treat "${anchorPersonName}" as the primary subject as normal
+- Extract all people and events as usual`
+      : "";
+
+  return `You are a genealogy expert specializing in military records. Analyze this document and extract all people, events, and relationships. Return ONLY a JSON object with this exact structure:
+{
+  is_multi_person: boolean,
+  document_subtype: string,
+  record_type: string,
+  people: [{ first_name, middle_name, last_name, birth_date, death_date, gender, occupation, military_branch, service_number, birth_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, description }],
+  parent_events: [],
+  relationships: [{ person_a, person_b, relationship_type }]
+}
+
+PEOPLE — extract the anchor person as the primary subject. Extract other named individuals only when the document explicitly states a relationship to the anchor person (next of kin, commanding officer, fellow crew member named in the same entry). Do not extract names that appear only incidentally.
+- first_name, middle_name, last_name: exactly as written. Spell out abbreviations.
+- birth_date: stated birth date in YYYY-MM-DD format, or year only as "YYYY". Null if not stated.
+- death_date: stated death date in YYYY-MM-DD format. Null if not stated.
+- gender: read explicitly from document text only. Use indicators: male, female, M, F, Mr., Mrs., his, her, he, she. Never infer gender from a name alone. Return null if not explicitly stated.
+- occupation: civilian occupation if stated. Null if not stated.
+- military_branch: the branch of military service stated in the document, e.g. "Army", "Navy", "Marine Corps", "Coast Guard", "Army Air Forces". Null if not stated.
+- service_number: the service number, serial number, or military ID number exactly as written. Null if not stated.
+- birth_place: where the person was born if stated, parsed into { township, county, state, country }. Null fields where not stated.
+- notes: any additional biographical detail from the document not captured in other fields — rank, unit, ship or station name, next of kin name and address, civilian employer, or any other person-level detail. Null if nothing additional.
+
+EVENTS — extract every event this document provides evidence for. A single document may produce multiple events. For example: a muster roll showing an enlistment date and a transfer date produces both an enlistment event and a military transfer event. A report of changes showing an action code and date produces the corresponding event. Do not limit yourself to one event per document — extract all events the document supports.
+
+Use these event_type values. Choose the most specific type that fits:
+- "enlistment" — the person entered military service on a stated date
+- "deployment" — the person was deployed to a theater, base, or region
+- "military transfer" — the person was transferred to a new unit, ship, or station
+- "military award" — a decoration, medal, or commendation was received
+- "discharge" — the person was separated from military service
+- "missing in action" — the person was officially designated MIA
+- "killed in action" — the person died in combat
+- "prisoner of war" — the person was captured
+- "military service" — general military service when no more specific type applies
+- "other" — use only when the event clearly does not fit any above type
+
+For each event:
+- person_name: full name of the person this event belongs to
+- event_type: exactly one of the values listed above
+- event_date: the date of the event in YYYY-MM-DD format, or year only as "YYYY". Null if not stated.
+- event_place: the location parsed into { township, county, state, country }. For ship-based events, put the ship or station name in the township field.
+- description: include rank at the time of the event, unit or ship name, action code if present, and any other relevant detail from the document. Capture structured fields like enrollment location, action type, and vessel name here if not captured elsewhere.
+
+parent_events must always be an empty array for military records.
+
+RELATIONSHIPS — populate only when the document explicitly states a relationship between named individuals. Use the standard relationship types: parent, spouse, sibling. Never infer relationships from co-appearance alone.
+
+is_multi_person: true if this document contains multiple individuals not all related to the anchor person (muster roll, personnel roster, roll, roster of dead, report of changes). false if it is a single-subject document (draft card, discharge paper, award citation, individual service record).
+
+document_subtype: classify the document as one of: "Draft Registration", "Muster Roll", "Report of Changes", "Personnel Roll", "Roster of Dead", "Missing in Action Report", "Awards/Commendations", "Other".
+
+Places — event_place on each event and birth_place on each person must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable; country is required.
+- country must reflect the political entity at the time of the record. Records before 1776 in American colonies use "British Colonial America". Never default to "United States" for records that predate its existence.
+Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West Virginia" not "W. Va."${anchorSuffix}`;
+}
+
 function buildSystemPrompt(
   vibe: string,
   anchorPersonName: string | null,
@@ -253,6 +324,7 @@ function buildSystemPrompt(
   if (normalized === "marriage record") return buildMarriageRecordPrompt(vibe, anchorPersonName);
   if (normalized === "census record")
     return buildCensusRecordPrompt(vibe, anchorPersonName, censusHouseholdSurname);
+  if (normalized === "military record") return buildMilitaryRecordPrompt(vibe, anchorPersonName);
   return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 

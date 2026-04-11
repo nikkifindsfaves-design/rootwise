@@ -57,7 +57,9 @@ create table public.persons (
   notes text,
   marital_status text,
   cause_of_death text,
-  surviving_spouse text
+  surviving_spouse text,
+  military_branch text,
+  service_number text
 );
 
 create index if not exists persons_user_id_idx on public.persons (user_id);
@@ -78,6 +80,7 @@ create table public.records (
   file_url text not null,
   file_type text,
   record_type text,
+  document_subtype text,
   ai_response jsonb,
   created_at timestamptz not null default now()
 );

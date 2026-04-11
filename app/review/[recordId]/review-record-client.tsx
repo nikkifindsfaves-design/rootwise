@@ -2,7 +2,7 @@
 
 import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
-import { EVENT_TYPES, type EventType } from "@/lib/events/event-types";
+import { ALL_EVENT_TYPES, EVENT_TYPES, type EventType } from "@/lib/events/event-types";
 import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
@@ -40,6 +40,8 @@ type AiPerson = {
   surviving_spouse?: string | null;
   gender?: string | null;
   notes?: string | null;
+  military_branch?: string | null;
+  service_number?: string | null;
 };
 
 type AiEvent = {
@@ -78,7 +80,7 @@ const RELATIONSHIP_OPTIONS = [
 ] as const;
 
 type RelOption = (typeof RELATIONSHIP_OPTIONS)[number];
-type EvOption = EventType;
+type EvOption = typeof ALL_EVENT_TYPES[number];
 
 type PersonForm = {
   first_name: string;
@@ -98,6 +100,8 @@ type PersonForm = {
   surviving_spouse: string;
   gender: string;
   notes: string;
+  military_branch: string;
+  service_number: string;
 };
 
 type RelationshipRow = {
@@ -160,6 +164,8 @@ export type PendingReviewPayload = {
     surviving_spouse: string | null;
     gender: string | null;
     notes: string | null;
+    military_branch?: string | null;
+    service_number?: string | null;
     relationships: Array<{
       related_name: string;
       relationship_type: string;
@@ -307,6 +313,8 @@ function toForm(p: AiPerson): PersonForm {
     surviving_spouse: p.surviving_spouse ?? "",
     gender: normalizeGenderForPendingReview(p.gender),
     notes: p.notes ?? "",
+    military_branch: p.military_branch ?? "",
+    service_number: p.service_number ?? "",
   };
 }
 
@@ -365,7 +373,7 @@ function relationshipRowForPerson(
 
 function normalizeEventType(raw: string): EvOption {
   const n = raw.trim().toLowerCase();
-  if (EVENT_TYPES.includes(n as EvOption)) return n as EvOption;
+  if ((ALL_EVENT_TYPES as readonly string[]).includes(n)) return n as EvOption;
   if (n.includes("birth")) return "birth";
   if (n.includes("baptism") || n.includes("baptized") || n.includes("christening")) return "baptism";
   if (n.includes("death")) return "death";
@@ -375,6 +383,14 @@ function normalizeEventType(raw: string): EvOption {
   if (n === "spouse died" || n.includes("spouse died")) return "spouse died";
   if (n.includes("marriage") || n.includes("married")) return "marriage";
   if (n.includes("census")) return "census";
+  if (n === "enlistment") return "enlistment";
+  if (n === "deployment") return "deployment";
+  if (n === "military transfer") return "military transfer";
+  if (n === "military award") return "military award";
+  if (n === "discharge") return "discharge";
+  if (n === "missing in action") return "missing in action";
+  if (n === "killed in action") return "killed in action";
+  if (n === "prisoner of war") return "prisoner of war";
   if (n.includes("military")) return "military service";
   if (n.includes("immigration") || n.includes("immigrat")) return "immigration";
   if (n.includes("land")) return "land";
@@ -639,6 +655,7 @@ export default function ReviewRecordClient({
   recordTypeLabel,
   aiResponse,
   recordTreeId = null,
+  documentSubtype = null,
 }: {
   recordId: string;
   signedDocumentUrl: string | null;
@@ -646,6 +663,7 @@ export default function ReviewRecordClient({
   recordTypeLabel: string;
   aiResponse: unknown;
   recordTreeId?: string | null;
+  documentSubtype?: string | null;
 }) {
   const router = useRouter();
   const parsed = useMemo(() => {
@@ -845,6 +863,8 @@ export default function ReviewRecordClient({
           gender: normalizeGenderForPendingReview(c.form.gender),
           notes: c.form.notes.trim() || null,
           occupation: c.form.occupation.trim() || null,
+          military_branch: c.form.military_branch.trim() || null,
+          service_number: c.form.service_number.trim() || null,
           marital_status: c.form.marital_status.trim() || null,
           cause_of_death: c.form.cause_of_death.trim() || null,
           surviving_spouse: c.form.surviving_spouse.trim() || null,
@@ -1057,6 +1077,15 @@ export default function ReviewRecordClient({
                     item.events,
                     recordTypeLabel,
                   );
+                  const isMilitaryRecord = recordTypeLabel
+                    .toLowerCase()
+                    .includes("military");
+                  const hidePersonalDates =
+                    isMilitaryRecord &&
+                    (documentSubtype === "Report of Changes" ||
+                      documentSubtype === "Muster Roll" ||
+                      documentSubtype === "Personnel Roll" ||
+                      documentSubtype === "Roster of Dead");
                   const isPrimaryPerson = item.events.some(
                     (e) => e.eventType === "death"
                   );
@@ -1143,6 +1172,7 @@ export default function ReviewRecordClient({
                     <div className="space-y-4 p-4">
                       {(() => {
                         return (
+                      <>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <label className={labelFieldClass}
@@ -1216,7 +1246,9 @@ export default function ReviewRecordClient({
                             }
                           />
                         </div>
-                        {!isSecondaryPerson && !isMarriageRecord && (
+                        {!isSecondaryPerson &&
+                        !isMarriageRecord &&
+                        !hidePersonalDates && (
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Birth date</label>
@@ -1242,7 +1274,9 @@ export default function ReviewRecordClient({
                           />
                         </div>
                         )}
-                        {!isSecondaryPerson && !isMarriageRecord && (
+                        {!isSecondaryPerson &&
+                        !isMarriageRecord &&
+                        !hidePersonalDates && (
                         <div>
                           <label className={labelFieldClass}
                             style={labelFieldStyle}>Death date</label>
@@ -1364,7 +1398,10 @@ export default function ReviewRecordClient({
                           </select>
                         </div>
                         )}
-                        {(!isDeathRecord || isPrimaryPerson) && !isMarriageRecord && !isBirthRecordChild && (
+                        {(!isDeathRecord || isPrimaryPerson) &&
+                        !isMarriageRecord &&
+                        !isBirthRecordChild &&
+                        !hidePersonalDates && (
                           <div className="sm:col-span-2">
                             <label className={labelFieldClass}
                             style={labelFieldStyle}>Occupation</label>
@@ -1443,6 +1480,55 @@ export default function ReviewRecordClient({
                           </>
                         )}
                       </div>
+                      {isMilitaryRecord && (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="sm:col-span-2">
+                            <label
+                              className={labelFieldClass}
+                              style={labelFieldStyle}
+                            >
+                              Military branch
+                            </label>
+                            <input
+                              className={inputFieldClass}
+                              style={inputFieldStyle}
+                              value={item.form.military_branch}
+                              onChange={(e) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  form: {
+                                    ...item.form,
+                                    military_branch: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label
+                              className={labelFieldClass}
+                              style={labelFieldStyle}
+                            >
+                              Service number
+                            </label>
+                            <input
+                              className={inputFieldClass}
+                              style={inputFieldStyle}
+                              value={item.form.service_number}
+                              onChange={(e) =>
+                                updateCard(item.key, {
+                                  ...item,
+                                  form: {
+                                    ...item.form,
+                                    service_number: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                      </>
                         );
                       })()}
 
@@ -1577,6 +1663,145 @@ export default function ReviewRecordClient({
                                 >
                                   Remove
                                 </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      <div
+                        className="border-t pt-4"
+                        style={{ borderTopColor: "var(--dg-brown-border)" }}
+                      >
+                        <div className="mb-2">
+                          <h4
+                            className="text-xs font-semibold uppercase tracking-wide"
+                            style={{ color: "var(--dg-brown-muted)" }}
+                          >
+                            Events
+                          </h4>
+                        </div>
+                        {item.events.length === 0 ? (
+                          <p
+                            className="text-xs"
+                            style={{ color: "var(--dg-brown-muted)" }}
+                          >
+                            No events extracted from this document.
+                          </p>
+                        ) : (
+                          <ul className="space-y-3">
+                            {item.events.map((row) => (
+                              <li
+                                key={row.key}
+                                className="rounded-lg border p-3"
+                                style={{
+                                  borderColor: "var(--dg-brown-border)",
+                                  backgroundColor: "var(--dg-parchment)",
+                                }}
+                              >
+                                <div className="space-y-3">
+                                  <div>
+                                    <label
+                                      className={labelFieldClass}
+                                      style={labelFieldStyle}
+                                    >
+                                      Event type
+                                    </label>
+                                    <select
+                                      className={inputFieldClass}
+                                      style={inputFieldStyle}
+                                      value={row.eventType}
+                                      onChange={(e) =>
+                                        updateCard(item.key, {
+                                          ...item,
+                                          events: item.events.map((ev) =>
+                                            ev.key === row.key
+                                              ? {
+                                                  ...ev,
+                                                  eventType: e.target
+                                                    .value as EvOption,
+                                                }
+                                              : ev
+                                          ),
+                                        })
+                                      }
+                                    >
+                                      {ALL_EVENT_TYPES.map((opt, idx) => (
+                                        <option
+                                          key={`${String(opt)}-${idx}`}
+                                          value={opt}
+                                        >
+                                          {opt}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={labelFieldClass}
+                                      style={labelFieldStyle}
+                                    >
+                                      Date
+                                    </label>
+                                    <SmartDateInput
+                                      className={inputFieldClass}
+                                      style={inputFieldStyle}
+                                      value={row.eventDate}
+                                      onChange={(nextDate) =>
+                                        updateCard(item.key, {
+                                          ...item,
+                                          events: item.events.map((ev) =>
+                                            ev.key === row.key
+                                              ? { ...ev, eventDate: nextDate }
+                                              : ev
+                                          ),
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={labelFieldClass}
+                                      style={labelFieldStyle}
+                                    >
+                                      Place
+                                    </label>
+                                    <PlaceInput
+                                      className={inputFieldClass}
+                                      style={inputFieldStyle}
+                                      value={row.event_place_display}
+                                      onChange={(v) =>
+                                        updateCard(item.key, {
+                                          ...item,
+                                          events: item.events.map((ev) =>
+                                            ev.key === row.key
+                                              ? {
+                                                  ...ev,
+                                                  event_place_display: v,
+                                                  event_place_id: null,
+                                                }
+                                              : ev
+                                          ),
+                                        })
+                                      }
+                                      onPlaceSelect={(place) =>
+                                        updateCard(item.key, {
+                                          ...item,
+                                          events: item.events.map((ev) =>
+                                            ev.key === row.key
+                                              ? {
+                                                  ...ev,
+                                                  event_place_display:
+                                                    place.display,
+                                                  event_place_id: place.id,
+                                                }
+                                              : ev
+                                          ),
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                </div>
                               </li>
                             ))}
                           </ul>

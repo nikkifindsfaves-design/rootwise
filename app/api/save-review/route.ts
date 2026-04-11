@@ -23,6 +23,8 @@ type PendingPersonBody = {
   marital_status?: string | null;
   cause_of_death?: string | null;
   surviving_spouse?: string | null;
+  military_branch?: string | null;
+  service_number?: string | null;
   gender?: unknown;
   notes?: unknown;
   relationships?: unknown;
@@ -338,6 +340,25 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const militaryUpdates: Record<string, string | null> = {};
+      if (typeof p.military_branch === "string" && p.military_branch.trim() !== "") {
+        militaryUpdates.military_branch = p.military_branch.trim();
+      }
+      if (typeof p.service_number === "string" && p.service_number.trim() !== "") {
+        militaryUpdates.service_number = p.service_number.trim();
+      }
+      if (Object.keys(militaryUpdates).length > 0) {
+        const { error: milUpdErr } = await supabase
+          .from("persons")
+          .update(militaryUpdates)
+          .eq("id", existingId)
+          .eq("user_id", user.id);
+        if (milUpdErr) {
+          console.error("[save-review]", "military-fields-update", milUpdErr.message);
+          return NextResponse.json({ error: milUpdErr.message }, { status: 500 });
+        }
+      }
+
       resolvedIds.push(existingId);
     } else {
       if (!payload.first_name && !payload.last_name) {
@@ -363,6 +384,14 @@ export async function POST(request: NextRequest) {
         marital_status: p.marital_status ?? null,
         cause_of_death: p.cause_of_death ?? null,
         surviving_spouse: p.surviving_spouse ?? null,
+        military_branch:
+          typeof p.military_branch === "string"
+            ? p.military_branch.trim() || null
+            : null,
+        service_number:
+          typeof p.service_number === "string"
+            ? p.service_number.trim() || null
+            : null,
         gender: payload.gender,
         notes: payload.notes,
       };

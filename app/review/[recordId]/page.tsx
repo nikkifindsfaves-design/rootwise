@@ -61,7 +61,7 @@ export default async function ReviewRecordPage({
 
   const { data: record, error } = await supabase
     .from("records")
-    .select("id, file_url, file_type, ai_response, record_type, tree_id")
+    .select("id, file_url, file_type, ai_response, record_type, tree_id, document_subtype")
     .eq("id", recordId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -103,6 +103,10 @@ export default async function ReviewRecordPage({
       recordTypeLabel={label}
       aiResponse={record.ai_response}
       recordTreeId={recordTreeId}
+      documentSubtype={
+        (record as { document_subtype?: string | null }).document_subtype ??
+        null
+      }
     />
   );
 }
