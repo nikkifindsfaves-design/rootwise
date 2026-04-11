@@ -55,7 +55,7 @@ export default function DocumentUploadSection({
     "Birth Record"
   );
   const [censusSurname, setCensusSurname] = useState("");
-  const [militaryAnchorName, setMilitaryAnchorName] = useState("");
+  const [anchorName, setAnchorName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,9 +73,13 @@ export default function DocumentUploadSection({
       if (recordType === "Census Record") {
         formData.append("census_surname", censusSurname.trim());
       }
-      if (recordType === "Military Record") {
-        const n = militaryAnchorName.trim();
-        if (n) formData.append("anchor_person_name", n);
+      if (
+        (recordType === "Birth Record" ||
+          recordType === "Death Record" ||
+          recordType === "Military Record") &&
+        anchorName.trim() !== ""
+      ) {
+        formData.append("anchor_person_name", anchorName.trim());
       }
       if (treeId != null && treeId.trim() !== "") {
         formData.append("tree_id", treeId.trim());
@@ -88,7 +92,7 @@ export default function DocumentUploadSection({
       }
       return formData;
     },
-    [recordType, censusSurname, militaryAnchorName, treeId, anchorPersonId]
+    [recordType, censusSurname, anchorName, treeId, anchorPersonId]
   );
 
   /** Empty query → all extracted names; otherwise fuzzy token match on full name. */
@@ -123,8 +127,13 @@ export default function DocumentUploadSection({
       return;
     }
 
-    if (recordType === "Military Record" && militaryAnchorName.trim() === "") {
-      setError("Please enter the ancestor's full name for military records.");
+    if (
+      (recordType === "Birth Record" ||
+        recordType === "Death Record" ||
+        recordType === "Military Record") &&
+      anchorName.trim() === ""
+    ) {
+      setError("Please enter the ancestor's name.");
       return;
     }
 
@@ -165,7 +174,17 @@ export default function DocumentUploadSection({
         anchorPersonId != null && anchorPersonId.trim() !== "";
       const isMultiPerson = data?.is_multi_person === true;
 
-      if (isMultiPerson && !anchorSet && !(recordType === "Census Record" && censusSurname.trim() !== "") && !(recordType === "Military Record" && militaryAnchorName.trim() !== "")) {
+      if (
+        isMultiPerson &&
+        !anchorSet &&
+        !(recordType === "Census Record" && censusSurname.trim() !== "") &&
+        !(
+          (recordType === "Birth Record" ||
+            recordType === "Death Record" ||
+            recordType === "Military Record") &&
+          anchorName.trim() !== ""
+        )
+      ) {
         const names = extractPeopleFullNames(data);
         setPendingRecordId(recordId);
         setPendingPeople(names);
@@ -338,20 +357,22 @@ export default function DocumentUploadSection({
         </div>
       ) : null}
 
-      {recordType === "Military Record" ? (
+      {(recordType === "Birth Record" ||
+        recordType === "Death Record" ||
+        recordType === "Military Record") ? (
         <div>
           <label
-            htmlFor="military_anchor_name"
+            htmlFor="ancestor_name"
             className="mb-1 block text-sm font-medium"
             style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
           >
-            Ancestor's Full Name
+            Ancestor's name
           </label>
           <input
-            id="military_anchor_name"
+            id="ancestor_name"
             type="text"
-            value={militaryAnchorName}
-            onChange={(e) => setMilitaryAnchorName(e.target.value)}
+            value={anchorName}
+            onChange={(e) => setAnchorName(e.target.value)}
             autoComplete="off"
             className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)] sm:max-w-xs"
             style={{
