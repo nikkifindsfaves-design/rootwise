@@ -1,5 +1,7 @@
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
+import { MERGE_FIELDS, type MergeField } from "@/lib/person-merge/merge-fields";
+import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -8,19 +10,6 @@ import { NextResponse, type NextRequest } from "next/server";
  * to the authenticated user on every insert.
  * Migrations: `20260329120000_event_sources.sql`, `20260330120000_event_sources_user_id.sql`.
  */
-
-const MERGE_FIELDS = [
-  "first_name",
-  "middle_name",
-  "last_name",
-  "birth_date",
-  "death_date",
-  "birth_place_id",
-  "gender",
-  "notes",
-] as const;
-
-type MergeField = (typeof MERGE_FIELDS)[number];
 
 type PendingPersonBody = {
   existingPersonId?: string | null;
@@ -86,13 +75,6 @@ function isEmptyDbField(v: string | null | undefined): boolean {
   return v == null || String(v).trim() === "";
 }
 
-type PlaceFields = {
-  township: string | null;
-  county: string | null;
-  state: string | null;
-  country: string;
-};
-
 function parsePlaceFields(raw: unknown): PlaceFields | null {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
@@ -113,56 +95,6 @@ function parsePlaceFields(raw: unknown): PlaceFields | null {
         : null,
     country: typeof o.country === "string" ? o.country : "",
   };
-}
-
-async function findOrCreatePlace(
-  supabase: SupabaseClient,
-  fields: PlaceFields
-): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
-  let q = supabase.from("places").select("id");
-  if (fields.township === null) {
-    q = q.is("township", null);
-  } else {
-    q = q.eq("township", fields.township);
-  }
-  if (fields.county === null) {
-    q = q.is("county", null);
-  } else {
-    q = q.eq("county", fields.county);
-  }
-  if (fields.state === null) {
-    q = q.is("state", null);
-  } else {
-    q = q.eq("state", fields.state);
-  }
-  q = q.eq("country", fields.country);
-
-  const { data: foundRows, error: findErr } = await q.limit(1);
-  if (findErr) return { ok: false, message: findErr.message };
-  const fid = (foundRows?.[0] as { id?: string } | undefined)?.id;
-  if (typeof fid === "string" && fid !== "") {
-    return { ok: true, id: fid };
-  }
-
-  const { data: inserted, error: insErr } = await supabase
-    .from("places")
-    .insert({
-      township: fields.township,
-      county: fields.county,
-      state: fields.state,
-      country: fields.country,
-    })
-    .select("id")
-    .maybeSingle();
-
-  if (insErr) {
-    return { ok: false, message: insErr.message };
-  }
-  const iid = (inserted as { id?: string } | null)?.id;
-  if (typeof iid !== "string" || iid === "") {
-    return { ok: false, message: "Failed to create place." };
-  }
-  return { ok: true, id: iid };
 }
 
 async function resolveBirthPlaceIdFromBody(
@@ -201,16 +133,6 @@ async function resolveEventPlaceIdFromEvent(
     return { id: null, error: r.message };
   }
   return { id: r.id, error: null };
-}
-
-function placeFieldsFromAiEventPlaceRaw(raw: unknown): PlaceFields | null {
-  if (raw == null) return null;
-  if (typeof raw === "string") {
-    const t = raw.trim();
-    if (!t) return null;
-    return { township: null, county: null, state: null, country: t };
-  }
-  return parsePlaceFields(raw);
 }
 
 function toPersonPayload(p: PendingPersonBody) {
@@ -280,16 +202,6 @@ function parseMergeDecisions(raw: unknown): Map<string, Record<string, "existing
 function parsePendingPersons(raw: unknown): PendingPersonBody[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((x) => typeof x === "object" && x !== null) as PendingPersonBody[];
-}
-
-function extractParentEventsFromAi(ai: unknown): Record<string, unknown>[] {
-  if (typeof ai !== "object" || ai === null) return [];
-  const pe = (ai as Record<string, unknown>).parent_events;
-  if (!Array.isArray(pe)) return [];
-  return pe.filter(
-    (x): x is Record<string, unknown> =>
-      typeof x === "object" && x !== null && !Array.isArray(x)
-  );
 }
 
 export async function POST(request: NextRequest) {

@@ -2,6 +2,8 @@
 
 import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
+import { EVENT_TYPES, type EventType } from "@/lib/events/event-types";
+import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
 import {
@@ -75,26 +77,8 @@ const RELATIONSHIP_OPTIONS = [
   "other",
 ] as const;
 
-const EVENT_TYPE_OPTIONS = [
-  "birth",
-  "baptism",
-  "child born",
-  "death",
-  "burial",
-  "child died",
-  "spouse died",
-  "marriage",
-  "census appearance",
-  "military service",
-  "immigration",
-  "residence",
-  "land record",
-  "court record",
-  "other",
-] as const;
-
 type RelOption = (typeof RELATIONSHIP_OPTIONS)[number];
-type EvOption = (typeof EVENT_TYPE_OPTIONS)[number];
+type EvOption = EventType;
 
 type PersonForm = {
   first_name: string;
@@ -190,8 +174,6 @@ export type PendingReviewPayload = {
     }>;
   }>;
 };
-
-const PENDING_REVIEW_KEY = "pendingReview";
 
 function normalizeName(s: string): string {
   return s
@@ -383,7 +365,7 @@ function relationshipRowForPerson(
 
 function normalizeEventType(raw: string): EvOption {
   const n = raw.trim().toLowerCase();
-  if (EVENT_TYPE_OPTIONS.includes(n as EvOption)) return n as EvOption;
+  if (EVENT_TYPES.includes(n as EvOption)) return n as EvOption;
   if (n.includes("birth")) return "birth";
   if (n.includes("baptism") || n.includes("baptized") || n.includes("christening")) return "baptism";
   if (n.includes("death")) return "death";
@@ -392,11 +374,14 @@ function normalizeEventType(raw: string): EvOption {
   if (n === "child died" || n.includes("child died")) return "child died";
   if (n === "spouse died" || n.includes("spouse died")) return "spouse died";
   if (n.includes("marriage") || n.includes("married")) return "marriage";
-  if (n.includes("census")) return "census appearance";
+  if (n.includes("census")) return "census";
   if (n.includes("military")) return "military service";
   if (n.includes("immigration") || n.includes("immigrat")) return "immigration";
-  if (n.includes("land")) return "land record";
-  if (n.includes("court")) return "court record";
+  if (n.includes("land")) return "land";
+  if (n.includes("court")) return "court";
+  if (n === "census appearance") return "census";
+  if (n === "land record") return "land";
+  if (n === "court record") return "court";
   return "other";
 }
 

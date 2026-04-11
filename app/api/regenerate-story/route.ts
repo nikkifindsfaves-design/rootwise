@@ -1,16 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { estimateCost } from "@/lib/utils/anthropic-cost";
+import { parseJsonFromText } from "@/lib/utils/parse-json-from-text";
 import { getVoiceInstructions } from "@/lib/vibes/voice-instructions";
 
 const MODEL = "claude-sonnet-4-20250514";
-
-function parseJsonFromText(text: string): unknown {
-  const trimmed = text.trim();
-  const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
-  const raw = fence ? fence[1].trim() : trimmed;
-  return JSON.parse(raw);
-}
 
 type RequestBody = {
   tree_id?: unknown;
@@ -155,7 +150,7 @@ Use these exact names when referring to these people in the story. Do not use an
     ],
   });
 
-  console.log("[DG] Story regen tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", ((message.usage.input_tokens * 3 + message.usage.output_tokens * 15) / 1_000_000).toFixed(5));
+  console.log("[DG] Story regen tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens));
 
   const text = message.content
     .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")

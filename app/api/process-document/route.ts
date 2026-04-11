@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import { estimateCost } from "@/lib/utils/anthropic-cost";
 import { parseJsonFromText } from "@/lib/utils/parse-json-from-text";
-import { getVoiceInstructions } from "@/lib/vibes/voice-instructions";
 import { NextResponse, type NextRequest } from "next/server";
 
 function buildBirthRecordPrompt(
@@ -557,7 +557,7 @@ export async function POST(request: NextRequest) {
       ),
       messages: [{ role: "user", content: userContent }],
     });
-    console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", ((message.usage.input_tokens * 3 + message.usage.output_tokens * 15) / 1_000_000).toFixed(5));
+    console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Anthropic request failed";
     return NextResponse.json({ error: msg }, { status: 502 });

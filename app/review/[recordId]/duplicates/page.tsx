@@ -1,25 +1,12 @@
 "use client";
 
+import { MERGE_FIELDS, type MergeField } from "@/lib/person-merge/merge-fields";
+import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
 import { createClient } from "@/lib/supabase/client";
 import { formatPlace, type PlaceObject } from "@/lib/utils/places";
 import type { PendingReviewPayload } from "../review-record-client";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-
-const PENDING_REVIEW_KEY = "pendingReview";
-
-const MERGE_FIELDS = [
-  "first_name",
-  "middle_name",
-  "last_name",
-  "birth_date",
-  "death_date",
-  "birth_place_id",
-  "gender",
-  "notes",
-] as const;
-
-type MergeField = (typeof MERGE_FIELDS)[number];
 
 /** Shown in the duplicate comparison UI; merge/save still uses full `MERGE_FIELDS`. */
 const COMPARISON_FIELDS = MERGE_FIELDS.filter(

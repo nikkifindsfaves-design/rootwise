@@ -2,6 +2,7 @@
 
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
+import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type PersonRow = {
@@ -49,13 +50,6 @@ function isEmptyDbField(v: string | null | undefined): boolean {
   return v == null || String(v).trim() === "";
 }
 
-type PlaceFields = {
-  township: string | null;
-  county: string | null;
-  state: string | null;
-  country: string;
-};
-
 function parsePlaceFields(raw: unknown): PlaceFields | null {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
@@ -76,59 +70,6 @@ function parsePlaceFields(raw: unknown): PlaceFields | null {
         : null,
     country: typeof o.country === "string" ? o.country : "",
   };
-}
-
-async function findOrCreatePlace(
-  supabase: SupabaseClient,
-  fields: PlaceFields
-): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
-  let q = supabase.from("places").select("id");
-  if (fields.township === null) {
-    q = q.is("township", null);
-  } else {
-    q = q.eq("township", fields.township);
-  }
-  if (fields.county === null) {
-    q = q.is("county", null);
-  } else {
-    q = q.eq("county", fields.county);
-  }
-  if (fields.state === null) {
-    q = q.is("state", null);
-  } else {
-    q = q.eq("state", fields.state);
-  }
-  q = q.eq("country", fields.country);
-
-  const { data: found, error: findErr } = await q.maybeSingle();
-
-  if (findErr) {
-    return { ok: false, message: findErr.message };
-  }
-  const fid = (found as { id?: string } | null)?.id;
-  if (typeof fid === "string" && fid !== "") {
-    return { ok: true, id: fid };
-  }
-
-  const { data: inserted, error: insErr } = await supabase
-    .from("places")
-    .insert({
-      township: fields.township,
-      county: fields.county,
-      state: fields.state,
-      country: fields.country,
-    })
-    .select("id")
-    .single();
-
-  if (insErr) {
-    return { ok: false, message: insErr.message };
-  }
-  const iid = (inserted as { id?: string } | null)?.id;
-  if (typeof iid !== "string" || iid === "") {
-    return { ok: false, message: "Failed to create place." };
-  }
-  return { ok: true, id: iid };
 }
 
 /**

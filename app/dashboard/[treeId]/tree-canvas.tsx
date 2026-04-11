@@ -716,64 +716,6 @@ type ClientPrimaryPhotoRow = {
   crop_zoom: number | null;
 };
 
-function parseNumField(r: Record<string, unknown>, key: string): number | null {
-  const v = r[key];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-function parseClientPrimaryPhotoRow(
-  row: Record<string, unknown>
-): ClientPrimaryPhotoRow | null {
-  const person_id = String(row.person_id ?? "");
-  const file_url = String(row.file_url ?? "").trim();
-  if (!person_id || !file_url) return null;
-  return {
-    person_id,
-    file_url,
-    natural_width: parseNumField(row, "natural_width"),
-    natural_height: parseNumField(row, "natural_height"),
-    crop_x: parseNumField(row, "crop_x"),
-    crop_y: parseNumField(row, "crop_y"),
-    crop_zoom: parseNumField(row, "crop_zoom"),
-  };
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseTaggedPrimaryPhotoRow(
-  row: Record<string, unknown>
-): ClientPrimaryPhotoRow | null {
-  const person_id = String(row.person_id ?? "");
-  if (!person_id) return null;
-  const nested = row.photos;
-  let photoObj: Record<string, unknown> | null = null;
-  if (isPlainRecord(nested)) {
-    photoObj = nested;
-  } else if (Array.isArray(nested) && nested.length > 0) {
-    const first = nested[0];
-    if (isPlainRecord(first)) photoObj = first;
-  }
-  if (!photoObj) return null;
-  const file_url = String(photoObj.file_url ?? "").trim();
-  if (!file_url) return null;
-  return {
-    person_id,
-    file_url,
-    natural_width: parseNumField(photoObj, "natural_width"),
-    natural_height: parseNumField(photoObj, "natural_height"),
-    crop_x: parseNumField(row, "crop_x"),
-    crop_y: parseNumField(row, "crop_y"),
-    crop_zoom: parseNumField(row, "crop_zoom"),
-  };
-}
-
 const TREE_NODE_AVATAR_VP = 40;
 const TREE_PHOTO_CROP_PREVIEW_PX = 200;
 

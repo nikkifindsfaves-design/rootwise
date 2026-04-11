@@ -2502,7 +2502,7 @@ export default function PersonProfilePage() {
             : {}),
         })
         .select("*")
-        .single();
+        .maybeSingle();
       if (insErr || !newRow) {
         setPhotoUploadError(insErr?.message ?? "Could not save photo.");
         return;
@@ -3329,7 +3329,7 @@ export default function PersonProfilePage() {
           .eq("id", researchNoteId)
           .eq("user_id", user.id)
           .select("updated_at")
-          .single();
+          .maybeSingle();
 
         if (error) {
           setResearchNoteSaveError(error.message);
@@ -3352,7 +3352,7 @@ export default function PersonProfilePage() {
             updated_at: now,
           })
           .select("id, updated_at")
-          .single();
+          .maybeSingle();
 
         if (error) {
           setResearchNoteSaveError(error.message);
@@ -3461,7 +3461,7 @@ export default function PersonProfilePage() {
       .select(
         "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
-      .single();
+      .maybeSingle();
 
     setPersonEditSaving(false);
     if (error) {
@@ -3866,7 +3866,7 @@ export default function PersonProfilePage() {
           photo_url: null,
         })
         .select("id")
-        .single();
+        .maybeSingle();
 
       if (insP || !newPerson) {
         setAddFamilyCreateError(insP?.message ?? "Could not create person.");
@@ -3969,7 +3969,7 @@ export default function PersonProfilePage() {
       .select(
         "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at"
       )
-      .single();
+      .maybeSingle();
 
     setEventEditSaving(false);
     if (error) {
@@ -4116,9 +4116,10 @@ export default function PersonProfilePage() {
           notes: addEventDraft.notes.trim() || null,
         })
         .select("id")
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!insertedEvent) throw new Error("No event returned after insert");
 
       // Generate story in Dead Gossip voice
       if (person && insertedEvent?.id) {
@@ -4218,7 +4219,7 @@ export default function PersonProfilePage() {
           record_type: pendingSourceName.trim() || null,
         })
         .select("id")
-        .single();
+        .maybeSingle();
 
       if (recordErr || !recordRow) throw recordErr;
 
