@@ -70,7 +70,7 @@ export default function DocumentUploadSection({
       const formData = new FormData();
       formData.append("file", f);
       formData.append("record_type", recordType);
-      if (recordType === "Census Record") {
+      if (recordType === "Census Record" || recordType === "Land Record") {
         formData.append("census_surname", censusSurname.trim());
       }
       if (
@@ -178,6 +178,7 @@ export default function DocumentUploadSection({
         isMultiPerson &&
         !anchorSet &&
         !(recordType === "Census Record" && censusSurname.trim() !== "") &&
+        !(recordType === "Land Record" && censusSurname.trim() !== "") &&
         !(
           (recordType === "Birth Record" ||
             recordType === "Death Record" ||
@@ -329,7 +330,7 @@ export default function DocumentUploadSection({
         </select>
       </div>
 
-      {recordType === "Census Record" ? (
+      {(recordType === "Census Record" || recordType === "Land Record") ? (
         <div>
           <label
             htmlFor="census_family_surname"

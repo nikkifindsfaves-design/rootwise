@@ -315,6 +315,82 @@ Places — event_place on each event and birth_place on each person must always 
 Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West Virginia" not "W. Va."${anchorSuffix}`;
 }
 
+function buildLandRecordPrompt(
+  vibe: string,
+  anchorPersonName: string | null,
+  filterSurname: string | null
+): string {
+  const anchorSuffix =
+    anchorPersonName != null
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".
+
+If this is a multi-person document (deed book page with multiple entries, tax list, or similar):
+- Scan the document to find the entry that matches "${anchorPersonName}"
+- Extract ONLY the people from that entry who are parties to the transaction
+- Do NOT extract any other individuals from other entries on the document
+
+If this is a single-subject document (single deed, patent, survey, or similar):
+- Treat "${anchorPersonName}" as the primary subject as normal
+- Extract all people and events as usual`
+      : "";
+
+  const filterSurnameSuffix =
+    filterSurname != null && filterSurname.trim() !== ""
+      ? `\n\nSURNAME FILTER — THIS OVERRIDES ALL OTHER EXTRACTION INSTRUCTIONS:
+
+The researcher wants ONLY people with the surname "${filterSurname.trim()}". This is a hard filter. Every person you extract must have this surname or a historical spelling variation of it. No exceptions.
+
+BEFORE extracting anyone, do this:
+1. Read every name on the document from top to bottom, left column then right column
+2. Mark ONLY the rows where the surname is "${filterSurname.trim()}" (or a spelling variation such as ${filterSurname.trim().slice(0,4)}*)
+3. Discard every other row entirely — do not include them in people, events, or relationships under any circumstances
+
+People like "Elder William", "Hill William", "Kennedy John" or any name where the surname does not match "${filterSurname.trim()}" must NOT appear in your response at all. Not in people. Not in events. Not in relationships.
+
+Each matching row becomes exactly one person entry and one land event. Set is_multi_person to false.
+
+If you are uncertain whether a name matches, err on the side of excluding it.`
+      : "";
+
+  return `You are a genealogy expert specializing in land records. Analyze this document and extract all people, events, and relationships. Return ONLY a JSON object with this exact structure:
+{
+  is_multi_person: boolean,
+  document_subtype: string,
+  record_type: string,
+  people: [{ first_name, middle_name, last_name, birth_date, gender, birth_place: { township, county, state, country }, notes }],
+  events: [{ person_name, event_type, event_date, event_place: { township, county, state, country }, land_data: { acres: number | null, transaction_type: string | null } }],
+  parent_events: [],
+  relationships: [{ person_a, person_b, relationship_type }]
+}
+
+PEOPLE — extract every person named as a party to the transaction (grantor, grantee, taxpayer, patentee, surveyor's subject, etc.). Do not extract witnesses or officials unless they are also named as a party.
+- first_name, middle_name, last_name: exactly as written. Spell out abbreviations — "William" not "Wm.", "Thomas" not "Thos."
+- birth_date: null — land records rarely state birth dates. Return null unless explicitly present.
+- gender: read explicitly from document text only using indicators: Mr., Mrs., his, her, he, she, husband, wife, widow, widower. Never infer gender from a name alone. Return null if not explicitly stated.
+- birth_place: null unless explicitly stated in the document.
+- notes: include role in the transaction (e.g. "Grantor", "Grantee", "Taxpayer") and any other relevant person-level detail. Never null — always state the role.
+
+EVENTS — produce exactly one land event per person named as a party to the transaction.
+- event_type: exactly "land"
+- event_date: the date of the transaction in YYYY-MM-DD format, or year only as "YYYY". Null if not stated.
+- event_place: the location of the land parcel, parsed into { township, county, state, country }. This is where the land is located, not where the document was recorded unless they are the same. township is the most local jurisdiction (town, township, hundred, district, parish). county is the county or county-equivalent. state is the state, province, or colony. country must reflect the political entity at the time of the record — records before 1776 in American colonies use "British Colonial America". Never default to "United States" for records that predate its existence. Spell out all abbreviations fully.
+- land_data: an object with exactly two fields:
+  - acres: the numeric acreage as a decimal number (e.g. 34.5 for thirty-four and a half acres). Parse written numbers to digits — "one hundred" becomes 100, "thirty-four and a half" becomes 34.5. Return null if acreage is not stated or cannot be confidently parsed to a number.
+  - transaction_type: classify the transaction as one of exactly these values: "Acquired", "Sold", "Gifted", "Taxed", "Surveyed". Use "Acquired" for any purchase, grant, patent, or inheritance. Use "Gifted" for any deed of gift or will bequest transferring land out of the person's name. Use "Taxed" when the document is a tax list confirming ownership. Use "Surveyed" when the document is a survey or map naming the person as a landowner.
+
+parent_events must always be an empty array for land records.
+
+RELATIONSHIPS — populate only when the document explicitly states a relationship between named parties (e.g. husband and wife both named as grantors, a father deeding land to a son). Use relationship_type "spouse" or "parent" as appropriate. Never infer relationships from co-appearance alone.
+
+is_multi_person: true if this document contains multiple unrelated transactions or individuals (e.g. a tax list, a deed book page with multiple entries). false if this is a single transaction document.
+
+document_subtype: classify as one of: "Deed", "Deed of Gift", "Land Grant", "Tax List", "Survey", "Quitclaim Deed", "Indenture", "Patent", "Warrant", "Other".
+
+Places — event_place on each event and birth_place on each person must always be an object with this exact shape: { township, county, state, country }. Never return a single string for a place. township, county, and state are each nullable; country is required.
+- country must reflect the political entity at the time of the record. Records before 1776 in American colonies use "British Colonial America". Never default to "United States" for records that predate its existence.
+Always spell out abbreviations fully — "Randolph County" not "Randolph Co.", "West River" not "W. River".${anchorSuffix}${filterSurnameSuffix}`;
+}
+
 function buildSystemPrompt(
   vibe: string,
   anchorPersonName: string | null,
@@ -327,6 +403,7 @@ function buildSystemPrompt(
   if (normalized === "census record")
     return buildCensusRecordPrompt(vibe, anchorPersonName, censusHouseholdSurname);
   if (normalized === "military record") return buildMilitaryRecordPrompt(vibe, anchorPersonName);
+  if (normalized === "land record") return buildLandRecordPrompt(vibe, anchorPersonName, censusHouseholdSurname);
   return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 

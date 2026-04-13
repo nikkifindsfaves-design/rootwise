@@ -65,6 +65,7 @@
       notes: string | null;
       story_short?: string | null;
       story_full: string | null;
+      land_data?: { acres: number | null; transaction_type: string | null } | null;
     }
   ): Promise<{ error: string | null }> {
     const existingId = await findExistingEventIdForPersonType(
@@ -96,6 +97,7 @@
         notes: fields.notes,
         story_short: fields.story_short ?? null,
         story_full: fields.story_full,
+        land_data: fields.land_data ?? null,
       })
       .select("id")
       .maybeSingle();

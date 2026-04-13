@@ -51,6 +51,7 @@ type AiEvent = {
   event_place?: PlaceFields | string | null;
   description?: string | null;
   story_full?: string | null;
+  land_data?: { acres: number | null; transaction_type: string | null } | null;
 };
 
 type AiRelationship = {
@@ -129,6 +130,7 @@ type EventRow = {
   /** From AI `description`; saved to DB as `events.notes`. */
   eventNotes: string;
   eventStoryFull: string;
+  landData: { acres: number | null; transaction_type: string | null } | null;
 };
 
 type PersonCardState = {
@@ -177,9 +179,14 @@ export type PendingReviewPayload = {
       event_place_fields: PlaceFields | null;
       notes: string | null;
       story_full: string | null;
+      land_data?: { acres: number | null; transaction_type: string | null } | null;
     }>;
   }>;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function normalizeName(s: string): string {
   return s
@@ -455,6 +462,22 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
+          landData: (isRecord(e) && isRecord((e as Record<string, unknown>).land_data))
+            ? {
+                acres:
+                  typeof ((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                    .acres === "number"
+                    ? (((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                        .acres as number)
+                    : null,
+                transaction_type:
+                  typeof ((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                    .transaction_type === "string"
+                    ? (((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                        .transaction_type as string)
+                    : null,
+              }
+            : null,
         });
       }
     }
@@ -470,6 +493,22 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
           event_place_fields: placeFieldsFromAi(e.event_place),
           eventNotes: (e.description ?? "").trim(),
           eventStoryFull: (e.story_full ?? "").trim(),
+          landData: (isRecord(e) && isRecord((e as Record<string, unknown>).land_data))
+            ? {
+                acres:
+                  typeof ((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                    .acres === "number"
+                    ? (((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                        .acres as number)
+                    : null,
+                transaction_type:
+                  typeof ((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                    .transaction_type === "string"
+                    ? (((e as Record<string, unknown>).land_data as Record<string, unknown>)
+                        .transaction_type as string)
+                    : null,
+              }
+            : null,
         });
       }
     }
@@ -732,6 +771,7 @@ export default function ReviewRecordClient({
           event_place_fields: null,
           eventNotes: description,
           eventStoryFull: "",
+          landData: null,
         };
         return {
           ...card,
@@ -890,6 +930,7 @@ export default function ReviewRecordClient({
             event_place_fields: e.event_place_fields,
             notes: e.eventNotes.trim() || null,
             story_full: e.eventStoryFull.trim() || null,
+            land_data: e.landData ?? null,
           })),
         })),
       };
@@ -1801,6 +1842,58 @@ export default function ReviewRecordClient({
                                       }
                                     />
                                   </div>
+                                  {row.eventType === "land" ? (
+                                    <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem" }}>
+                                      <div>
+                                        <label className={labelFieldClass} style={labelFieldStyle}>Acres</label>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          value={row.landData?.acres ?? ""}
+                                          onChange={(ev) => {
+                                            const parsed = ev.target.value === "" ? null : parseFloat(ev.target.value);
+                                            updateCard(item.key, {
+                                              ...item,
+                                              events: item.events.map((e) =>
+                                                e.key === row.key
+                                                  ? { ...e, landData: { acres: isNaN(parsed as number) ? null : parsed, transaction_type: e.landData?.transaction_type ?? null } }
+                                                  : e
+                                              ),
+                                            });
+                                          }}
+                                          className={inputFieldClass}
+                                          style={inputFieldStyle}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className={labelFieldClass} style={labelFieldStyle}>Transaction Type</label>
+                                        <select
+                                          value={row.landData?.transaction_type ?? ""}
+                                          onChange={(ev) => {
+                                            const val = ev.target.value || null;
+                                            updateCard(item.key, {
+                                              ...item,
+                                              events: item.events.map((e) =>
+                                                e.key === row.key
+                                                  ? { ...e, landData: { acres: e.landData?.acres ?? null, transaction_type: val } }
+                                                  : e
+                                              ),
+                                            });
+                                          }}
+                                          className={inputFieldClass}
+                                          style={inputFieldStyle}
+                                        >
+                                          <option value="">— Select —</option>
+                                          <option value="Acquired">Acquired</option>
+                                          <option value="Sold">Sold</option>
+                                          <option value="Gifted">Gifted</option>
+                                          <option value="Taxed">Taxed</option>
+                                          <option value="Surveyed">Surveyed</option>
+                                        </select>
+                                      </div>
+                                    </div>
+                                  ) : null}
                                 </div>
                               </li>
                             ))}

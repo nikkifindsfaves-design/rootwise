@@ -553,6 +553,26 @@ export async function POST(request: NextRequest) {
         console.error("[save-review]", "event-place-resolve", evPlaceRes.error);
         return NextResponse.json({ error: evPlaceRes.error }, { status: 500 });
       }
+      let landData: {
+        acres: number | null;
+        transaction_type: string | null;
+      } | null = null;
+      const rawLand = e.land_data;
+      if (rawLand != null && typeof rawLand === "object" && !Array.isArray(rawLand)) {
+        const ld = rawLand as Record<string, unknown>;
+        let acres: number | null = null;
+        const rawAcres = ld.acres;
+        if (typeof rawAcres === "number" && Number.isFinite(rawAcres)) {
+          acres = rawAcres;
+        } else if (typeof rawAcres === "string") {
+          const n = Number(rawAcres.trim());
+          acres = Number.isFinite(n) ? n : null;
+        }
+        const rawTt = ld.transaction_type;
+        const transaction_type =
+          typeof rawTt === "string" ? rawTt.trim() || null : null;
+        landData = { acres, transaction_type };
+      }
       const { error: evSaveErr } = await savePersonEventWithDedupe(
         supabase,
         user.id,
@@ -564,6 +584,7 @@ export async function POST(request: NextRequest) {
           event_place_id: evPlaceRes.id,
           notes: noteText,
           story_full: storyFull,
+          land_data: landData,
         }
       );
 
