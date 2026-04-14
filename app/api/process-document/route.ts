@@ -322,16 +322,24 @@ function buildLandRecordPrompt(
 ): string {
   const anchorSuffix =
     anchorPersonName != null
-      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: This document was uploaded to research "${anchorPersonName}".
+      ? `\n\nANCHOR PERSON — STRICT EXTRACTION RULE: The researcher typed "${anchorPersonName}" to identify who they are researching.
 
-If this is a multi-person document (deed book page with multiple entries, tax list, or similar):
-- Scan the document to find the entry that matches "${anchorPersonName}"
-- Extract ONLY the people from that entry who are parties to the transaction
-- Do NOT extract any other individuals from other entries on the document
+Determine which case applies:
 
-If this is a single-subject document (single deed, patent, survey, or similar):
-- Treat "${anchorPersonName}" as the primary subject as normal
-- Extract all people and events as usual`
+CASE 1 — Full name provided (first and last name, e.g. "Elijah Garrett"):
+- Scan the document and find the single row or entry where this exact person appears
+- Extract ONLY that one person and their land event
+- Do not extract anyone else from the document
+
+CASE 2 — Surname only provided (e.g. "Garrett"):
+- Scan the entire document from top to bottom
+- Extract every person whose surname matches "${anchorPersonName}" or a historical spelling variation
+- Each matching row becomes one person entry and one land event
+- Do not extract anyone whose surname does not match
+
+If this is a single-subject document like a deed or patent with only one named party, extract that person normally regardless of which case applies.
+
+If you cannot find anyone matching "${anchorPersonName}" on the document, return an empty people array.`
       : "";
 
   const filterSurnameSuffix =
@@ -690,7 +698,8 @@ export async function POST(request: NextRequest) {
       : "";
   const censusHouseholdSurnameForPrompt =
     recordTypeStr != null &&
-    recordTypeStr.toLowerCase().trim() === "census record" &&
+    (recordTypeStr.toLowerCase().trim() === "census record" ||
+      recordTypeStr.toLowerCase().trim() === "land record") &&
     censusSurnameTrim !== ""
       ? censusSurnameTrim
       : null;

@@ -55,7 +55,6 @@ export default function DocumentUploadSection({
     "Birth Record"
   );
   const [censusSurname, setCensusSurname] = useState("");
-  const [anchorName, setAnchorName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,33 +65,22 @@ export default function DocumentUploadSection({
   const [multiPersonProcessing, setMultiPersonProcessing] = useState(false);
 
   const buildFormData = useCallback(
-    (f: File, opts?: { anchorName?: string }) => {
+    (f: File) => {
       const formData = new FormData();
       formData.append("file", f);
       formData.append("record_type", recordType);
-      if (recordType === "Census Record" || recordType === "Land Record") {
+      if (censusSurname.trim() !== "") {
         formData.append("census_surname", censusSurname.trim());
-      }
-      if (
-        (recordType === "Birth Record" ||
-          recordType === "Death Record" ||
-          recordType === "Military Record") &&
-        anchorName.trim() !== ""
-      ) {
-        formData.append("anchor_person_name", anchorName.trim());
       }
       if (treeId != null && treeId.trim() !== "") {
         formData.append("tree_id", treeId.trim());
       }
-      const name = opts?.anchorName?.trim();
-      if (name) {
-        formData.append("anchor_person_name", name);
-      } else if (anchorPersonId != null && anchorPersonId.trim() !== "") {
+      if (anchorPersonId != null && anchorPersonId.trim() !== "") {
         formData.append("anchor_person_id", anchorPersonId.trim());
       }
       return formData;
     },
-    [recordType, censusSurname, anchorName, treeId, anchorPersonId]
+    [recordType, censusSurname, treeId, anchorPersonId]
   );
 
   /** Empty query → all extracted names; otherwise fuzzy token match on full name. */
@@ -124,16 +112,6 @@ export default function DocumentUploadSection({
 
     if (recordType === "Census Record" && censusSurname.trim() === "") {
       setError("Please enter a family surname for census records.");
-      return;
-    }
-
-    if (
-      (recordType === "Birth Record" ||
-        recordType === "Death Record" ||
-        recordType === "Military Record") &&
-      anchorName.trim() === ""
-    ) {
-      setError("Please enter the ancestor's name.");
       return;
     }
 
@@ -177,14 +155,7 @@ export default function DocumentUploadSection({
       if (
         isMultiPerson &&
         !anchorSet &&
-        !(recordType === "Census Record" && censusSurname.trim() !== "") &&
-        !(recordType === "Land Record" && censusSurname.trim() !== "") &&
-        !(
-          (recordType === "Birth Record" ||
-            recordType === "Death Record" ||
-            recordType === "Military Record") &&
-          anchorName.trim() !== ""
-        )
+        !(censusSurname.trim() !== "")
       ) {
         const names = extractPeopleFullNames(data);
         setPendingRecordId(recordId);
@@ -218,7 +189,7 @@ export default function DocumentUploadSection({
     setError(null);
 
     try {
-      const formData = buildFormData(file, { anchorName: selectedName });
+      const formData = buildFormData(file);
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -330,63 +301,31 @@ export default function DocumentUploadSection({
         </select>
       </div>
 
-      {(recordType === "Census Record" || recordType === "Land Record") ? (
-        <div>
-          <label
-            htmlFor="census_family_surname"
-            className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
-          >
-            Family Surname
-          </label>
-          <input
-            id="census_family_surname"
-            type="text"
-            value={censusSurname}
-            onChange={(e) => setCensusSurname(e.target.value)}
-            autoComplete="off"
-            className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)] sm:max-w-xs"
-            style={{
-              fontFamily: sans,
-              borderWidth: 1,
-              borderStyle: "solid",
-              borderColor: "var(--dg-brown-border)",
-              backgroundColor: "var(--dg-bg-main)",
-              color: "var(--dg-brown-dark)",
-            }}
-          />
-        </div>
-      ) : null}
-
-      {(recordType === "Birth Record" ||
-        recordType === "Death Record" ||
-        recordType === "Military Record") ? (
-        <div>
-          <label
-            htmlFor="ancestor_name"
-            className="mb-1 block text-sm font-medium"
-            style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
-          >
-            Ancestor's name
-          </label>
-          <input
-            id="ancestor_name"
-            type="text"
-            value={anchorName}
-            onChange={(e) => setAnchorName(e.target.value)}
-            autoComplete="off"
-            className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)] sm:max-w-xs"
-            style={{
-              fontFamily: sans,
-              borderWidth: 1,
-              borderStyle: "solid",
-              borderColor: "var(--dg-brown-border)",
-              backgroundColor: "var(--dg-bg-main)",
-              color: "var(--dg-brown-dark)",
-            }}
-          />
-        </div>
-      ) : null}
+      <div>
+        <label
+          htmlFor="census_family_surname"
+          className="mb-1 block text-sm font-medium"
+          style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
+        >
+          Ancestor's name
+        </label>
+        <input
+          id="census_family_surname"
+          type="text"
+          value={censusSurname}
+          onChange={(e) => setCensusSurname(e.target.value)}
+          autoComplete="off"
+          className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)] sm:max-w-xs"
+          style={{
+            fontFamily: sans,
+            borderWidth: 1,
+            borderStyle: "solid",
+            borderColor: "var(--dg-brown-border)",
+            backgroundColor: "var(--dg-bg-main)",
+            color: "var(--dg-brown-dark)",
+          }}
+        />
+      </div>
 
       <button
         type="button"
