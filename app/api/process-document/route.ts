@@ -482,13 +482,16 @@ async function resolveAnchorPersonName(
     .join(" ");
 }
 
-export async function POST(request: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY is not configured" },
-      { status: 500 }
-    );
+function formTruthySkipExtraction(raw: FormDataEntryValue | null): boolean {
+  if (raw == null) return false;
+  if (typeof raw === "string") {
+    const t = raw.trim().toLowerCase();
+    return t === "true" || t === "1" || t === "yes";
   }
+  return false;
+}
+
+export async function POST(request: NextRequest) {
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -525,6 +528,10 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  const skipExtraction = formTruthySkipExtraction(
+    formData.get("skip_extraction")
+  );
 
   const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -650,6 +657,59 @@ export async function POST(request: NextRequest) {
 
   const fileUrl = publicUrlData.publicUrl;
 
+  const recordTypeField = formData.get("record_type");
+  const recordTypeStr =
+    recordTypeField != null && String(recordTypeField).trim() !== ""
+      ? String(recordTypeField).trim()
+      : null;
+
+  if (skipExtraction) {
+    const manualAiResponse: Record<string, unknown> = {
+      record_type: recordTypeStr ?? "",
+      people: [],
+      events: [],
+      parent_events: [],
+      relationships: [],
+      is_multi_person: false,
+      document_subtype: "Manual entry",
+      extraction_skipped: true,
+    };
+
+    const { data: record, error: recordError } = await supabase
+      .from("records")
+      .insert({
+        user_id: user.id,
+        file_url: fileUrl,
+        file_type: resolvedFileType,
+        ai_response: manualAiResponse,
+        ...(recordTypeStr ? { record_type: recordTypeStr } : {}),
+        ...(resolvedTreeId != null ? { tree_id: resolvedTreeId } : {}),
+        document_subtype: "Manual entry",
+      })
+      .select("id")
+      .single();
+
+    if (recordError || !record) {
+      return NextResponse.json(
+        { error: `Failed to save record: ${recordError?.message ?? "unknown"}` },
+        { status: 500 }
+      );
+    }
+
+    const recordId = record.id as string;
+    return NextResponse.json({
+      ...manualAiResponse,
+      recordId,
+    });
+  }
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json(
+      { error: "ANTHROPIC_API_KEY is not configured" },
+      { status: 500 }
+    );
+  }
+
   const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
   });
@@ -684,12 +744,6 @@ export async function POST(request: NextRequest) {
             text: "Analyze this image and respond with JSON only as specified in your instructions.",
           },
         ];
-
-  const recordTypeField = formData.get("record_type");
-  const recordTypeStr =
-    recordTypeField != null && String(recordTypeField).trim() !== ""
-      ? String(recordTypeField).trim()
-      : null;
 
   const censusSurnameRaw = formData.get("census_surname");
   const censusSurnameTrim =

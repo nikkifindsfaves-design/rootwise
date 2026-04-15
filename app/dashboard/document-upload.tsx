@@ -121,6 +121,9 @@ export default function DocumentUploadSection({
   );
   const [censusSurname, setCensusSurname] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<null | "analyze" | "upload">(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [isAdjustingImage, setIsAdjustingImage] = useState(false);
 
@@ -131,7 +134,7 @@ export default function DocumentUploadSection({
   const [multiPersonProcessing, setMultiPersonProcessing] = useState(false);
 
   const buildFormData = useCallback(
-    (f: File) => {
+    (f: File, options?: { skipExtraction?: boolean }) => {
       const formData = new FormData();
       formData.append("file", f);
       formData.append("record_type", recordType);
@@ -143,6 +146,9 @@ export default function DocumentUploadSection({
       }
       if (anchorPersonId != null && anchorPersonId.trim() !== "") {
         formData.append("anchor_person_id", anchorPersonId.trim());
+      }
+      if (options?.skipExtraction === true) {
+        formData.append("skip_extraction", "true");
       }
       return formData;
     },
@@ -170,18 +176,23 @@ export default function DocumentUploadSection({
     setMultiPersonProcessing(false);
   }
 
-  async function handleUpload() {
+  async function handleUpload(options: { skipExtraction: boolean }) {
     if (!file) {
       setError("Please choose a file first.");
       return;
     }
 
-    if (recordType === "Census Record" && censusSurname.trim() === "") {
+    if (
+      !options.skipExtraction &&
+      recordType === "Census Record" &&
+      censusSurname.trim() === ""
+    ) {
       setError("Please enter a family surname for census records.");
       return;
     }
 
     setIsLoading(true);
+    setLoadingMode(options.skipExtraction ? "upload" : "analyze");
     setError(null);
     setIsAdjustingImage(false);
 
@@ -189,7 +200,9 @@ export default function DocumentUploadSection({
       setIsAdjustingImage(true);
       const uploadFile = await downscaleImageIfNeeded(file);
       setIsAdjustingImage(false);
-      const formData = buildFormData(uploadFile);
+      const formData = buildFormData(uploadFile, {
+        skipExtraction: options.skipExtraction,
+      });
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -220,7 +233,8 @@ export default function DocumentUploadSection({
 
       const anchorSet =
         anchorPersonId != null && anchorPersonId.trim() !== "";
-      const isMultiPerson = data?.is_multi_person === true;
+      const isMultiPerson =
+        !options.skipExtraction && data?.is_multi_person === true;
 
       if (
         isMultiPerson &&
@@ -242,6 +256,7 @@ export default function DocumentUploadSection({
     } finally {
       setIsAdjustingImage(false);
       setIsLoading(false);
+      setLoadingMode(null);
     }
   }
 
@@ -264,7 +279,7 @@ export default function DocumentUploadSection({
       setIsAdjustingImage(true);
       const uploadFile = await downscaleImageIfNeeded(file);
       setIsAdjustingImage(false);
-      const formData = buildFormData(uploadFile);
+      const formData = buildFormData(uploadFile, { skipExtraction: false });
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -403,26 +418,50 @@ export default function DocumentUploadSection({
         />
       </div>
 
-      <button
-        type="button"
-        onClick={handleUpload}
-        disabled={isLoading}
-        className="rounded-md px-4 py-2 text-sm font-semibold transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
-        style={{
-          fontFamily: sans,
-          backgroundColor: "var(--dg-primary-bg)",
-          color: "var(--dg-primary-fg)",
-        }}
-      >
-        Upload and Analyze
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void handleUpload({ skipExtraction: false })}
+          disabled={isLoading}
+          className="rounded-md px-4 py-2 text-sm font-semibold transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+          style={{
+            fontFamily: sans,
+            backgroundColor: "var(--dg-primary-bg)",
+            color: "var(--dg-primary-fg)",
+          }}
+        >
+          Upload and Analyze
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleUpload({ skipExtraction: true })}
+          disabled={isLoading}
+          className="rounded-md border-2 px-4 py-2 text-sm font-semibold transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+          style={{
+            fontFamily: sans,
+            borderColor: "var(--dg-brown-outline)",
+            color: "var(--dg-brown-dark)",
+            backgroundColor: "transparent",
+          }}
+        >
+          Upload
+        </button>
+      </div>
 
-      {isLoading ? (
+      {isLoading && loadingMode === "analyze" ? (
         <p
           className="text-sm italic"
           style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
         >
           Claude is reading your document…
+        </p>
+      ) : null}
+      {isLoading && loadingMode === "upload" ? (
+        <p
+          className="text-sm italic"
+          style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
+        >
+          Uploading your document…
         </p>
       ) : null}
       {isAdjustingImage ? (
@@ -640,8 +679,9 @@ export default function DocumentUploadSection({
           className="mt-1 text-sm"
           style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
         >
-          Upload a document and let Claude extract people, events, and
-          relationships.
+          Upload and analyze to have Claude extract people, events, and
+          relationships, or use Upload to open the review screen and enter
+          everything yourself.
         </p>
         {fields}
       </section>

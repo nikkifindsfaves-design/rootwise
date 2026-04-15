@@ -4,10 +4,19 @@ import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { ALL_EVENT_TYPES, EVENT_TYPES, type EventType } from "@/lib/events/event-types";
 import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
+import {
+  emptySharedEventDetails,
+  eventUsesSharedDetails,
+  extractionSkippedFromAi,
+  migrateExtractedEventsToShared,
+  resolveEventDatePlaceNotes,
+  type SharedEventDetailsState,
+} from "@/lib/review/shared-event-merge";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
 import {
+  getIsBirthRecord,
   getIsBirthRecordChild,
   getIsDeathRecord,
   getIsMarriageRecord,
@@ -133,6 +142,11 @@ type EventRow = {
   eventNotes: string;
   eventStoryFull: string;
   landData: { acres: number | null; transaction_type: string | null } | null;
+  /**
+   * When true, date / place / notes for this row come from `sharedEventDetails`
+   * in the parent review UI (one shared block for census, shared residence, etc.).
+   */
+   useSharedDetails?: boolean;
 };
 
 type PersonCardState = {
@@ -542,6 +556,74 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
   });
 }
 
+function blankPersonCard(recordTypeLabel: string): PersonCardState {
+  const t = defaultEventTypeForRecord(recordTypeLabel);
+  /** Land rows need per-event acres / transaction fields in the card UI. */
+  const linkShared = t !== "land";
+  return {
+    key: newKey("p"),
+    include: true,
+    form: toForm({}),
+    relationships: [],
+    events: [blankEventRow(t, linkShared)],
+    generateStory: false,
+  };
+}
+
+function defaultEventTypeForRecord(recordTypeLabel: string): EvOption {
+  if (getIsMarriageRecord(recordTypeLabel)) return "marriage";
+  if (getIsDeathRecord(recordTypeLabel)) return "death";
+  if (getIsBirthRecord(recordTypeLabel)) return "birth";
+  const lower = recordTypeLabel.toLowerCase();
+  if (lower.includes("census")) return "residence";
+  if (lower.includes("land")) return "land";
+  return "other";
+}
+
+function blankEventRow(
+  defaultType: EvOption,
+  useSharedDetails = false
+): EventRow {
+  return {
+    key: newKey("ev"),
+    eventType: defaultType,
+    eventDate: "",
+    event_place_display: "",
+    event_place_id: null,
+    event_place_fields: null,
+    eventNotes: "",
+    eventStoryFull: "",
+    landData: null,
+    ...(useSharedDetails ? { useSharedDetails: true } : {}),
+  };
+}
+
+function parsedShapeFromAiResponse(aiResponse: unknown): AiResponseShape {
+  const r = aiResponse as AiResponseShape;
+  return {
+    record_type:
+      typeof r?.record_type === "string" ? r.record_type.trim() : "",
+    people: Array.isArray(r?.people) ? r.people : [],
+    relationships: Array.isArray(r?.relationships) ? r.relationships : [],
+    events: Array.isArray(r?.events) ? r.events : [],
+    parent_events: Array.isArray(r?.parent_events) ? r.parent_events : [],
+  };
+}
+
+function createInitialCardsAndShared(
+  aiResponse: unknown,
+  _recordTypeLabel: string
+): { cards: PersonCardState[]; shared: SharedEventDetailsState } {
+  const parsed = parsedShapeFromAiResponse(aiResponse);
+  const cards = buildInitialCards(parsed);
+
+  if (extractionSkippedFromAi(aiResponse)) {
+    return { cards, shared: emptySharedEventDetails() };
+  }
+
+  return migrateExtractedEventsToShared(cards);
+}
+
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
 const ZOOM_STEP = 0.25;
@@ -717,27 +799,31 @@ export default function ReviewRecordClient({
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const parsed = useMemo(() => {
-    const r = aiResponse as AiResponseShape;
-    return {
-      record_type:
-        typeof r?.record_type === "string" ? r.record_type.trim() : "",
-      people: Array.isArray(r?.people) ? r.people : [],
-      relationships: Array.isArray(r?.relationships) ? r.relationships : [],
-      events: Array.isArray(r?.events) ? r.events : [],
-      parent_events: Array.isArray(r?.parent_events) ? r.parent_events : [],
-    };
-  }, [aiResponse]);
+  const parsed = useMemo(
+    () => parsedShapeFromAiResponse(aiResponse),
+    [aiResponse]
+  );
+
+  const manualEntryReview = useMemo(
+    () => extractionSkippedFromAi(aiResponse),
+    [aiResponse]
+  );
 
   const [cards, setCards] = useState<PersonCardState[]>(() => {
-    const p = parsed as AiResponseShape;
+    const init = createInitialCardsAndShared(aiResponse, recordTypeLabel);
+    const p = parsedShapeFromAiResponse(aiResponse);
     console.log("[review] buildInitialCards input", {
       parsed: p,
       people: p.people,
       parent_events: p.parent_events,
+      cardCount: init.cards.length,
     });
-    return buildInitialCards(p);
+    return init.cards;
   });
+  const [sharedEventDetails, setSharedEventDetails] =
+    useState<SharedEventDetailsState>(() =>
+      createInitialCardsAndShared(aiResponse, recordTypeLabel).shared
+    );
   const [isRegeneratingStories, setIsRegeneratingStories] = useState(false);
   const [treePersonNameSuggestions, setTreePersonNameSuggestions] = useState<string[]>([]);
 
@@ -800,8 +886,15 @@ export default function ReviewRecordClient({
       const primaryName = primaryCard
         ? fullNameFromForm(primaryCard.form).trim()
         : "";
-      const primaryDeathDate = primaryCard
-        ? primaryCard.events.find((e) => e.eventType === "death")?.eventDate ?? ""
+      const primaryDeathEv = primaryCard?.events.find(
+        (e) => e.eventType === "death"
+      );
+      const primaryDeathDate = primaryDeathEv
+        ? resolveEventDatePlaceNotes(
+            primaryDeathEv,
+            sharedEventDetails,
+            manualEntryReview
+          ).eventDate
         : "";
 
       const cardsWithSynthesized = cards.map((card) => {
@@ -826,6 +919,7 @@ export default function ReviewRecordClient({
           eventNotes: description,
           eventStoryFull: "",
           landData: null,
+          useSharedDetails: false,
         };
         return {
           ...card,
@@ -850,6 +944,11 @@ export default function ReviewRecordClient({
             if (!card || !event) return null;
 
             try {
+              const resolvedEv = resolveEventDatePlaceNotes(
+                event,
+                sharedEventDetails,
+                manualEntryReview
+              );
               const response = await fetch("/api/regenerate-story", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -857,9 +956,9 @@ export default function ReviewRecordClient({
                   tree_id: recordTreeId,
                   person_name: fullNameFromForm(card.form),
                   event_type: event.eventType,
-                  event_date: event.eventDate.trim() || null,
-                  event_place: event.event_place_display.trim() || null,
-                  event_notes: event.eventNotes.trim() || null,
+                  event_date: resolvedEv.eventDate.trim() || null,
+                  event_place: resolvedEv.event_place_display.trim() || null,
+                  event_notes: resolvedEv.eventNotes.trim() || null,
                   related_people: card.relationships
                     .map((rel) => {
                       if (rel.relatedPeerIndex != null) {
@@ -977,15 +1076,22 @@ export default function ReviewRecordClient({
               return true;
             })
             .map(({ relatedPeerIndex: _rp, ...rest }) => rest),
-          events: c.events.map((e) => ({
-            event_type: e.eventType,
-            event_date: e.eventDate.trim() || null,
-            event_place_id: e.event_place_id,
-            event_place_fields: e.event_place_fields,
-            notes: e.eventNotes.trim() || null,
-            story_full: e.eventStoryFull.trim() || null,
-            land_data: e.landData ?? null,
-          })),
+          events: c.events.map((e) => {
+            const r = resolveEventDatePlaceNotes(
+              e,
+              sharedEventDetails,
+              manualEntryReview
+            );
+            return {
+              event_type: e.eventType,
+              event_date: r.eventDate.trim() || null,
+              event_place_id: r.event_place_id,
+              event_place_fields: r.event_place_fields,
+              notes: r.eventNotes.trim() || null,
+              story_full: e.eventStoryFull.trim() || null,
+              land_data: e.landData ?? null,
+            };
+          }),
         })),
       };
 
@@ -1109,60 +1215,152 @@ export default function ReviewRecordClient({
               </p>
             )}
 
-            {getIsMarriageRecord(recordTypeLabel) && (() => {
-              const sharedMarriageEvent = cards
-                .flatMap((c) => c.events)
-                .find((e) => e.eventType === "marriage") ?? null;
-              return (
-                <div
-                  className="rounded-xl border p-4 space-y-3"
-                  style={{
-                    backgroundColor: "var(--dg-cream)",
-                    borderColor: "var(--dg-brown-border)",
-                  }}
-                >
-                  <h3
-                    className="text-xs font-semibold uppercase tracking-wide"
-                    style={{ color: "var(--dg-brown-muted)" }}
-                  >
-                    Marriage details
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <label className={labelFieldClass} style={labelFieldStyle}>
-                        Marriage date
-                      </label>
-                      <p className={inputFieldClass} style={{ ...inputFieldStyle, cursor: "default" }}>
-                        {sharedMarriageEvent?.eventDate || "—"}
-                      </p>
-                      <p className="mt-1 text-xs" style={{ color: "var(--dg-brown-muted)" }}>
-                        Edit in the Events section on the husband card below
-                      </p>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className={labelFieldClass} style={labelFieldStyle}>
-                        Marriage place
-                      </label>
-                      <p className={inputFieldClass} style={{ ...inputFieldStyle, cursor: "default" }}>
-                        {sharedMarriageEvent?.event_place_display || "—"}
-                      </p>
-                    </div>
-                  </div>
+            <div
+              className="rounded-xl border p-4 space-y-3"
+              style={{
+                backgroundColor: "var(--dg-cream)",
+                borderColor: "var(--dg-brown-border)",
+              }}
+            >
+              <h3
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "var(--dg-brown-muted)" }}
+              >
+                Shared event details
+              </h3>
+              <p className="text-xs" style={{ color: "var(--dg-brown-muted)" }}>
+                {manualEntryReview ? (
+                  <>
+                    One date, place, and shared description for every{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      linked
+                    </span>{" "}
+                    event (for example the same birth as{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      birth
+                    </span>{" "}
+                    vs{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      child born
+                    </span>
+                    ). Change{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      event type
+                    </span>{" "}
+                    per person if needed; use{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      Different date or place for this person only
+                    </span>{" "}
+                    for an exception, or remove an event when someone should not
+                    share this fact.
+                  </>
+                ) : (
+                  <>
+                    After extraction, edit shared{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      date
+                    </span>{" "}
+                    and{" "}
+                    <span className="font-medium text-[var(--dg-brown-dark)]">
+                      place
+                    </span>{" "}
+                    once for every linked event. Event type can still differ per
+                    person. Text the model put on each row (roles, etc.) is kept
+                    for saving and story generation but is not edited in this
+                    panel.
+                  </>
+                )}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className={labelFieldClass} style={labelFieldStyle}>
+                    Date
+                  </label>
+                  <SmartDateInput
+                    className={inputFieldClass}
+                    style={inputFieldStyle}
+                    value={sharedEventDetails.eventDate}
+                    onChange={(nextDate) =>
+                      setSharedEventDetails((s) => ({
+                        ...s,
+                        eventDate: nextDate,
+                      }))
+                    }
+                  />
                 </div>
-              );
-            })()}
+                <div className="sm:col-span-2">
+                  <label className={labelFieldClass} style={labelFieldStyle}>
+                    Place
+                  </label>
+                  <PlaceInput
+                    className={inputFieldClass}
+                    style={inputFieldStyle}
+                    value={sharedEventDetails.event_place_display}
+                    onChange={(v) =>
+                      setSharedEventDetails((s) => ({
+                        ...s,
+                        event_place_display: v,
+                        event_place_id: null,
+                      }))
+                    }
+                    onPlaceSelect={(place) =>
+                      setSharedEventDetails((s) => ({
+                        ...s,
+                        event_place_display: place.display,
+                        event_place_id: place.id,
+                        event_place_fields: null,
+                      }))
+                    }
+                  />
+                </div>
+                {manualEntryReview ? (
+                  <div className="sm:col-span-2">
+                    <label className={labelFieldClass} style={labelFieldStyle}>
+                      Description / notes (shared)
+                    </label>
+                    <textarea
+                      className={inputFieldClass}
+                      style={inputFieldStyle}
+                      rows={2}
+                      value={sharedEventDetails.eventNotes}
+                      onChange={(e) =>
+                        setSharedEventDetails((s) => ({
+                          ...s,
+                          eventNotes: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
 
             {cards.length === 0 ? (
-              <p
-                className="rounded-xl border border-dashed p-8 text-center text-sm"
+              <div
+                className="rounded-xl border border-dashed p-8 text-center space-y-4"
                 style={{
                   borderColor: "var(--dg-brown-border)",
                   backgroundColor: "var(--dg-cream)",
                   color: "var(--dg-brown-muted)",
                 }}
               >
-                No people were extracted from this document.
-              </p>
+                <p className="text-sm">
+                  No one is listed yet. You can add people and events manually
+                  using the document preview.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCards([blankPersonCard(recordTypeLabel)])}
+                  className="rounded-md border-2 px-4 py-2 text-sm font-semibold transition hover:opacity-95"
+                  style={{
+                    borderColor: "var(--dg-brown-outline)",
+                    color: "var(--dg-brown-dark)",
+                    backgroundColor: "transparent",
+                  }}
+                >
+                  Add person
+                </button>
+              </div>
             ) : (
               <div className="space-y-5">
                 {cards.map((item) => {
@@ -1776,33 +1974,71 @@ export default function ReviewRecordClient({
                         className="border-t pt-4"
                         style={{ borderTopColor: "var(--dg-brown-border)" }}
                       >
-                        <div className="mb-2">
+                        <div className="mb-2 flex items-center justify-between gap-2">
                           <h4
                             className="text-xs font-semibold uppercase tracking-wide"
                             style={{ color: "var(--dg-brown-muted)" }}
                           >
                             Events
                           </h4>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateCard(item.key, {
+                                ...item,
+                                events: [
+                                  ...item.events,
+                                  blankEventRow(
+                                    defaultEventTypeForRecord(recordTypeLabel)
+                                  ),
+                                ],
+                              })
+                            }
+                            className="text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                          >
+                            Add event
+                          </button>
                         </div>
                         {item.events.length === 0 ? (
                           <p
                             className="text-xs"
                             style={{ color: "var(--dg-brown-muted)" }}
                           >
-                            No events extracted from this document.
+                            No events for this person. Use{" "}
+                            <span className="font-medium text-[var(--dg-brown-dark)]">
+                              Add event
+                            </span>{" "}
+                            for a separate event with its own date and place, or
+                            remove events on other people when they should not
+                            share this record.
                           </p>
                         ) : (
                           <ul className="space-y-3">
                             {item.events.map((row) => (
                               <li
                                 key={row.key}
-                                className="rounded-lg border p-3"
+                                className="relative rounded-lg border p-3"
                                 style={{
                                   borderColor: "var(--dg-brown-border)",
                                   backgroundColor: "var(--dg-parchment)",
                                 }}
                               >
-                                <div className="space-y-3">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateCard(item.key, {
+                                      ...item,
+                                      events: item.events.filter(
+                                        (ev) => ev.key !== row.key
+                                      ),
+                                    })
+                                  }
+                                  className="absolute top-3 right-3 z-10 text-xs font-medium hover:underline"
+                                  style={{ color: "var(--dg-danger)" }}
+                                >
+                                  Remove event
+                                </button>
+                                <div className="space-y-3 pr-[6.5rem]">
                                   <div>
                                     <label
                                       className={labelFieldClass}
@@ -1839,123 +2075,291 @@ export default function ReviewRecordClient({
                                       ))}
                                     </select>
                                   </div>
-                                  <div>
-                                    <label
-                                      className={labelFieldClass}
-                                      style={labelFieldStyle}
-                                    >
-                                      Date
-                                    </label>
-                                    <SmartDateInput
-                                      className={inputFieldClass}
-                                      style={inputFieldStyle}
-                                      value={row.eventDate}
-                                      onChange={(nextDate) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((ev) =>
-                                            ev.key === row.key
-                                              ? { ...ev, eventDate: nextDate }
-                                              : ev
-                                          ),
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <label
-                                      className={labelFieldClass}
-                                      style={labelFieldStyle}
-                                    >
-                                      Place
-                                    </label>
-                                    <PlaceInput
-                                      className={inputFieldClass}
-                                      style={inputFieldStyle}
-                                      value={row.event_place_display}
-                                      onChange={(v) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((ev) =>
-                                            ev.key === row.key
-                                              ? {
-                                                  ...ev,
-                                                  event_place_display: v,
-                                                  event_place_id: null,
-                                                }
-                                              : ev
-                                          ),
-                                        })
-                                      }
-                                      onPlaceSelect={(place) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          events: item.events.map((ev) =>
-                                            ev.key === row.key
-                                              ? {
-                                                  ...ev,
-                                                  event_place_display:
-                                                    place.display,
-                                                  event_place_id: place.id,
-                                                }
-                                              : ev
-                                          ),
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  {row.eventType === "land" ? (
-                                    <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem" }}>
+                                  {eventUsesSharedDetails(row) ? (
+                                    <>
+                                      <p
+                                        className="text-xs leading-relaxed"
+                                        style={{
+                                          color: "var(--dg-brown-muted)",
+                                        }}
+                                      >
+                                        {manualEntryReview ? (
+                                          <>
+                                            Date, place, and notes use{" "}
+                                            <span
+                                              className="font-medium"
+                                              style={{
+                                                color: "var(--dg-brown-dark)",
+                                              }}
+                                            >
+                                              Shared event details
+                                            </span>{" "}
+                                            at the top. Change them once for
+                                            everyone linked this way.
+                                          </>
+                                        ) : (
+                                          <>
+                                            Date and place use{" "}
+                                            <span
+                                              className="font-medium"
+                                              style={{
+                                                color: "var(--dg-brown-dark)",
+                                              }}
+                                            >
+                                              Shared event details
+                                            </span>{" "}
+                                            at the top. Row-specific description
+                                            from extraction is unchanged and
+                                            still used when you continue.
+                                          </>
+                                        )}
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const r = resolveEventDatePlaceNotes(
+                                            row,
+                                            sharedEventDetails,
+                                            manualEntryReview
+                                          );
+                                          updateCard(item.key, {
+                                            ...item,
+                                            events: item.events.map((ev) =>
+                                              ev.key === row.key
+                                                ? {
+                                                    ...ev,
+                                                    useSharedDetails: false,
+                                                    eventDate: r.eventDate,
+                                                    event_place_display:
+                                                      r.event_place_display,
+                                                    event_place_id:
+                                                      r.event_place_id,
+                                                    event_place_fields:
+                                                      r.event_place_fields,
+                                                    eventNotes: r.eventNotes,
+                                                  }
+                                                : ev
+                                            ),
+                                          });
+                                        }}
+                                        className="text-left text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                                      >
+                                        Different date or place for this person
+                                        only
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
                                       <div>
-                                        <label className={labelFieldClass} style={labelFieldStyle}>Acres</label>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          min="0"
-                                          value={row.landData?.acres ?? ""}
-                                          onChange={(ev) => {
-                                            const parsed = ev.target.value === "" ? null : parseFloat(ev.target.value);
-                                            updateCard(item.key, {
-                                              ...item,
-                                              events: item.events.map((e) =>
-                                                e.key === row.key
-                                                  ? { ...e, landData: { acres: isNaN(parsed as number) ? null : parsed, transaction_type: e.landData?.transaction_type ?? null } }
-                                                  : e
-                                              ),
-                                            });
-                                          }}
+                                        <label
+                                          className={labelFieldClass}
+                                          style={labelFieldStyle}
+                                        >
+                                          Date
+                                        </label>
+                                        <SmartDateInput
                                           className={inputFieldClass}
                                           style={inputFieldStyle}
+                                          value={row.eventDate}
+                                          onChange={(nextDate) =>
+                                            updateCard(item.key, {
+                                              ...item,
+                                              events: item.events.map((ev) =>
+                                                ev.key === row.key
+                                                  ? {
+                                                      ...ev,
+                                                      eventDate: nextDate,
+                                                    }
+                                                  : ev
+                                              ),
+                                            })
+                                          }
                                         />
                                       </div>
                                       <div>
-                                        <label className={labelFieldClass} style={labelFieldStyle}>Transaction Type</label>
-                                        <select
-                                          value={row.landData?.transaction_type ?? ""}
-                                          onChange={(ev) => {
-                                            const val = ev.target.value || null;
-                                            updateCard(item.key, {
-                                              ...item,
-                                              events: item.events.map((e) =>
-                                                e.key === row.key
-                                                  ? { ...e, landData: { acres: e.landData?.acres ?? null, transaction_type: val } }
-                                                  : e
-                                              ),
-                                            });
-                                          }}
+                                        <label
+                                          className={labelFieldClass}
+                                          style={labelFieldStyle}
+                                        >
+                                          Place
+                                        </label>
+                                        <PlaceInput
                                           className={inputFieldClass}
                                           style={inputFieldStyle}
-                                        >
-                                          <option value="">— Select —</option>
-                                          <option value="Acquired">Acquired</option>
-                                          <option value="Sold">Sold</option>
-                                          <option value="Gifted">Gifted</option>
-                                          <option value="Taxed">Taxed</option>
-                                          <option value="Surveyed">Surveyed</option>
-                                        </select>
+                                          value={row.event_place_display}
+                                          onChange={(v) =>
+                                            updateCard(item.key, {
+                                              ...item,
+                                              events: item.events.map((ev) =>
+                                                ev.key === row.key
+                                                  ? {
+                                                      ...ev,
+                                                      event_place_display: v,
+                                                      event_place_id: null,
+                                                    }
+                                                  : ev
+                                              ),
+                                            })
+                                          }
+                                          onPlaceSelect={(place) =>
+                                            updateCard(item.key, {
+                                              ...item,
+                                              events: item.events.map((ev) =>
+                                                ev.key === row.key
+                                                  ? {
+                                                      ...ev,
+                                                      event_place_display:
+                                                        place.display,
+                                                      event_place_id: place.id,
+                                                    }
+                                                  : ev
+                                              ),
+                                            })
+                                          }
+                                        />
                                       </div>
-                                    </div>
-                                  ) : null}
+                                      {manualEntryReview ? (
+                                        <div>
+                                          <label
+                                            className={labelFieldClass}
+                                            style={labelFieldStyle}
+                                          >
+                                            Description / notes
+                                          </label>
+                                          <textarea
+                                            className={inputFieldClass}
+                                            style={inputFieldStyle}
+                                            rows={2}
+                                            value={row.eventNotes}
+                                            onChange={(e) =>
+                                              updateCard(item.key, {
+                                                ...item,
+                                                events: item.events.map(
+                                                  (ev) =>
+                                                    ev.key === row.key
+                                                      ? {
+                                                          ...ev,
+                                                          eventNotes:
+                                                            e.target.value,
+                                                        }
+                                                      : ev
+                                                ),
+                                              })
+                                            }
+                                          />
+                                        </div>
+                                      ) : null}
+                                      {row.eventType === "land" ? (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            gap: "1rem",
+                                            marginTop: "0.5rem",
+                                          }}
+                                        >
+                                          <div>
+                                            <label
+                                              className={labelFieldClass}
+                                              style={labelFieldStyle}
+                                            >
+                                              Acres
+                                            </label>
+                                            <input
+                                              type="number"
+                                              step="0.01"
+                                              min="0"
+                                              value={row.landData?.acres ?? ""}
+                                              onChange={(ev) => {
+                                                const parsed =
+                                                  ev.target.value === ""
+                                                    ? null
+                                                    : parseFloat(
+                                                        ev.target.value
+                                                      );
+                                                updateCard(item.key, {
+                                                  ...item,
+                                                  events: item.events.map(
+                                                    (e) =>
+                                                      e.key === row.key
+                                                        ? {
+                                                            ...e,
+                                                            landData: {
+                                                              acres:
+                                                                isNaN(
+                                                                  parsed as number
+                                                                )
+                                                                  ? null
+                                                                  : parsed,
+                                                              transaction_type:
+                                                                e.landData
+                                                                  ?.transaction_type ??
+                                                                null,
+                                                            },
+                                                          }
+                                                        : e
+                                                  ),
+                                                });
+                                              }}
+                                              className={inputFieldClass}
+                                              style={inputFieldStyle}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label
+                                              className={labelFieldClass}
+                                              style={labelFieldStyle}
+                                            >
+                                              Transaction Type
+                                            </label>
+                                            <select
+                                              value={
+                                                row.landData
+                                                  ?.transaction_type ?? ""
+                                              }
+                                              onChange={(ev) => {
+                                                const val =
+                                                  ev.target.value || null;
+                                                updateCard(item.key, {
+                                                  ...item,
+                                                  events: item.events.map(
+                                                    (e) =>
+                                                      e.key === row.key
+                                                        ? {
+                                                            ...e,
+                                                            landData: {
+                                                              acres:
+                                                                e.landData
+                                                                  ?.acres ??
+                                                                null,
+                                                              transaction_type:
+                                                                val,
+                                                            },
+                                                          }
+                                                        : e
+                                                  ),
+                                                });
+                                              }}
+                                              className={inputFieldClass}
+                                              style={inputFieldStyle}
+                                            >
+                                              <option value="">— Select —</option>
+                                              <option value="Acquired">
+                                                Acquired
+                                              </option>
+                                              <option value="Sold">Sold</option>
+                                              <option value="Gifted">
+                                                Gifted
+                                              </option>
+                                              <option value="Taxed">Taxed</option>
+                                              <option value="Surveyed">
+                                                Surveyed
+                                              </option>
+                                            </select>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  )}
                                 </div>
                               </li>
                             ))}
@@ -1969,6 +2373,26 @@ export default function ReviewRecordClient({
                 })}
               </div>
             )}
+
+            {cards.length > 0 ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setCards((prev) => [
+                    ...prev,
+                    blankPersonCard(recordTypeLabel),
+                  ])
+                }
+                className="w-full rounded-md border-2 px-4 py-2.5 text-sm font-semibold transition hover:opacity-95"
+                style={{
+                  borderColor: "var(--dg-brown-outline)",
+                  color: "var(--dg-brown-dark)",
+                  backgroundColor: "var(--dg-parchment)",
+                }}
+              >
+                Add another person
+              </button>
+            ) : null}
 
             <div
               className="sticky bottom-4 rounded-xl border p-4 shadow-lg"
