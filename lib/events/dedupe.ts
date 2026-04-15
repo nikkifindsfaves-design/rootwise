@@ -4,6 +4,11 @@
     return (t || "other").trim().toLowerCase() || "other";
   }
 
+function allowsMultipleEventsPerPerson(eventTypeRaw: string): boolean {
+  const eventType = normalizeEventTypeKey(eventTypeRaw);
+  return eventType === "child born";
+}
+
   export async function findExistingEventIdForPersonType(
     supabase: SupabaseClient,
     userId: string,
@@ -68,12 +73,15 @@
       land_data?: { acres: number | null; transaction_type: string | null } | null;
     }
   ): Promise<{ error: string | null }> {
-    const existingId = await findExistingEventIdForPersonType(
-      supabase,
-      userId,
-      personId,
-      fields.event_type
-    );
+  const dedupeByType = !allowsMultipleEventsPerPerson(fields.event_type);
+  const existingId = dedupeByType
+    ? await findExistingEventIdForPersonType(
+        supabase,
+        userId,
+        personId,
+        fields.event_type
+      )
+    : null;
 
     if (existingId) {
       return insertEventSourceIfMissing(

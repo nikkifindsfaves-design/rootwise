@@ -4,6 +4,7 @@ import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { ALL_EVENT_TYPES, EVENT_TYPES, type EventType } from "@/lib/events/event-types";
 import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
+import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/lib/utils/review-visibility";
 import { useRouter } from "next/navigation";
 import {
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -381,6 +383,13 @@ function relationshipRowForPerson(
 function normalizeEventType(raw: string): EvOption {
   const n = raw.trim().toLowerCase();
   if ((ALL_EVENT_TYPES as readonly string[]).includes(n)) return n as EvOption;
+  // Child birth events can arrive with freeform labels; normalize them before generic "birth".
+  if (
+    (n.includes("child") || n.includes("son") || n.includes("daughter")) &&
+    (n.includes("born") || n.includes("birth"))
+  ) {
+    return "child born";
+  }
   if (n.includes("birth")) return "birth";
   if (n.includes("baptism") || n.includes("baptized") || n.includes("christening")) return "baptism";
   if (n.includes("death")) return "death";
@@ -513,10 +522,12 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
       }
     }
 
-    const seenEventTypes = new Set<EvOption>();
+    const singleInstanceEventTypes = new Set<EvOption>(["birth"]);
+    const seenSingleInstanceEventTypes = new Set<EvOption>();
     events = events.filter((row) => {
-      if (seenEventTypes.has(row.eventType)) return false;
-      seenEventTypes.add(row.eventType);
+      if (!singleInstanceEventTypes.has(row.eventType)) return true;
+      if (seenSingleInstanceEventTypes.has(row.eventType)) return false;
+      seenSingleInstanceEventTypes.add(row.eventType);
       return true;
     });
 
@@ -705,6 +716,7 @@ export default function ReviewRecordClient({
   documentSubtype?: string | null;
 }) {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const parsed = useMemo(() => {
     const r = aiResponse as AiResponseShape;
     return {
@@ -727,6 +739,48 @@ export default function ReviewRecordClient({
     return buildInitialCards(p);
   });
   const [isRegeneratingStories, setIsRegeneratingStories] = useState(false);
+  const [treePersonNameSuggestions, setTreePersonNameSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTreePersonNames() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+
+      let personsQuery = supabase
+        .from("persons")
+        .select("first_name, middle_name, last_name")
+        .eq("user_id", user.id);
+
+      if (recordTreeId) {
+        personsQuery = personsQuery.eq("tree_id", recordTreeId);
+      }
+
+      const { data, error } = await personsQuery;
+      if (cancelled || error) return;
+
+      const uniqueByNormalized = new Map<string, string>();
+      for (const row of data ?? []) {
+        const fullName = [row.first_name, row.middle_name, row.last_name]
+          .map((v) => String(v ?? "").trim())
+          .filter(Boolean)
+          .join(" ");
+        const normalized = normalizeName(fullName);
+        if (!normalized || uniqueByNormalized.has(normalized)) continue;
+        uniqueByNormalized.set(normalized, fullName);
+      }
+
+      setTreePersonNameSuggestions(Array.from(uniqueByNormalized.values()));
+    }
+
+    void loadTreePersonNames();
+    return () => {
+      cancelled = true;
+    };
+  }, [recordTreeId, supabase]);
 
   const ft = (fileType ?? "").toLowerCase();
   const isImage = ft.startsWith("image/");
@@ -1639,27 +1693,35 @@ export default function ReviewRecordClient({
                                       {relatedPersonDisplayLabel(rel, cards)}
                                     </p>
                                   ) : (
-                                    <input
-                                      className={inputFieldClass}
-                                      style={inputFieldStyle}
-                                      placeholder="Full name"
-                                      value={rel.relatedNameExternal}
-                                      onChange={(e) =>
-                                        updateCard(item.key, {
-                                          ...item,
-                                          relationships:
-                                            item.relationships.map((r) =>
-                                              r.key === rel.key
-                                                ? {
-                                                    ...r,
-                                                    relatedNameExternal:
-                                                      e.target.value,
-                                                  }
-                                                : r
-                                            ),
-                                        })
-                                      }
-                                    />
+                                    <>
+                                      <input
+                                        className={inputFieldClass}
+                                        style={inputFieldStyle}
+                                        placeholder="Full name"
+                                        list="tree-person-name-suggestions"
+                                        value={rel.relatedNameExternal}
+                                        onChange={(e) =>
+                                          updateCard(item.key, {
+                                            ...item,
+                                            relationships:
+                                              item.relationships.map((r) =>
+                                                r.key === rel.key
+                                                  ? {
+                                                      ...r,
+                                                      relatedNameExternal:
+                                                        e.target.value,
+                                                    }
+                                                  : r
+                                              ),
+                                          })
+                                        }
+                                      />
+                                      <datalist id="tree-person-name-suggestions">
+                                        {treePersonNameSuggestions.map((name) => (
+                                          <option key={name} value={name} />
+                                        ))}
+                                      </datalist>
+                                    </>
                                   )}
                                 </div>
                                 <select

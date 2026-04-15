@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState } from "react";
 
 const sans = "var(--font-dg-body), Lato, sans-serif";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
+const MAX_IMAGE_DIMENSION_PX = 8000;
 
 const modalColors = {
   parchment: "var(--dg-parchment)",
@@ -35,6 +36,70 @@ function extractPeopleFullNames(data: unknown): string[] {
   return people.map(fullNameFromPersonRow).filter((s) => s.length > 0);
 }
 
+async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    const loaded = new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("Unable to read image dimensions."));
+    });
+    img.src = objectUrl;
+    await loaded;
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      throw new Error("Invalid image dimensions.");
+    }
+    return { width, height };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function downscaleImageIfNeeded(file: File): Promise<File> {
+  if (!file.type.toLowerCase().startsWith("image/")) return file;
+
+  const { width, height } = await getImageDimensions(file);
+  const longestSide = Math.max(width, height);
+  if (longestSide <= MAX_IMAGE_DIMENSION_PX) return file;
+
+  const scale = MAX_IMAGE_DIMENSION_PX / longestSide;
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    const loaded = new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("Unable to load image for resizing."));
+    });
+    img.src = objectUrl;
+    await loaded;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Unable to resize image in browser.");
+    context.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+    const blob = await new Promise<Blob | null>((resolve) => {
+      const quality = outputType === "image/jpeg" ? 0.92 : undefined;
+      canvas.toBlob((b) => resolve(b), outputType, quality);
+    });
+    if (!blob) throw new Error("Failed to generate resized image.");
+
+    const ext = outputType === "image/png" ? ".png" : ".jpg";
+    const nextName = file.name.replace(/\.[^.]+$/, "") + `-scaled${ext}`;
+    return new File([blob], nextName, { type: outputType, lastModified: Date.now() });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 type DocumentUploadSectionProps = {
   /** When set, the record is tied to this tree (process-document + save-review). */
   treeId?: string;
@@ -57,6 +122,7 @@ export default function DocumentUploadSection({
   const [censusSurname, setCensusSurname] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAdjustingImage, setIsAdjustingImage] = useState(false);
 
   const [multiPersonModalOpen, setMultiPersonModalOpen] = useState(false);
   const [multiPersonNameQuery, setMultiPersonNameQuery] = useState("");
@@ -117,9 +183,13 @@ export default function DocumentUploadSection({
 
     setIsLoading(true);
     setError(null);
+    setIsAdjustingImage(false);
 
     try {
-      const formData = buildFormData(file);
+      setIsAdjustingImage(true);
+      const uploadFile = await downscaleImageIfNeeded(file);
+      setIsAdjustingImage(false);
+      const formData = buildFormData(uploadFile);
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -170,6 +240,7 @@ export default function DocumentUploadSection({
       console.log("[document-upload] process-document error", err);
       setError("Something went wrong while uploading your document.");
     } finally {
+      setIsAdjustingImage(false);
       setIsLoading(false);
     }
   }
@@ -187,9 +258,13 @@ export default function DocumentUploadSection({
 
     setMultiPersonProcessing(true);
     setError(null);
+    setIsAdjustingImage(false);
 
     try {
-      const formData = buildFormData(file);
+      setIsAdjustingImage(true);
+      const uploadFile = await downscaleImageIfNeeded(file);
+      setIsAdjustingImage(false);
+      const formData = buildFormData(uploadFile);
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -224,6 +299,7 @@ export default function DocumentUploadSection({
       console.log("[document-upload] process-document error", err);
       setError("Something went wrong while processing your document.");
     } finally {
+      setIsAdjustingImage(false);
       setMultiPersonProcessing(false);
     }
   }
@@ -347,6 +423,14 @@ export default function DocumentUploadSection({
           style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
         >
           Claude is reading your document…
+        </p>
+      ) : null}
+      {isAdjustingImage ? (
+        <p
+          className="text-sm italic"
+          style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
+        >
+          Preparing large image for upload…
         </p>
       ) : null}
 

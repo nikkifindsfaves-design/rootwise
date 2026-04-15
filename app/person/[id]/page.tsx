@@ -13,6 +13,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -993,6 +994,228 @@ function FamilyGroup({
   );
 }
 
+function CollapsibleFamilyGroup({
+  title,
+  members,
+  relationshipMetaByPersonId,
+  onEditRelationship,
+  defaultExpanded = false,
+}: {
+  title: string;
+  members: PersonRow[];
+  relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
+  onEditRelationship: (meta: RelationshipMeta) => void;
+  defaultExpanded?: boolean;
+}) {
+  const baseId = useId();
+  const headerId = `${baseId}-hdr`;
+  const listId = `${baseId}-list`;
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  if (members.length === 0) return null;
+
+  return (
+    <div className="mb-5">
+      <button
+        type="button"
+        id={headerId}
+        aria-expanded={expanded}
+        aria-controls={listId}
+        onClick={() => setExpanded((v) => !v)}
+        className="mb-2 flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-0 py-1 text-left transition hover:border-[color-mix(in_srgb,var(--dg-brown-border)_55%,transparent)]"
+        style={{ fontFamily: sans }}
+      >
+        <span
+          className="text-xs font-bold uppercase tracking-widest"
+          style={{ color: colors.brownMuted }}
+        >
+          {title}
+        </span>
+        <span
+          className="flex shrink-0 items-center gap-2 text-xs font-semibold tabular-nums"
+          style={{ color: colors.brownMuted }}
+        >
+          <span>({members.length})</span>
+          <span aria-hidden className="inline-block w-3 text-center">
+            {expanded ? "−" : "+"}
+          </span>
+        </span>
+      </button>
+      {expanded ? (
+        <ul
+          id={listId}
+          className="space-y-2"
+          role="region"
+          aria-labelledby={headerId}
+        >
+          {members.map((p) => (
+            <li key={p.id}>
+              {(() => {
+                const relMeta = relationshipMetaByPersonId[p.id];
+                return (
+                  <FamilyMemberCard
+                    p={p}
+                    crop_x={p.crop_x}
+                    crop_y={p.crop_y}
+                    crop_zoom={p.crop_zoom}
+                    natural_width={p.natural_width}
+                    natural_height={p.natural_height}
+                    onEditRelationship={
+                      relMeta ? () => onEditRelationship(relMeta) : undefined
+                    }
+                  />
+                );
+              })()}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function SpouseWithChildrenCollapsible({
+  spouse,
+  children: kids,
+  relationshipMetaByPersonId,
+  onEditRelationship,
+  onAddChildWithSpouse,
+  defaultExpanded = false,
+}: {
+  spouse: PersonRow;
+  children: PersonRow[];
+  relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
+  onEditRelationship: (meta: RelationshipMeta) => void;
+  onAddChildWithSpouse: (spouse: PersonRow) => void;
+  defaultExpanded?: boolean;
+}) {
+  const baseId = useId();
+  const headerId = `${baseId}-hdr`;
+  const panelId = `${baseId}-panel`;
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  const label = [spouse.first_name, spouse.middle_name ?? "", spouse.last_name]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+  const headerText = label || "Spouse";
+  const childLabel =
+    kids.length === 0
+      ? "0 children"
+      : kids.length === 1
+        ? "1 child"
+        : `${kids.length} children`;
+
+  const spouseRelMeta = relationshipMetaByPersonId[spouse.id];
+
+  return (
+    <div className="mb-5">
+      <button
+        type="button"
+        id={headerId}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => setExpanded((v) => !v)}
+        className="mb-2 flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-0 py-1 text-left transition hover:border-[color-mix(in_srgb,var(--dg-brown-border)_55%,transparent)]"
+        style={{ fontFamily: sans }}
+      >
+        <span
+          className="min-w-0 flex-1 text-xs font-bold uppercase tracking-widest"
+          style={{ color: colors.brownMuted }}
+        >
+          <span className="block truncate">{headerText}</span>
+          <span
+            className="mt-0.5 block text-[0.65rem] font-semibold normal-case tracking-normal"
+            style={{ color: colors.brownMid }}
+          >
+            Spouse · {childLabel}
+          </span>
+        </span>
+        <span
+          className="flex shrink-0 items-center gap-2 text-xs font-semibold tabular-nums"
+          style={{ color: colors.brownMuted }}
+        >
+          <span aria-hidden className="inline-block w-3 text-center">
+            {expanded ? "−" : "+"}
+          </span>
+        </span>
+      </button>
+      {expanded ? (
+        <div
+          id={panelId}
+          className="space-y-3 border-l-2 pl-3"
+          style={{ borderColor: `${colors.brownBorder}99` }}
+          role="region"
+          aria-labelledby={headerId}
+        >
+          <FamilyMemberCard
+            p={spouse}
+            crop_x={spouse.crop_x}
+            crop_y={spouse.crop_y}
+            crop_zoom={spouse.crop_zoom}
+            natural_width={spouse.natural_width}
+            natural_height={spouse.natural_height}
+            onEditRelationship={
+              spouseRelMeta
+                ? () => onEditRelationship(spouseRelMeta)
+                : undefined
+            }
+          />
+          <div>
+            <button
+              type="button"
+              onClick={() => onAddChildWithSpouse(spouse)}
+              className="border-none bg-transparent p-0 text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline"
+              style={{ fontFamily: sans, color: colors.forest }}
+            >
+              + Add child with this spouse
+            </button>
+          </div>
+          {kids.length > 0 ? (
+            <div>
+              <h4
+                className="mb-2 text-xs font-bold uppercase tracking-widest"
+                style={{ fontFamily: sans, color: colors.brownMuted }}
+              >
+                Children
+              </h4>
+              <ul className="space-y-2">
+                {kids.map((p) => {
+                  const relMeta = relationshipMetaByPersonId[p.id];
+                  return (
+                    <li key={p.id}>
+                      <FamilyMemberCard
+                        p={p}
+                        crop_x={p.crop_x}
+                        crop_y={p.crop_y}
+                        crop_zoom={p.crop_zoom}
+                        natural_width={p.natural_width}
+                        natural_height={p.natural_height}
+                        onEditRelationship={
+                          relMeta
+                            ? () => onEditRelationship(relMeta)
+                            : undefined
+                        }
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : (
+            <p
+              className="text-sm italic"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              No children linked with this spouse in your tree.
+            </p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TimelineEventStoryBlock({
   storyText,
   typ,
@@ -1139,7 +1362,16 @@ export default function PersonProfilePage() {
     spouses: PersonRow[];
     siblings: PersonRow[];
     children: PersonRow[];
-  }>({ parents: [], spouses: [], siblings: [], children: [] });
+    spouseWithChildrenGroups: { spouse: PersonRow; children: PersonRow[] }[];
+    otherChildren: PersonRow[];
+  }>({
+    parents: [],
+    spouses: [],
+    siblings: [],
+    children: [],
+    spouseWithChildrenGroups: [],
+    otherChildren: [],
+  });
   const [relationshipMetaByPersonId, setRelationshipMetaByPersonId] = useState<
     Record<string, RelationshipMeta>
   >({});
@@ -1256,6 +1488,7 @@ export default function PersonProfilePage() {
   const [addFamilyCreateGender, setAddFamilyCreateGender] = useState("");
   const [addFamilyCreateRel, setAddFamilyCreateRel] =
     useState<FamilyRelationshipChoice>("parent");
+  const [addFamilyCoParentId, setAddFamilyCoParentId] = useState<string | null>(null);
   const [addFamilyCreateBusy, setAddFamilyCreateBusy] = useState(false);
   const [addFamilyCreateError, setAddFamilyCreateError] = useState<
     string | null
@@ -1402,6 +1635,7 @@ export default function PersonProfilePage() {
     setAddFamilyCreateDeath("");
     setAddFamilyCreateGender("");
     setAddFamilyCreateRel("parent");
+    setAddFamilyCoParentId(null);
     setAddFamilyCreateBusy(false);
     setAddFamilyCreateError(null);
     setCropModalPhoto(null);
@@ -1939,6 +2173,116 @@ export default function PersonProfilePage() {
     const pick = (ids: Set<string>) =>
       [...ids].map((id) => relativesMap.get(id)).filter(Boolean) as PersonRow[];
 
+    let spouseWithChildrenGroups: { spouse: PersonRow; children: PersonRow[] }[] =
+      [];
+    let otherChildrenRows: PersonRow[] = [];
+
+    const childIdArr = [...children];
+    if (spouses.size === 0) {
+      spouseWithChildrenGroups = [];
+      otherChildrenRows = pick(children);
+    } else if (childIdArr.length === 0) {
+      spouseWithChildrenGroups = pick(spouses).map((s) => ({
+        spouse: s,
+        children: [] as PersonRow[],
+      }));
+      otherChildrenRows = [];
+    } else {
+      let parentRelsQuery = supabase
+        .from("relationships")
+        .select("person_a_id, person_b_id")
+        .eq("user_id", user.id)
+        .eq("relationship_type", "parent")
+        .in("person_b_id", childIdArr);
+      if (effectiveTreeForRels !== "") {
+        parentRelsQuery = parentRelsQuery.eq("tree_id", effectiveTreeForRels);
+      }
+      const { data: parentRelRows, error: prelErr } = await parentRelsQuery;
+      if (prelErr) {
+        setError(prelErr.message);
+        setLoading(false);
+        return;
+      }
+
+      const coParentsByChild = new Map<string, string[]>();
+      for (const row of (parentRelRows ?? []) as {
+        person_a_id: string;
+        person_b_id: string;
+      }[]) {
+        const parentA = row.person_a_id;
+        const childB = row.person_b_id;
+        if (parentA === personId) continue;
+        const arr = coParentsByChild.get(childB) ?? [];
+        arr.push(parentA);
+        coParentsByChild.set(childB, arr);
+      }
+
+      const childrenBySpouseId = new Map<string, string[]>();
+      for (const sid of spouses) {
+        childrenBySpouseId.set(sid, []);
+      }
+      const ungroupedChildIds: string[] = [];
+
+      for (const cid of childIdArr) {
+        const others = coParentsByChild.get(cid) ?? [];
+        let matchedSpouse: string | null = null;
+        for (const oid of others) {
+          if (spouses.has(oid)) {
+            matchedSpouse = oid;
+            break;
+          }
+        }
+        if (matchedSpouse !== null) {
+          childrenBySpouseId.get(matchedSpouse)!.push(cid);
+        } else {
+          ungroupedChildIds.push(cid);
+        }
+      }
+
+      const spouseRows = pick(spouses);
+      const groups = spouseRows.map((s) => ({
+        spouse: s,
+        children: pick(new Set(childrenBySpouseId.get(s.id) ?? [])),
+      }));
+
+      const birthSortKey = (iso: string | null): string => {
+        const t = (iso ?? "").trim();
+        return t === "" ? "9999-99-99" : t;
+      };
+      const minChildBirth = (ch: PersonRow[]): string => {
+        let min = "9999-99-99";
+        for (const c of ch) {
+          const k = birthSortKey(c.birth_date);
+          if (k < min) min = k;
+        }
+        return min;
+      };
+      const spouseNameKey = (s: PersonRow): string =>
+        [s.first_name, s.middle_name ?? "", s.last_name]
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+      groups.sort((a, b) => {
+        const aHas = a.children.length > 0;
+        const bHas = b.children.length > 0;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        const cmp = minChildBirth(a.children).localeCompare(
+          minChildBirth(b.children),
+        );
+        if (cmp !== 0) return cmp;
+        const bc = birthSortKey(a.spouse.birth_date).localeCompare(
+          birthSortKey(b.spouse.birth_date),
+        );
+        if (bc !== 0) return bc;
+        return spouseNameKey(a.spouse).localeCompare(spouseNameKey(b.spouse));
+      });
+
+      spouseWithChildrenGroups = groups;
+      otherChildrenRows = pick(new Set(ungroupedChildIds));
+    }
+
     let photosParsed: Record<string, unknown>[] = [];
     const { data: tagLinkRows, error: tagLinkErr } = await supabase
       .from("photo_tags")
@@ -2136,6 +2480,8 @@ export default function PersonProfilePage() {
       spouses: pick(spouses),
       siblings: pick(siblings),
       children: pick(children),
+      spouseWithChildrenGroups,
+      otherChildren: otherChildrenRows,
     });
     setRelationshipMetaByPersonId(relMetaByPersonId);
     setResearchNoteId(pnId);
@@ -2242,6 +2588,22 @@ export default function PersonProfilePage() {
       .filter(Boolean)
       .join(" ");
   }, [editRelModal, family]);
+
+  const addFamilyCoParentName = useMemo(() => {
+    if (!addFamilyCoParentId) return "";
+    const all = [
+      ...family.parents,
+      ...family.spouses,
+      ...family.siblings,
+      ...family.children,
+    ];
+    const personRow = all.find((p) => p.id === addFamilyCoParentId);
+    if (!personRow) return "";
+    return [personRow.first_name, personRow.middle_name ?? "", personRow.last_name]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(" ");
+  }, [addFamilyCoParentId, family]);
 
   useEffect(() => {
     if (!mergeModalOpen || !personId) return;
@@ -3615,13 +3977,26 @@ export default function PersonProfilePage() {
     setAddFamilyCreateDeath("");
     setAddFamilyCreateGender("");
     setAddFamilyCreateRel("parent");
+    setAddFamilyCoParentId(null);
     setAddFamilyCreateBusy(false);
     setAddFamilyCreateError(null);
     setAddFamilyTreePeopleError(null);
   }
 
-  function openAddFamilyModal() {
+  function openAddFamilyModal(opts?: {
+    tab?: "find" | "create";
+    relationship?: FamilyRelationshipChoice;
+    coParentId?: string | null;
+  }) {
     resetAddFamilyModalFormState();
+    if (opts?.tab) setAddFamilyTab(opts.tab);
+    if (opts?.relationship) {
+      setAddFamilyFindRel(opts.relationship);
+      setAddFamilyCreateRel(opts.relationship);
+    }
+    if (opts?.coParentId) {
+      setAddFamilyCoParentId(opts.coParentId);
+    }
     setAddFamilyModalOpen(true);
   }
 
@@ -3629,6 +4004,47 @@ export default function PersonProfilePage() {
     if (addFamilyFindBusy || addFamilyCreateBusy) return;
     setAddFamilyModalOpen(false);
     resetAddFamilyModalFormState();
+  }
+
+  async function linkProfileAndOtherAsParentChild(
+    supabase: ReturnType<typeof createClient>,
+    userId: string,
+    profileId: string,
+    otherId: string,
+    treeIdForRels: string,
+    choice: FamilyRelationshipChoice
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const rows = bidirectionalRelationshipRows(choice, profileId, otherId);
+    const base = {
+      user_id: userId,
+      tree_id: treeIdForRels,
+    };
+    const { error: e1 } = await supabase.from("relationships").insert({
+      ...base,
+      person_a_id: rows[0]!.person_a_id,
+      person_b_id: rows[0]!.person_b_id,
+      relationship_type: rows[0]!.relationship_type,
+    });
+    if (e1) return { ok: false, error: e1.message };
+
+    const { error: e2 } = await supabase.from("relationships").insert({
+      ...base,
+      person_a_id: rows[1]!.person_a_id,
+      person_b_id: rows[1]!.person_b_id,
+      relationship_type: rows[1]!.relationship_type,
+    });
+    if (e2) {
+      await supabase
+        .from("relationships")
+        .delete()
+        .eq("user_id", userId)
+        .eq("tree_id", treeIdForRels)
+        .eq("person_a_id", rows[0]!.person_a_id)
+        .eq("person_b_id", rows[0]!.person_b_id)
+        .eq("relationship_type", rows[0]!.relationship_type);
+      return { ok: false, error: e2.message };
+    }
+    return { ok: true };
   }
 
   async function submitEditRelationship() {
@@ -3772,42 +4188,32 @@ export default function PersonProfilePage() {
         setAddFamilyFindError("Not signed in.");
         return;
       }
-      const rows = bidirectionalRelationshipRows(
-        addFamilyFindRel,
+      const primaryLink = await linkProfileAndOtherAsParentChild(
+        supabase,
+        user.id,
         personId,
-        otherId
+        otherId,
+        effectiveTreeIdForFamily,
+        addFamilyFindRel
       );
-      const base = {
-        user_id: user.id,
-        tree_id: effectiveTreeIdForFamily,
-      };
-      const { error: e1 } = await supabase.from("relationships").insert({
-        ...base,
-        person_a_id: rows[0]!.person_a_id,
-        person_b_id: rows[0]!.person_b_id,
-        relationship_type: rows[0]!.relationship_type,
-      });
-      if (e1) {
-        setAddFamilyFindError(e1.message);
+      if (!primaryLink.ok) {
+        setAddFamilyFindError(primaryLink.error);
         return;
       }
-      const { error: e2 } = await supabase.from("relationships").insert({
-        ...base,
-        person_a_id: rows[1]!.person_a_id,
-        person_b_id: rows[1]!.person_b_id,
-        relationship_type: rows[1]!.relationship_type,
-      });
-      if (e2) {
-        await supabase
-          .from("relationships")
-          .delete()
-          .eq("user_id", user.id)
-          .eq("tree_id", effectiveTreeIdForFamily)
-          .eq("person_a_id", rows[0]!.person_a_id)
-          .eq("person_b_id", rows[0]!.person_b_id)
-          .eq("relationship_type", rows[0]!.relationship_type);
-        setAddFamilyFindError(e2.message);
-        return;
+
+      if (addFamilyFindRel === "child" && addFamilyCoParentId) {
+        const secondLink = await linkProfileAndOtherAsParentChild(
+          supabase,
+          user.id,
+          addFamilyCoParentId,
+          otherId,
+          effectiveTreeIdForFamily,
+          "child"
+        );
+        if (!secondLink.ok) {
+          setAddFamilyFindError(secondLink.error);
+          return;
+        }
       }
       setAddFamilyModalOpen(false);
       resetAddFamilyModalFormState();
@@ -3874,44 +4280,34 @@ export default function PersonProfilePage() {
       }
       const otherId = String((newPerson as { id: string }).id);
 
-      const rows = bidirectionalRelationshipRows(
-        addFamilyCreateRel,
+      const primaryLink = await linkProfileAndOtherAsParentChild(
+        supabase,
+        user.id,
         personId,
-        otherId
+        otherId,
+        effectiveTreeIdForFamily,
+        addFamilyCreateRel
       );
-      const base = {
-        user_id: user.id,
-        tree_id: effectiveTreeIdForFamily,
-      };
-      const { error: e1 } = await supabase.from("relationships").insert({
-        ...base,
-        person_a_id: rows[0]!.person_a_id,
-        person_b_id: rows[0]!.person_b_id,
-        relationship_type: rows[0]!.relationship_type,
-      });
-      if (e1) {
+      if (!primaryLink.ok) {
         await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
-        setAddFamilyCreateError(e1.message);
+        setAddFamilyCreateError(primaryLink.error);
         return;
       }
-      const { error: e2 } = await supabase.from("relationships").insert({
-        ...base,
-        person_a_id: rows[1]!.person_a_id,
-        person_b_id: rows[1]!.person_b_id,
-        relationship_type: rows[1]!.relationship_type,
-      });
-      if (e2) {
-        await supabase
-          .from("relationships")
-          .delete()
-          .eq("user_id", user.id)
-          .eq("tree_id", effectiveTreeIdForFamily)
-          .eq("person_a_id", rows[0]!.person_a_id)
-          .eq("person_b_id", rows[0]!.person_b_id)
-          .eq("relationship_type", rows[0]!.relationship_type);
-        await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
-        setAddFamilyCreateError(e2.message);
-        return;
+
+      if (addFamilyCreateRel === "child" && addFamilyCoParentId) {
+        const secondLink = await linkProfileAndOtherAsParentChild(
+          supabase,
+          user.id,
+          addFamilyCoParentId,
+          otherId,
+          effectiveTreeIdForFamily,
+          "child"
+        );
+        if (!secondLink.ok) {
+          await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
+          setAddFamilyCreateError(secondLink.error);
+          return;
+        }
       }
       setAddFamilyModalOpen(false);
       resetAddFamilyModalFormState();
@@ -5876,36 +6272,50 @@ export default function PersonProfilePage() {
                   setEditRelError(null);
                 }}
               />
-              <FamilyGroup
-                title="Spouses"
-                members={family.spouses}
-                relationshipMetaByPersonId={relationshipMetaByPersonId}
-                onEditRelationship={(meta) => {
-                  setEditRelModal(meta);
-                  setEditRelType(meta.relationshipType);
-                  setEditRelError(null);
-                }}
-              />
-              <FamilyGroup
+              <CollapsibleFamilyGroup
                 title="Siblings"
                 members={family.siblings}
                 relationshipMetaByPersonId={relationshipMetaByPersonId}
+                defaultExpanded={false}
                 onEditRelationship={(meta) => {
                   setEditRelModal(meta);
                   setEditRelType(meta.relationshipType);
                   setEditRelError(null);
                 }}
               />
-              <FamilyGroup
-                title="Children"
-                members={family.children}
-                relationshipMetaByPersonId={relationshipMetaByPersonId}
-                onEditRelationship={(meta) => {
-                  setEditRelModal(meta);
-                  setEditRelType(meta.relationshipType);
-                  setEditRelError(null);
-                }}
-              />
+              {family.spouseWithChildrenGroups.map((group, idx) => (
+                <SpouseWithChildrenCollapsible
+                  key={group.spouse.id}
+                  spouse={group.spouse}
+                  children={group.children}
+                  relationshipMetaByPersonId={relationshipMetaByPersonId}
+                  onAddChildWithSpouse={(spouse) =>
+                    openAddFamilyModal({
+                      relationship: "child",
+                      coParentId: spouse.id,
+                    })
+                  }
+                  defaultExpanded={idx === 0}
+                  onEditRelationship={(meta) => {
+                    setEditRelModal(meta);
+                    setEditRelType(meta.relationshipType);
+                    setEditRelError(null);
+                  }}
+                />
+              ))}
+              {family.otherChildren.length > 0 ? (
+                <CollapsibleFamilyGroup
+                  title="Other children"
+                  members={family.otherChildren}
+                  relationshipMetaByPersonId={relationshipMetaByPersonId}
+                  defaultExpanded={family.spouseWithChildrenGroups.length === 0}
+                  onEditRelationship={(meta) => {
+                    setEditRelModal(meta);
+                    setEditRelType(meta.relationshipType);
+                    setEditRelError(null);
+                  }}
+                />
+              ) : null}
               {family.parents.length === 0 &&
               family.spouses.length === 0 &&
               family.siblings.length === 0 &&
@@ -6819,6 +7229,27 @@ export default function PersonProfilePage() {
             >
               Link someone in this tree or create a new person and connect them.
             </p>
+            {addFamilyCoParentId ? (
+              <p
+                className="mb-4 rounded-md border px-3 py-2 text-sm"
+                style={{
+                  fontFamily: sans,
+                  borderColor: colors.brownBorder,
+                  backgroundColor: colors.cream,
+                  color: colors.brownDark,
+                }}
+              >
+                Adding a child for{" "}
+                <strong>{personFullName || "this person"}</strong>
+                {addFamilyCoParentName ? (
+                  <>
+                    {" "}
+                    and <strong>{addFamilyCoParentName}</strong>
+                  </>
+                ) : null}
+                . The child will be linked to both parents.
+              </p>
+            ) : null}
 
             <div
               className="mb-5 flex gap-1 rounded-md border p-1"
@@ -6982,11 +7413,14 @@ export default function PersonProfilePage() {
                     style={{ fontFamily: sans, color: colors.brownMuted }}
                     htmlFor="add-family-find-rel"
                   >
-                    Their relationship to {personFullName || "this person"}
+                    {addFamilyCoParentId
+                      ? "Relationship (fixed for child under selected spouse)"
+                      : `Their relationship to ${personFullName || "this person"}`}
                   </label>
                   <select
                     id="add-family-find-rel"
                     value={addFamilyFindRel}
+                    disabled={addFamilyCoParentId != null}
                     onChange={(e) =>
                       setAddFamilyFindRel(
                         e.target.value as FamilyRelationshipChoice
@@ -7153,11 +7587,14 @@ export default function PersonProfilePage() {
                     style={{ fontFamily: sans, color: colors.brownMuted }}
                     htmlFor="add-family-create-rel"
                   >
-                    Their relationship to {personFullName || "this person"}
+                    {addFamilyCoParentId
+                      ? "Relationship (fixed for child under selected spouse)"
+                      : `Their relationship to ${personFullName || "this person"}`}
                   </label>
                   <select
                     id="add-family-create-rel"
                     value={addFamilyCreateRel}
+                    disabled={addFamilyCoParentId != null}
                     onChange={(e) =>
                       setAddFamilyCreateRel(
                         e.target.value as FamilyRelationshipChoice
