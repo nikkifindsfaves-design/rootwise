@@ -54,6 +54,10 @@ type PersonRow = {
   natural_width?: number | null;
   natural_height?: number | null;
   gender: string | null;
+  military_branch: string | null;
+  service_number: string | null;
+  cause_of_death: string | null;
+  marital_status: string | null;
   notes: string | null;
   tree_id?: string | null;
   birth_place?: {
@@ -273,8 +277,6 @@ type EventSourceRow = {
 
 const SIGNED_URL_EXPIRY_SEC = 3600;
 
-type TabId = "details" | "documents" | "photos" | "notes";
-
 type EventCluster = {
   displayType: string;
   events: EventRow[];
@@ -403,17 +405,6 @@ function normalizeDateToMMDDYYYY(raw: string | null): string {
   }
 }
 
-function formatResearchNoteTimestamp(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
-}
-
 function classifyRelationship(
   personId: string,
   rel: RelRow
@@ -465,18 +456,6 @@ function pickPrimaryPhotoUrl(
   return personPhotoUrl;
 }
 
-/** Same row order as `pickPrimaryPhotoUrl` uses for a gallery URL (not legacy person.photo_url). */
-function pickHeaderPhotoCropRow(
-  photoRows: Record<string, unknown>[]
-): Record<string, unknown> | null {
-  const primary = photoRows.find((p) => rowIsPrimaryForDisplay(p));
-  if (primary && photoUrlFromRow(primary)) return primary;
-  for (const row of photoRows) {
-    if (photoUrlFromRow(row)) return row;
-  }
-  return null;
-}
-
 function cropPercentFromUnknown(v: unknown, fallback: number): number {
   if (typeof v === "number" && Number.isFinite(v)) {
     return Math.min(100, Math.max(0, v));
@@ -517,19 +496,74 @@ function personPhotoCropForRow(row: Record<string, unknown>): {
   };
 }
 
-const CROP_PREVIEW_PX = 280;
+/** Polaroid-style crop aperture (width × height) for adjust/setup modals and saved crop math. */
+const POLAROID_CROP_VIEWPORT_W = 220;
+const POLAROID_CROP_VIEWPORT_H = 275;
 
-/** Cover-fit rendered size inside a square viewport; zoom scales both axes. */
+/** Image window inside header polaroids (same aspect as `POLAROID_CROP_VIEWPORT_*`). */
+const HEADER_POLAROID_IMG_W = 168;
+const HEADER_POLAROID_IMG_H = 210;
+
+type HeaderPolaroidLayer =
+  | { kind: "row"; row: Record<string, unknown> }
+  | { kind: "legacy"; url: string; person: PersonRow };
+
+function headerPolaroidLayerKey(layer: HeaderPolaroidLayer): string {
+  if (layer.kind === "row") {
+    return typeof layer.row.id === "string" ? layer.row.id : "row-unknown";
+  }
+  return "__legacy_header__";
+}
+
+function headerPolaroidLayerVisual(
+  layer: HeaderPolaroidLayer
+): {
+  url: string;
+  crop: { x: number; y: number; zoom: number };
+  naturalW: number | null;
+  naturalH: number | null;
+} {
+  if (layer.kind === "row") {
+    const row = layer.row;
+    return {
+      url: photoUrlFromRow(row) ?? "",
+      crop: personPhotoCropForRow(row),
+      naturalW:
+        typeof row.natural_width === "number" ? row.natural_width : null,
+      naturalH:
+        typeof row.natural_height === "number" ? row.natural_height : null,
+    };
+  }
+  return {
+    url: layer.url,
+    crop: {
+      x: cropPercentFromUnknown(layer.person.crop_x, 50),
+      y: cropPercentFromUnknown(layer.person.crop_y, 50),
+      zoom: cropZoomFromUnknown(layer.person.crop_zoom, 1),
+    },
+    naturalW:
+      typeof layer.person.natural_width === "number"
+        ? layer.person.natural_width
+        : null,
+    naturalH:
+      typeof layer.person.natural_height === "number"
+        ? layer.person.natural_height
+        : null,
+  };
+}
+
+/** Cover-fit rendered size inside a rectangular viewport; zoom scales both axes. */
 function cropCoverRenderedSize(
   naturalW: number,
   naturalH: number,
-  viewportPx: number,
+  viewportW: number,
+  viewportH: number,
   zoom: number
 ): { w: number; h: number } {
-  const scale = Math.max(viewportPx / naturalW, viewportPx / naturalH);
+  const scale = Math.max(viewportW / naturalW, viewportH / naturalH) * zoom;
   return {
-    w: naturalW * scale * zoom,
-    h: naturalH * scale * zoom,
+    w: naturalW * scale,
+    h: naturalH * scale,
   };
 }
 
@@ -537,10 +571,11 @@ function clampCropOffsetCover(
   offset: { x: number; y: number },
   renderedW: number,
   renderedH: number,
-  viewportPx: number
+  viewportW: number,
+  viewportH: number
 ): { x: number; y: number } {
-  const spanX = renderedW - viewportPx;
-  const spanY = renderedH - viewportPx;
+  const spanX = renderedW - viewportW;
+  const spanY = renderedH - viewportH;
   return {
     x: spanX > 0 ? Math.min(0, Math.max(-spanX, offset.x)) : 0,
     y: spanY > 0 ? Math.min(0, Math.max(-spanY, offset.y)) : 0,
@@ -552,10 +587,11 @@ function offsetToCropPercentCover(
   offset: { x: number; y: number },
   renderedW: number,
   renderedH: number,
-  viewportPx: number
+  viewportW: number,
+  viewportH: number
 ): { x: number; y: number } {
-  const spanX = renderedW - viewportPx;
-  const spanY = renderedH - viewportPx;
+  const spanX = renderedW - viewportW;
+  const spanY = renderedH - viewportH;
   return {
     x:
       spanX > 0
@@ -573,10 +609,11 @@ function cropPercentToOffsetCover(
   cropY: number,
   renderedW: number,
   renderedH: number,
-  viewportPx: number
+  viewportW: number,
+  viewportH: number
 ): { x: number; y: number } {
-  const spanX = renderedW - viewportPx;
-  const spanY = renderedH - viewportPx;
+  const spanX = renderedW - viewportW;
+  const spanY = renderedH - viewportH;
   return clampCropOffsetCover(
     {
       x: spanX > 0 ? -(cropX / 100) * spanX : 0,
@@ -584,7 +621,8 @@ function cropPercentToOffsetCover(
     },
     renderedW,
     renderedH,
-    viewportPx
+    viewportW,
+    viewportH
   );
 }
 
@@ -626,6 +664,38 @@ function IconPencil({ className }: { className?: string }) {
     >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+/** Classic vertical filing cabinet: frame + three drawers with bar pulls. */
+function IconFilingCabinet({
+  className,
+  size = 26,
+}: {
+  className?: string;
+  size?: number;
+}) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.65}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3.5" y="2" width="17" height="20" rx="1.75" />
+      <line x1="4.5" y1="8.35" x2="19.5" y2="8.35" strokeWidth={1.35} opacity={0.92} />
+      <line x1="4.5" y1="14.65" x2="19.5" y2="14.65" strokeWidth={1.35} opacity={0.92} />
+      <line x1="9" y1="5.15" x2="15" y2="5.15" strokeWidth={2.15} />
+      <line x1="9" y1="11.45" x2="15" y2="11.45" strokeWidth={2.15} />
+      <line x1="9" y1="17.75" x2="15" y2="17.75" strokeWidth={2.15} />
     </svg>
   );
 }
@@ -838,6 +908,7 @@ function FamilyMemberCard({
       natural_width,
       natural_height,
       FAMILY_MEMBER_AVATAR_VP,
+      FAMILY_MEMBER_AVATAR_VP,
       crop_zoom
     );
     const offset = cropPercentToOffsetCover(
@@ -845,6 +916,7 @@ function FamilyMemberCard({
       crop_y,
       rw,
       rh,
+      FAMILY_MEMBER_AVATAR_VP,
       FAMILY_MEMBER_AVATAR_VP
     );
     pixelAvatarStyle = {
@@ -1350,10 +1422,10 @@ export default function PersonProfilePage() {
   const [person, setPerson] = useState<PersonRow | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [photoRows, setPhotoRows] = useState<Record<string, unknown>[]>([]);
-  const [avatarNaturalSize, setAvatarNaturalSize] = useState<{
-    w: number;
-    h: number;
-  } | null>(null);
+  const [polaroidNaturalByKey, setPolaroidNaturalByKey] = useState<
+    Record<string, { w: number; h: number }>
+  >({});
+  const [portraitsGalleryOpen, setPortraitsGalleryOpen] = useState(false);
   const [recordsById, setRecordsById] = useState<Map<string, RecordRow>>(
     new Map()
   );
@@ -1379,7 +1451,9 @@ export default function PersonProfilePage() {
   const [editRelType, setEditRelType] = useState("");
   const [editRelBusy, setEditRelBusy] = useState(false);
   const [editRelError, setEditRelError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("details");
+  const [fileSectionExpanded, setFileSectionExpanded] = useState(true);
+  const [fileReceiptsCabinetOpen, setFileReceiptsCabinetOpen] = useState(false);
+  const [marginSidebarNotesOpen, setMarginSidebarNotesOpen] = useState(false);
   const [signedDocUrls, setSignedDocUrls] = useState<Map<string, string>>(
     new Map()
   );
@@ -1666,6 +1740,8 @@ export default function PersonProfilePage() {
     setTagModalSaving(false);
     setTagModalError(null);
     setHeaderMenuOpen(false);
+    setPortraitsGalleryOpen(false);
+    setPolaroidNaturalByKey({});
   }, [personId]);
 
   useEffect(() => {
@@ -1728,11 +1804,19 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       nw,
       nh,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       cropZoom
     );
     setCropOffset(
-      cropPercentToOffsetCover(thumb.x, thumb.y, rw, rh, CROP_PREVIEW_PX)
+      cropPercentToOffsetCover(
+        thumb.x,
+        thumb.y,
+        rw,
+        rh,
+        POLAROID_CROP_VIEWPORT_W,
+        POLAROID_CROP_VIEWPORT_H
+      )
     );
     cropOffsetHydratedRef.current = true;
   }, [cropModalPhoto, cropNaturalSize]);
@@ -1749,11 +1833,19 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       nw,
       nh,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       photoSetupZoom
     );
     setPhotoSetupOffset(
-      cropPercentToOffsetCover(thumb.x, thumb.y, rw, rh, CROP_PREVIEW_PX)
+      cropPercentToOffsetCover(
+        thumb.x,
+        thumb.y,
+        rw,
+        rh,
+        POLAROID_CROP_VIEWPORT_W,
+        POLAROID_CROP_VIEWPORT_H
+      )
     );
     photoSetupOffsetHydratedRef.current = true;
   }, [photoSetupModal, photoSetupNaturalSize]);
@@ -1763,10 +1855,19 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       cropNaturalSize.w,
       cropNaturalSize.h,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       cropZoom
     );
-    setCropOffset((o) => clampCropOffsetCover(o, rw, rh, CROP_PREVIEW_PX));
+    setCropOffset((o) =>
+      clampCropOffsetCover(
+        o,
+        rw,
+        rh,
+        POLAROID_CROP_VIEWPORT_W,
+        POLAROID_CROP_VIEWPORT_H
+      )
+    );
   }, [cropZoom, cropNaturalSize]);
 
   useEffect(() => {
@@ -1774,11 +1875,18 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       photoSetupNaturalSize.w,
       photoSetupNaturalSize.h,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       photoSetupZoom
     );
     setPhotoSetupOffset((o) =>
-      clampCropOffsetCover(o, rw, rh, CROP_PREVIEW_PX)
+      clampCropOffsetCover(
+        o,
+        rw,
+        rh,
+        POLAROID_CROP_VIEWPORT_W,
+        POLAROID_CROP_VIEWPORT_H
+      )
     );
   }, [photoSetupZoom, photoSetupNaturalSize]);
 
@@ -1810,7 +1918,7 @@ export default function PersonProfilePage() {
     const { data: personData, error: personErr } = await supabase
       .from("persons")
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
       .eq("id", personId)
       .eq("user_id", user.id)
@@ -1869,6 +1977,10 @@ export default function PersonProfilePage() {
       tree_id: raw.tree_id ?? null,
       birth_place,
       death_place,
+      military_branch: raw.military_branch ?? null,
+      service_number: raw.service_number ?? null,
+      cause_of_death: raw.cause_of_death ?? null,
+      marital_status: raw.marital_status ?? null,
     };
 
     const { data: eventData, error: eventErr } = await supabase
@@ -2684,53 +2796,21 @@ export default function PersonProfilePage() {
     [person, photoRows]
   );
 
-  const headerPhotoCrop = useMemo(() => {
-    const row = pickHeaderPhotoCropRow(photoRows);
-    if (!row) return { x: 50, y: 50, zoom: 1 };
-    return personPhotoCropForRow(row);
-  }, [photoRows]);
-
-  const primaryPhotoRow = useMemo(
-    () =>
-      photoRows.find((r) => rowIsPrimaryForDisplay(r)) ?? photoRows[0] ?? null,
-    [photoRows]
-  );
-
-  const avatarCropX = useMemo(() => {
-    if (!primaryPhotoRow) return 50;
-    if (primaryPhotoRow.__crop_save_to_tag === true) {
-      return typeof primaryPhotoRow.__person_crop_x === "number"
-        ? primaryPhotoRow.__person_crop_x
-        : 50;
+  const headerPolaroidLayers = useMemo((): HeaderPolaroidLayer[] => {
+    const withUrl = photoRows.filter((r) => photoUrlFromRow(r));
+    if (withUrl.length > 0) {
+      const primary = withUrl.find((r) => rowIsPrimaryForDisplay(r));
+      const rest = withUrl.filter((r) => !rowIsPrimaryForDisplay(r));
+      const ordered = primary ? [primary, ...rest] : [...withUrl];
+      return ordered
+        .slice(0, 3)
+        .map((row) => ({ kind: "row" as const, row }));
     }
-    return typeof primaryPhotoRow.crop_x === "number"
-      ? primaryPhotoRow.crop_x
-      : 50;
-  }, [primaryPhotoRow]);
-
-  const avatarCropY = useMemo(() => {
-    if (!primaryPhotoRow) return 50;
-    if (primaryPhotoRow.__crop_save_to_tag === true) {
-      return typeof primaryPhotoRow.__person_crop_y === "number"
-        ? primaryPhotoRow.__person_crop_y
-        : 50;
+    if (person && headerPhotoUrl) {
+      return [{ kind: "legacy" as const, url: headerPhotoUrl, person }];
     }
-    return typeof primaryPhotoRow.crop_y === "number"
-      ? primaryPhotoRow.crop_y
-      : 50;
-  }, [primaryPhotoRow]);
-
-  const avatarCropZoom = useMemo(() => {
-    if (!primaryPhotoRow) return 1;
-    if (primaryPhotoRow.__crop_save_to_tag === true) {
-      return typeof primaryPhotoRow.__person_crop_zoom === "number"
-        ? primaryPhotoRow.__person_crop_zoom
-        : 1;
-    }
-    return typeof primaryPhotoRow.crop_zoom === "number"
-      ? primaryPhotoRow.crop_zoom
-      : 1;
-  }, [primaryPhotoRow]);
+    return [];
+  }, [photoRows, person, headerPhotoUrl]);
 
   const eventTypeSelectOptions = useMemo(
     () => buildEventTypeSelectOptions(events),
@@ -3060,7 +3140,8 @@ export default function PersonProfilePage() {
           { x: newX, y: newY },
           renderedW,
           renderedH,
-          CROP_PREVIEW_PX
+          POLAROID_CROP_VIEWPORT_W,
+          POLAROID_CROP_VIEWPORT_H
         )
       );
     };
@@ -3086,7 +3167,8 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       cropNaturalSize.w,
       cropNaturalSize.h,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       cropZoom
     );
     attachCropMouseDrag(e.clientX, e.clientY, { ...cropOffset }, rw, rh);
@@ -3112,7 +3194,8 @@ export default function PersonProfilePage() {
           { x: newX, y: newY },
           renderedW,
           renderedH,
-          CROP_PREVIEW_PX
+          POLAROID_CROP_VIEWPORT_W,
+          POLAROID_CROP_VIEWPORT_H
         )
       );
     };
@@ -3141,7 +3224,8 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       cropNaturalSize.w,
       cropNaturalSize.h,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       cropZoom
     );
     const t = e.touches[0]!;
@@ -3165,7 +3249,8 @@ export default function PersonProfilePage() {
           { x: newX, y: newY },
           renderedW,
           renderedH,
-          CROP_PREVIEW_PX
+          POLAROID_CROP_VIEWPORT_W,
+          POLAROID_CROP_VIEWPORT_H
         )
       );
     };
@@ -3193,7 +3278,8 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       photoSetupNaturalSize.w,
       photoSetupNaturalSize.h,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       photoSetupZoom
     );
     attachPhotoSetupMouseDrag(
@@ -3225,7 +3311,8 @@ export default function PersonProfilePage() {
           { x: newX, y: newY },
           renderedW,
           renderedH,
-          CROP_PREVIEW_PX
+          POLAROID_CROP_VIEWPORT_W,
+          POLAROID_CROP_VIEWPORT_H
         )
       );
     };
@@ -3256,7 +3343,8 @@ export default function PersonProfilePage() {
     const { w: rw, h: rh } = cropCoverRenderedSize(
       photoSetupNaturalSize.w,
       photoSetupNaturalSize.h,
-      CROP_PREVIEW_PX,
+      POLAROID_CROP_VIEWPORT_W,
+      POLAROID_CROP_VIEWPORT_H,
       photoSetupZoom
     );
     const t = e.touches[0]!;
@@ -3578,14 +3666,16 @@ export default function PersonProfilePage() {
       const { w: setupRw, h: setupRh } = cropCoverRenderedSize(
         photoSetupNaturalSize.w,
         photoSetupNaturalSize.h,
-        CROP_PREVIEW_PX,
+        POLAROID_CROP_VIEWPORT_W,
+        POLAROID_CROP_VIEWPORT_H,
         photoSetupZoom
       );
       const { x: cx, y: cy } = offsetToCropPercentCover(
         photoSetupOffset,
         setupRw,
         setupRh,
-        CROP_PREVIEW_PX
+        POLAROID_CROP_VIEWPORT_W,
+        POLAROID_CROP_VIEWPORT_H
       );
       const cz = Math.min(3, Math.max(1, photoSetupZoom));
       const dateTrim = photoSetupDate.trim();
@@ -3821,7 +3911,7 @@ export default function PersonProfilePage() {
       .eq("id", personId)
       .eq("user_id", user.id)
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
       .maybeSingle();
 
@@ -3918,6 +4008,10 @@ export default function PersonProfilePage() {
       birth_place_id: dup.birth_place_id ?? null,
       photo_url: dup.photo_url ?? null,
       gender: dup.gender ?? null,
+      military_branch: dup.military_branch ?? null,
+      service_number: dup.service_number ?? null,
+      cause_of_death: dup.cause_of_death ?? null,
+      marital_status: dup.marital_status ?? null,
       notes: dup.notes ?? null,
     };
     setMergeSelectedDup(normalized);
@@ -4692,6 +4786,23 @@ export default function PersonProfilePage() {
     boxSizing: "border-box",
   };
 
+  const fileChips = useMemo(() => {
+    if (!person) return [] as { label: string; value: string }[];
+    const out: { label: string; value: string }[] = [];
+    const add = (label: string, raw: string | null | undefined) => {
+      if (raw == null) return;
+      const v = String(raw).trim();
+      if (!v) return;
+      out.push({ label, value: v });
+    };
+    add("MILITARY BRANCH", person.military_branch);
+    add("SERVICE NUMBER", person.service_number);
+    add("CAUSE OF DEATH", person.cause_of_death);
+    add("MARITAL STATUS", person.marital_status);
+    add("GENDER", person.gender);
+    return out;
+  }, [person]);
+
   if (loading) {
     return (
       <div className="min-h-[50vh]">
@@ -4907,10 +5018,6 @@ export default function PersonProfilePage() {
     (id) => recordsById.get(id)!
   );
 
-  function handleTabClick(tab: TabId) {
-    setActiveTab(tab);
-  }
-
   return (
     <div className="pb-16">
       <nav
@@ -4984,96 +5091,224 @@ export default function PersonProfilePage() {
           borderColor: `${colors.brownBorder}44`,
         }}
       >
-        <div className="relative mx-auto flex max-w-5xl flex-col items-center text-center sm:flex-row sm:items-start sm:gap-10 sm:text-left">
-          <div
-            className="relative h-48 w-48 shrink-0 overflow-hidden rounded-full ring-4"
+        <div className="relative mx-auto flex max-w-5xl flex-row items-start gap-10">
+          <button
+            type="button"
+            className="relative shrink-0 border-none bg-transparent p-0"
             style={{
-              position: "relative",
-              overflow: "hidden",
-              backgroundColor: colors.avatarBg,
-              borderColor: colors.cream,
-              boxShadow: "0 8px 28px rgb(var(--dg-shadow-rgb) / 0.12)",
+              width: 228,
+              height: 292,
+              cursor: "pointer",
             }}
+            aria-label="Open photo gallery — manage photos, crop, tags, and primary"
+            onClick={() => setPortraitsGalleryOpen(true)}
           >
-            {headerPhotoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={headerPhotoUrl}
-                alt=""
-                draggable={false}
-                onLoad={(e) => {
-                  const el = e.currentTarget;
-                  setAvatarNaturalSize({
-                    w: el.naturalWidth,
-                    h: el.naturalHeight,
-                  });
+            {headerPolaroidLayers.length === 0 ? (
+              <div
+                className="absolute left-1/2 top-1/2"
+                style={{
+                  transform: "translate(-50%, -50%) rotate(-2deg)",
+                  transformOrigin: "center center",
                 }}
-                style={(() => {
-                  if (
-                    !avatarNaturalSize ||
-                    avatarNaturalSize.w <= 0 ||
-                    avatarNaturalSize.h <= 0
-                  ) {
-                    return {
-                      position: "absolute" as const,
-                      left: 0,
-                      top: 0,
-                      width: "100%",
-                      height: "100%",
-                      opacity: 0,
-                    };
-                  }
-                  const { w: avatarRenderedW, h: avatarRenderedH } =
-                    cropCoverRenderedSize(
-                      avatarNaturalSize.w,
-                      avatarNaturalSize.h,
-                      192,
-                      avatarCropZoom
-                    );
-                  const avatarOffset = cropPercentToOffsetCover(
-                    avatarCropX,
-                    avatarCropY,
-                    avatarRenderedW,
-                    avatarRenderedH,
-                    192
-                  );
-                  return {
-                    position: "absolute" as const,
-                    left: avatarOffset.x,
-                    top: avatarOffset.y,
-                    width: avatarRenderedW,
-                    height: avatarRenderedH,
-                    opacity: 1,
-                    pointerEvents: "none" as const,
-                    maxWidth: "none",
-                  };
-                })()}
-              />
-            ) : (
-              <span
-                className="flex h-full w-full items-center justify-center text-5xl font-bold"
-                style={{ fontFamily: serif, color: colors.avatarInitials }}
               >
-                {initials(person)}
-              </span>
+                <div
+                  style={{
+                    backgroundColor: colors.cream,
+                    padding: "10px 12px 32px",
+                    boxShadow:
+                      "0 10px 28px rgb(var(--dg-shadow-rgb) / 0.16), 0 1px 0 rgb(0 0 0 / 0.05)",
+                    borderRadius: 3,
+                    border: `1px solid ${colors.brownBorder}`,
+                  }}
+                >
+                  <div
+                    className="flex items-center justify-center text-5xl font-bold"
+                    style={{
+                      width: HEADER_POLAROID_IMG_W,
+                      height: HEADER_POLAROID_IMG_H,
+                      backgroundColor: colors.avatarBg,
+                      borderRadius: 1,
+                      fontFamily: serif,
+                      color: colors.avatarInitials,
+                    }}
+                  >
+                    {person ? initials(person) : "?"}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              [...headerPolaroidLayers]
+                .map((layer, stackIndex) => ({ layer, stackIndex }))
+                .sort((a, b) => b.stackIndex - a.stackIndex)
+                .map(({ layer, stackIndex }) => {
+                  const key = headerPolaroidLayerKey(layer);
+                  const { url, crop, naturalW, naturalH } =
+                    headerPolaroidLayerVisual(layer);
+                  const nat = polaroidNaturalByKey[key];
+                  const nw =
+                    nat?.w ??
+                    (typeof naturalW === "number" && naturalW > 0
+                      ? naturalW
+                      : 0);
+                  const nh =
+                    nat?.h ??
+                    (typeof naturalH === "number" && naturalH > 0
+                      ? naturalH
+                      : 0);
+                  const stackStyle =
+                    (
+                      [
+                        { rot: -2.5, x: 0, y: 0 },
+                        { rot: 7, x: -12, y: 8 },
+                        { rot: -10, x: -20, y: 14 },
+                      ] as const
+                    )[stackIndex] ?? { rot: 0, x: 0, y: 0 };
+                  const z = 12 + stackIndex * 10;
+                  return (
+                    <div
+                      key={key}
+                      className="absolute left-1/2 top-1/2"
+                      style={{
+                        zIndex: z,
+                        transform: `translate(calc(-50% + ${stackStyle.x}px), calc(-50% + ${stackStyle.y}px)) rotate(${stackStyle.rot}deg)`,
+                        transformOrigin: "center center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          backgroundColor: colors.cream,
+                          padding: "10px 12px 32px",
+                          boxShadow:
+                            "0 10px 28px rgb(var(--dg-shadow-rgb) / 0.16), 0 1px 0 rgb(0 0 0 / 0.05)",
+                          borderRadius: 3,
+                          border: `1px solid ${colors.brownBorder}`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            width: HEADER_POLAROID_IMG_W,
+                            height: HEADER_POLAROID_IMG_H,
+                            overflow: "hidden",
+                            backgroundColor: colors.avatarBg,
+                            borderRadius: 1,
+                          }}
+                        >
+                          {url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={url}
+                              alt=""
+                              draggable={false}
+                              onLoad={(e) => {
+                                const el = e.currentTarget;
+                                setPolaroidNaturalByKey((prev) => ({
+                                  ...prev,
+                                  [key]: {
+                                    w: el.naturalWidth,
+                                    h: el.naturalHeight,
+                                  },
+                                }));
+                              }}
+                              style={(() => {
+                                if (nw <= 0 || nh <= 0) {
+                                  return {
+                                    position: "absolute" as const,
+                                    left: 0,
+                                    top: 0,
+                                    width: "100%",
+                                    height: "100%",
+                                    opacity: 0,
+                                  };
+                                }
+                                const { w: rw, h: rh } =
+                                  cropCoverRenderedSize(
+                                    nw,
+                                    nh,
+                                    HEADER_POLAROID_IMG_W,
+                                    HEADER_POLAROID_IMG_H,
+                                    crop.zoom
+                                  );
+                                const off = cropPercentToOffsetCover(
+                                  crop.x,
+                                  crop.y,
+                                  rw,
+                                  rh,
+                                  HEADER_POLAROID_IMG_W,
+                                  HEADER_POLAROID_IMG_H
+                                );
+                                return {
+                                  position: "absolute" as const,
+                                  left: off.x,
+                                  top: off.y,
+                                  width: rw,
+                                  height: rh,
+                                  opacity: 1,
+                                  pointerEvents: "none" as const,
+                                  maxWidth: "none",
+                                };
+                              })()}
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
             )}
-          </div>
-          <div className="mt-6 min-w-0 w-full flex-1 sm:mt-0">
-            <div className="mx-auto inline-block max-w-full text-left sm:mx-0 sm:block sm:w-full">
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="min-w-0 w-full max-w-full">
+              {firstMiddle ? (
+                <p
+                  className="mb-1 leading-snug"
+                  style={{
+                    fontFamily: serif,
+                    fontSize: 14,
+                    color: colors.brownMid,
+                  }}
+                >
+                  {firstMiddle}
+                </p>
+              ) : null}
               <h1
                 className="text-4xl font-bold leading-tight sm:text-5xl"
                 style={{ fontFamily: serif, color: colors.brownDark }}
               >
                 {lastName}
               </h1>
-              {firstMiddle ? (
-                <p
-                  className="mt-2 text-xl sm:text-2xl"
-                  style={{ fontFamily: serif, color: colors.brownMid }}
-                >
-                  {firstMiddle}
-                </p>
-              ) : null}
+              <p
+                className="mt-2 leading-snug"
+                style={{
+                  fontFamily: sans,
+                  fontSize: 13,
+                  color: colors.brownMuted,
+                }}
+              >
+                {(() => {
+                  const yearFrom = (d: string | null | undefined): string | null => {
+                    if (d == null) return null;
+                    const raw = String(d).trim();
+                    if (!raw) return null;
+                    const formatted = formatDateString(raw);
+                    if (/^\d{4}$/.test(formatted)) return formatted;
+                    const segs = formatted.split("/");
+                    const last = segs[segs.length - 1] ?? "";
+                    if (/^\d{4}$/.test(last)) return last;
+                    const m = raw.match(/(\d{4})/);
+                    return m?.[1] ?? null;
+                  };
+                  const by = yearFrom(person.birth_date);
+                  const dy = yearFrom(person.death_date);
+                  const place = headerBirthPlaceStr.trim();
+                  if (!by && !dy && !place) return "Dates unknown";
+                  let core = "";
+                  if (by && dy) core = `b. ${by} — d. ${dy}`;
+                  else if (by) core = `b. ${by}`;
+                  else if (dy) core = `d. ${dy}`;
+                  return place ? (core ? `${core} · ${place}` : place) : core;
+                })()}
+              </p>
               {headerGenderBadge ? (
                 <div className="mt-2">
                   <span
@@ -5092,14 +5327,6 @@ export default function PersonProfilePage() {
                 </div>
               ) : null}
             </div>
-            <p
-              className="mt-4 text-sm italic sm:text-base"
-              style={{ fontFamily: sans, color: colors.brownMuted }}
-            >
-              {birthLine ? <span style={{ display: "block" }}>{birthLine}</span> : null}
-              {deathLine ? <span style={{ display: "block" }}>{deathLine}</span> : null}
-              {headerNoDates ? <span>Dates unknown</span> : null}
-            </p>
           </div>
           <div
             ref={headerActionsDropdownRef}
@@ -5253,91 +5480,267 @@ export default function PersonProfilePage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
-        <div
-          role="tablist"
-          aria-label="Profile sections"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "flex-end",
-            borderBottom: `1px solid ${colors.brownBorder}`,
-            marginBottom: 0,
-          }}
-        >
-          {(
-            [
-              { id: "details" as const, label: "Details" },
-              { id: "documents" as const, label: "Documents" },
-              { id: "photos" as const, label: "Photos" },
-              { id: "notes" as const, label: "Notes" },
-            ] as const
-          ).map(({ id, label }) => {
-            const selected = activeTab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                id={`person-tab-${id}`}
-                aria-controls={`person-tabpanel-${id}`}
-                onClick={() => handleTabClick(id)}
+      <section
+        aria-label="The File"
+        style={{
+          backgroundColor: colors.parchment,
+          borderBottom: `1px solid ${colors.brownBorder}`,
+        }}
+      >
+        <div className="mx-auto max-w-6xl px-4 lg:px-8">
+          <div className="flex w-full items-center gap-3 py-3">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3 text-left"
+              style={{
+                background: "transparent",
+                border: "none",
+                paddingLeft: 0,
+                paddingRight: 0,
+              }}
+              aria-expanded={fileSectionExpanded}
+              onClick={() => setFileSectionExpanded((v) => !v)}
+            >
+              <span
+                className="tracking-wide"
                 style={{
                   fontFamily: sans,
-                  fontSize: "0.875rem",
-                  letterSpacing: "0.01em",
-                  padding: "0.65rem 1.2rem",
-                  margin: 0,
-                  cursor: "pointer",
-                  borderRadius: 0,
-                  boxShadow: "none",
-                  outline: "none",
-                  ...(selected
-                    ? {
-                        position: "relative" as const,
-                        zIndex: 2,
-                        backgroundColor: colors.cream,
-                        color: colors.brownDark,
-                        fontWeight: 700,
-                        borderStyle: "solid",
-                        borderColor: colors.brownBorder,
-                        borderWidth: "1px 1px 0 1px",
-                        borderBottom: `3px solid ${colors.brownOutline}`,
-                        marginBottom: -1,
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: colors.brownMuted,
-                        fontWeight: 500,
-                        border: "none",
-                        borderBottom: "1px solid transparent",
-                        marginBottom: -1,
-                      }),
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  color: colors.brownMuted,
                 }}
               >
-                {label}
-              </button>
-            );
-          })}
+                The File
+              </span>
+              <svg
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={colors.brownMuted}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+                style={{
+                  flexShrink: 0,
+                  transform: fileSectionExpanded
+                    ? "rotate(180deg)"
+                    : "rotate(0deg)",
+                  transition: "transform 0.15s ease",
+                }}
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-200 sm:h-12 sm:w-12"
+              style={{
+                backgroundColor: fileReceiptsCabinetOpen
+                  ? colors.cream
+                  : "transparent",
+                color: colors.brownDark,
+                boxShadow: fileReceiptsCabinetOpen
+                  ? "inset 0 1px 0 var(--dg-inset-highlight)"
+                  : "none",
+              }}
+              aria-expanded={fileReceiptsCabinetOpen}
+              aria-controls="file-receipts-cabinet"
+              title={
+                fileReceiptsCabinetOpen
+                  ? "Close receipts drawer"
+                  : "Open receipts drawer"
+              }
+              onClick={() => setFileReceiptsCabinetOpen((v) => !v)}
+            >
+              <IconFilingCabinet size={28} />
+            </button>
+          </div>
+          {fileSectionExpanded && fileChips.length > 0 ? (
+            <div className="flex flex-wrap gap-2 pb-4">
+              {fileChips.map(({ label, value }) => (
+                <div
+                  key={label}
+                  className="inline-flex min-w-0 max-w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5"
+                  style={{ backgroundColor: colors.cream }}
+                >
+                  <span
+                    className="font-medium uppercase tracking-wide"
+                    style={{
+                      fontFamily: sans,
+                      fontSize: 10,
+                      letterSpacing: "0.06em",
+                      color: colors.brownMuted,
+                    }}
+                  >
+                    {label}
+                  </span>
+                  <span
+                    className="break-words text-sm leading-snug"
+                    style={{
+                      fontFamily: serif,
+                      color: colors.brownDark,
+                    }}
+                  >
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div
+            id="file-receipts-cabinet"
+            aria-hidden={!fileReceiptsCabinetOpen}
+            className="motion-reduce:transition-none"
+            style={{
+              display: "grid",
+              gridTemplateRows: fileReceiptsCabinetOpen ? "1fr" : "0fr",
+              transition: "grid-template-rows 0.45s ease",
+            }}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <div
+                className="pb-4 pt-1"
+                style={{
+                  transform: fileReceiptsCabinetOpen
+                    ? "translateY(0)"
+                    : "translateY(-10px)",
+                  opacity: fileReceiptsCabinetOpen ? 1 : 0,
+                  transition: "transform 0.4s ease, opacity 0.3s ease",
+                }}
+              >
+                <div
+                  className="mb-3 flex flex-col gap-1.5"
+                  style={{ perspective: "800px" }}
+                  aria-hidden
+                >
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="h-1.5 rounded-sm"
+                      style={{
+                        backgroundColor: colors.brownBorder,
+                        opacity: 0.35 + i * 0.12,
+                        transform: fileReceiptsCabinetOpen
+                          ? "translateY(0)"
+                          : "translateY(-10px)",
+                        transition: `transform 0.35s ease ${80 + i * 70}ms`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div
+                  className="rounded-lg border px-4 py-4 sm:px-5 sm:py-5"
+                  style={{
+                    backgroundColor: colors.cream,
+                    borderColor: colors.brownBorder,
+                    boxShadow:
+                      "inset 0 2px 6px rgb(var(--dg-shadow-rgb) / 0.06), 0 6px 20px rgb(var(--dg-shadow-rgb) / 0.08)",
+                  }}
+                >
+                  <h3
+                    className="mb-4 text-xl font-bold"
+                    style={{ fontFamily: serif, color: colors.brownDark }}
+                  >
+                    Receipts
+                  </h3>
+                  {documentRecords.length === 0 ? (
+                    <p
+                      className="text-sm italic"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      No documents linked through events yet.
+                    </p>
+                  ) : (
+                    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {documentRecords.map((rec) => {
+                        const href = signedDocUrls.get(rec.id);
+                        const label = recordTypeLabel(rec);
+                        return (
+                          <li key={rec.id}>
+                            <div
+                              className="h-full rounded-lg border p-4"
+                              style={{
+                                backgroundColor: colors.parchment,
+                                borderColor: colors.brownBorder,
+                                boxShadow:
+                                  "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)",
+                              }}
+                            >
+                              {href ? (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-bold leading-snug underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                  style={{
+                                    fontFamily: serif,
+                                    color: colors.forest,
+                                  }}
+                                >
+                                  {label}
+                                </a>
+                              ) : (
+                                <p
+                                  className="font-bold leading-snug"
+                                  style={{
+                                    fontFamily: serif,
+                                    color: colors.brownDark,
+                                  }}
+                                >
+                                  {label}
+                                </p>
+                              )}
+                              <p
+                                className="mt-2 text-xs italic"
+                                style={{
+                                  fontFamily: sans,
+                                  color: colors.brownMuted,
+                                }}
+                              >
+                                Uploaded {formatUploadedAt(rec.created_at)}
+                              </p>
+                              {rec.file_type ? (
+                                <p
+                                  className="mt-1 text-[10px] uppercase tracking-wider"
+                                  style={{
+                                    fontFamily: sans,
+                                    color: colors.brownMuted,
+                                  }}
+                                >
+                                  {rec.file_type}
+                                </p>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+      </section>
 
-        <div
-          id={`person-tabpanel-${activeTab}`}
-          role="tabpanel"
-          aria-labelledby={`person-tab-${activeTab}`}
-          style={{
-            backgroundColor: colors.cream,
-            borderLeft: `1px solid ${colors.brownBorder}`,
-            borderRight: `1px solid ${colors.brownBorder}`,
-            borderBottom: `1px solid ${colors.brownBorder}`,
-            borderTop: "none",
-            padding: "1.5rem",
-            marginTop: -1,
-          }}
-        >
-        {activeTab === "details" ? (
-          <div className="grid gap-10 lg:grid-cols-[1fr_280px] lg:gap-12">
+      <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
+        <div id="section-details">
+          <div
+            className="tracking-wide"
+            style={{
+              fontFamily: sans,
+              fontSize: 11,
+              textTransform: "uppercase",
+              color: colors.brownMuted,
+              paddingTop: "2rem",
+              paddingBottom: "0.75rem",
+            }}
+          >
+            The Story
+          </div>
+          <div className="grid gap-10 lg:grid-cols-[1fr_318px] lg:gap-12">
             <section>
               <div
                 className="mb-6 flex items-center justify-between border-b pb-2"
@@ -5889,8 +6292,8 @@ export default function PersonProfilePage() {
                                           aria-expanded={sourcesOpen}
                                         >
                                           {sourcesOpen
-                                            ? "Hide sources"
-                                            : `Sources (${linkedSources.length})`}
+                                            ? "Hide receipts"
+                                            : `Receipts (${linkedSources.length})`}
                                         </button>
                                       ) : null}
                                       {linkedSources.length > 0 &&
@@ -6248,20 +6651,22 @@ export default function PersonProfilePage() {
               )}
             </section>
 
-            <aside
-              className="rounded-xl border p-5 lg:sticky lg:top-6 lg:self-start"
-              style={{
-                backgroundColor: colors.cream,
-                borderColor: colors.brownBorder,
-                boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.06)",
-              }}
-            >
-              <h2
-                className="mb-4 text-xl font-bold"
-                style={{ fontFamily: serif, color: colors.brownDark }}
+            <div className="flex w-full min-w-0 flex-row items-start gap-2 lg:sticky lg:top-6 lg:self-start">
+              <div
+                className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border shadow-md"
+                style={{
+                  backgroundColor: colors.cream,
+                  borderColor: colors.brownBorder,
+                  boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.06)",
+                }}
               >
-                Immediate family
-              </h2>
+                <aside className="relative z-0 border-0 p-5 shadow-none">
+                <h2
+                  className="mb-4 text-xl font-bold"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Immediate family
+                </h2>
               <FamilyGroup
                 title="Parents"
                 members={family.parents}
@@ -6355,100 +6760,188 @@ export default function PersonProfilePage() {
                   </p>
                 ) : null}
               </div>
-            </aside>
-          </div>
-        ) : activeTab === "documents" ? (
-          <section>
-            <h2
-              className="mb-6 text-2xl font-bold"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              Documents
-            </h2>
-            {documentRecords.length === 0 ? (
-              <p
-                className="text-sm italic"
-                style={{ fontFamily: sans, color: colors.brownMuted }}
+                </aside>
+
+                <div
+                id="person-margin-notes-panel"
+                className="absolute inset-0 z-[30] flex min-h-full min-w-0 flex-col overflow-hidden rounded-xl transition-[transform] duration-[250ms] ease-out"
+                style={{
+                  backgroundColor: colors.parchment,
+                  backgroundImage:
+                    "repeating-linear-gradient(to bottom, transparent 0, transparent 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 27px)",
+                  boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.08)",
+                  transform: marginSidebarNotesOpen
+                    ? "translateX(0)"
+                    : "translateX(100%)",
+                  pointerEvents: marginSidebarNotesOpen ? "auto" : "none",
+                }}
+                role="dialog"
+                {...(marginSidebarNotesOpen ? { "aria-modal": true } : {})}
+                aria-hidden={!marginSidebarNotesOpen}
+                aria-labelledby="person-margin-notes-title"
               >
-                No documents linked through events yet.
-              </p>
-            ) : (
-              <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {documentRecords.map((rec) => {
-                  const href = signedDocUrls.get(rec.id);
-                  const label = recordTypeLabel(rec);
-                  return (
-                    <li key={rec.id}>
-                      <div
-                        className="h-full rounded-lg border p-4"
-                        style={{
-                          backgroundColor: colors.cream,
-                          borderColor: colors.brownBorder,
-                          boxShadow: "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)",
-                        }}
+                <div className="flex shrink-0 justify-start px-2 pb-1 pt-2 sm:px-3 sm:pt-2.5">
+                  <button
+                    type="button"
+                    className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-xl leading-none opacity-75 transition hover:opacity-100"
+                    style={{
+                      fontFamily: sans,
+                      color: colors.brownMuted,
+                      cursor: "pointer",
+                    }}
+                    aria-label="Close The Margin"
+                    title="Close"
+                    onClick={() => setMarginSidebarNotesOpen(false)}
+                  >
+                    ×
+                  </button>
+                  <span id="person-margin-notes-title" className="sr-only">
+                    The Margin — research notes
+                  </span>
+                </div>
+                <textarea
+                  value={researchNoteText}
+                  onChange={(e) => setResearchNoteText(e.target.value)}
+                  placeholder="Your research notes, theories, brick walls, leads to follow up..."
+                  className="min-h-0 w-full flex-1 resize-none border-0 px-3 py-2 leading-relaxed focus-visible:outline-none"
+                  style={{
+                    fontFamily: serif,
+                    fontSize: "1.0625rem",
+                    color: colors.brownDark,
+                    backgroundColor: "transparent",
+                    boxSizing: "border-box",
+                  }}
+                  aria-label="The Margin research notes"
+                />
+                <div
+                  className="flex shrink-0 flex-col gap-2 border-t px-3 py-3"
+                  style={{ borderColor: `${colors.brownBorder}66` }}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={researchNoteSaving}
+                      onClick={() => void saveResearchNotes()}
+                      style={{
+                        fontFamily: sans,
+                        backgroundColor: colors.brownOutline,
+                        color: colors.cream,
+                        border: "none",
+                        padding: "0.45rem 1rem",
+                        fontSize: "0.8125rem",
+                        fontWeight: 700,
+                        cursor: researchNoteSaving ? "wait" : "pointer",
+                        opacity: researchNoteSaving ? 0.75 : 1,
+                        borderRadius: 2,
+                        boxShadow: "none",
+                      }}
+                    >
+                      Save
+                    </button>
+                    {researchNoteSavedFlash ? (
+                      <span
+                        className="text-xs"
+                        style={{ fontFamily: sans, color: colors.forest }}
                       >
-                        {href ? (
-                          <a
-                            href={href}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-bold leading-snug underline decoration-dotted underline-offset-2 hover:opacity-80"
-                            style={{
-                              fontFamily: serif,
-                              color: colors.forest,
-                            }}
-                          >
-                            {label}
-                          </a>
-                        ) : (
-                          <p
-                            className="font-bold leading-snug"
-                            style={{
-                              fontFamily: serif,
-                              color: colors.brownDark,
-                            }}
-                          >
-                            {label}
-                          </p>
-                        )}
-                        <p
-                          className="mt-2 text-xs italic"
-                          style={{
-                            fontFamily: sans,
-                            color: colors.brownMuted,
-                          }}
-                        >
-                          Uploaded {formatUploadedAt(rec.created_at)}
-                        </p>
-                        {rec.file_type ? (
-                          <p
-                            className="mt-1 text-[10px] uppercase tracking-wider"
-                            style={{
-                              fontFamily: sans,
-                              color: colors.brownMuted,
-                            }}
-                          >
-                            {rec.file_type}
-                          </p>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        ) : activeTab === "photos" ? (
-          <section>
-            <h2
-              className="mb-6 text-2xl font-bold"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              Photos
-            </h2>
+                        Saved
+                      </span>
+                    ) : null}
+                  </div>
+                  {researchNoteSaveError ? (
+                    <p
+                      className="text-xs leading-snug"
+                      style={{
+                        fontFamily: sans,
+                        color: "var(--dg-danger)",
+                      }}
+                    >
+                      {researchNoteSaveError}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+              <button
+                type="button"
+                className="mt-5 flex h-[7.5rem] w-9 shrink-0 cursor-pointer flex-row items-stretch gap-1.5 self-start rounded-r-lg border pl-1 pr-1.5 shadow-md"
+                style={{
+                  backgroundColor: colors.parchment,
+                  borderColor: colors.brownBorder,
+                  boxShadow: "0 3px 12px rgb(var(--dg-shadow-rgb) / 0.07)",
+                }}
+                aria-expanded={marginSidebarNotesOpen}
+                aria-controls="person-margin-notes-panel"
+                onClick={() => setMarginSidebarNotesOpen(true)}
+                title="Open The Margin"
+              >
+                <span
+                  className="w-px shrink-0 self-stretch"
+                  style={{ backgroundColor: colors.brownBorder }}
+                  aria-hidden
+                />
+                <span
+                  className="flex flex-1 items-center justify-center text-[10px] font-medium uppercase tracking-[0.14em]"
+                  style={{
+                    fontFamily: sans,
+                    color: colors.brownMuted,
+                    writingMode: "vertical-rl",
+                    transform: "rotate(180deg)",
+                  }}
+                >
+                  The Margin
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {portraitsGalleryOpen ? (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="portraits-gallery-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPortraitsGalleryOpen(false);
+          }}
+        >
+          <div
+            className="my-4 w-full max-w-3xl rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <h2
+                id="portraits-gallery-title"
+                className="text-2xl font-bold"
+                style={{ fontFamily: serif, color: colors.brownDark }}
+              >
+                Portraits
+              </h2>
+              <button
+                type="button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 text-2xl leading-none opacity-80 transition hover:opacity-100"
+                style={{
+                  fontFamily: sans,
+                  color: colors.brownMuted,
+                  cursor: "pointer",
+                  backgroundColor: "transparent",
+                }}
+                aria-label="Close portraits"
+                onClick={() => setPortraitsGalleryOpen(false)}
+              >
+                ×
+              </button>
+            </div>
             <div className="mb-6 flex flex-wrap items-center gap-3">
               <input
-                id="person-profile-photo-upload"
+                id="person-profile-photo-upload-gallery"
                 type="file"
                 accept="image/*"
                 className="sr-only"
@@ -6460,7 +6953,7 @@ export default function PersonProfilePage() {
                 }}
               />
               <label
-                htmlFor="person-profile-photo-upload"
+                htmlFor="person-profile-photo-upload-gallery"
                 className="inline-block cursor-pointer rounded border-2 px-4 py-2 text-sm font-semibold transition-opacity"
                 style={{
                   fontFamily: sans,
@@ -6645,88 +7138,9 @@ export default function PersonProfilePage() {
                 })}
               </ul>
             )}
-          </section>
-        ) : (
-          <section>
-            <h2
-              className="mb-6 text-2xl font-bold"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              Research notes
-            </h2>
-            {researchNoteId != null && researchNoteUpdatedAt ? (
-              <p
-                className="mb-2 text-xs"
-                style={{
-                  fontFamily: sans,
-                  color: colors.brownMuted,
-                }}
-              >
-                Last updated{" "}
-                {formatResearchNoteTimestamp(researchNoteUpdatedAt)}
-              </p>
-            ) : null}
-            <textarea
-              value={researchNoteText}
-              onChange={(e) => setResearchNoteText(e.target.value)}
-              rows={12}
-              placeholder="Your research notes, theories, brick walls, leads to follow up..."
-              className="w-full resize-y border px-4 py-3 text-base leading-relaxed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1"
-              style={{
-                fontFamily: sans,
-                color: colors.brownDark,
-                backgroundColor: colors.cream,
-                borderColor: colors.brownBorder,
-                minHeight: 400,
-                boxSizing: "border-box",
-                borderRadius: 0,
-                boxShadow: "none",
-                outlineColor: colors.brownOutline,
-              }}
-              aria-label="Research notes"
-            />
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                disabled={researchNoteSaving}
-                onClick={() => void saveResearchNotes()}
-                style={{
-                  fontFamily: sans,
-                  backgroundColor: colors.brownOutline,
-                  color: colors.cream,
-                  border: "none",
-                  padding: "0.65rem 1.35rem",
-                  fontSize: "0.875rem",
-                  fontWeight: 700,
-                  cursor: researchNoteSaving ? "wait" : "pointer",
-                  opacity: researchNoteSaving ? 0.75 : 1,
-                  borderRadius: 2,
-                  boxShadow: "none",
-                }}
-              >
-                Save notes
-              </button>
-              {researchNoteSavedFlash ? (
-                <span
-                  className="text-sm"
-                  style={{ fontFamily: sans, color: colors.forest }}
-                >
-                  Saved
-                </span>
-              ) : null}
-            </div>
-            {researchNoteSaveError ? (
-              <p
-                className="mt-2 text-sm"
-                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
-              >
-                {researchNoteSaveError}
-              </p>
-            ) : null}
-          </section>
-        )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {editPersonOpen && editPersonDraft ? (
         <div
@@ -8108,26 +8522,36 @@ export default function PersonProfilePage() {
             <div
               className="mx-auto flex justify-center"
               style={{
-                padding: 10,
-                borderRadius: "50%",
+                padding: 18,
+                borderRadius: 14,
                 backgroundColor: "var(--dg-modal-backdrop-deep)",
               }}
             >
               <div
-                className="select-none"
                 style={{
-                  position: "relative",
-                  width: CROP_PREVIEW_PX,
-                  height: CROP_PREVIEW_PX,
-                  borderRadius: "50%",
-                  overflow: "hidden",
-                  touchAction: "none",
-                  cursor: cropDragging ? "grabbing" : "grab",
-                  backgroundColor: colors.avatarBg,
+                  backgroundColor: colors.cream,
+                  padding: "12px 14px 40px",
+                  boxShadow:
+                    "0 8px 24px rgb(var(--dg-shadow-rgb) / 0.12)",
+                  borderRadius: 3,
+                  border: `1px solid ${colors.brownBorder}`,
                 }}
-                onMouseDown={handleCropCircleMouseDown}
-                onTouchStart={handleCropCircleTouchStart}
               >
+                <div
+                  className="select-none"
+                  style={{
+                    position: "relative",
+                    width: POLAROID_CROP_VIEWPORT_W,
+                    height: POLAROID_CROP_VIEWPORT_H,
+                    borderRadius: 2,
+                    overflow: "hidden",
+                    touchAction: "none",
+                    cursor: cropDragging ? "grabbing" : "grab",
+                    backgroundColor: colors.avatarBg,
+                  }}
+                  onMouseDown={handleCropCircleMouseDown}
+                  onTouchStart={handleCropCircleTouchStart}
+                >
                 {(() => {
                   const previewUrl = photoUrlFromRow(cropModalPhoto);
                   if (!previewUrl) return null;
@@ -8138,10 +8562,14 @@ export default function PersonProfilePage() {
                       ? cropCoverRenderedSize(
                           nw,
                           nh,
-                          CROP_PREVIEW_PX,
+                          POLAROID_CROP_VIEWPORT_W,
+                          POLAROID_CROP_VIEWPORT_H,
                           cropZoom
                         )
-                      : { w: CROP_PREVIEW_PX * cropZoom, h: CROP_PREVIEW_PX * cropZoom };
+                      : {
+                          w: POLAROID_CROP_VIEWPORT_W * cropZoom,
+                          h: POLAROID_CROP_VIEWPORT_H * cropZoom,
+                        };
                   return (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -8167,6 +8595,7 @@ export default function PersonProfilePage() {
                     />
                   );
                 })()}
+                </div>
               </div>
             </div>
             <div
@@ -8223,14 +8652,16 @@ export default function PersonProfilePage() {
                   const { w: saveRw, h: saveRh } = cropCoverRenderedSize(
                     cropNaturalSize.w,
                     cropNaturalSize.h,
-                    CROP_PREVIEW_PX,
+                    POLAROID_CROP_VIEWPORT_W,
+                    POLAROID_CROP_VIEWPORT_H,
                     cropZoom
                   );
                   const { x: cx, y: cy } = offsetToCropPercentCover(
                     cropOffset,
                     saveRw,
                     saveRh,
-                    CROP_PREVIEW_PX
+                    POLAROID_CROP_VIEWPORT_W,
+                    POLAROID_CROP_VIEWPORT_H
                   );
                   void saveCropPosition(id, cx, cy, cropZoom);
                 }}
@@ -8289,68 +8720,80 @@ export default function PersonProfilePage() {
                 <div
                   className="mx-auto flex w-fit justify-center"
                   style={{
-                    padding: 10,
-                    borderRadius: "50%",
+                    padding: 18,
+                    borderRadius: 14,
                     backgroundColor: "var(--dg-modal-backdrop-deep)",
                   }}
                 >
                   <div
-                    className="select-none"
                     style={{
-                      position: "relative",
-                      width: CROP_PREVIEW_PX,
-                      height: CROP_PREVIEW_PX,
-                      borderRadius: "50%",
-                      overflow: "hidden",
-                      touchAction: "none",
-                      cursor: photoSetupDragging ? "grabbing" : "grab",
-                      backgroundColor: colors.avatarBg,
+                      backgroundColor: colors.cream,
+                      padding: "12px 14px 40px",
+                      boxShadow:
+                        "0 8px 24px rgb(var(--dg-shadow-rgb) / 0.12)",
+                      borderRadius: 3,
+                      border: `1px solid ${colors.brownBorder}`,
                     }}
-                    onMouseDown={handlePhotoSetupCircleMouseDown}
-                    onTouchStart={handlePhotoSetupCircleTouchStart}
                   >
-                    {(() => {
-                      const previewUrl = photoUrlFromRow(photoSetupModal);
-                      if (!previewUrl) return null;
-                      const snw = photoSetupNaturalSize?.w ?? 0;
-                      const snh = photoSetupNaturalSize?.h ?? 0;
-                      const { w: setupImgRw, h: setupImgRh } =
-                        snw > 0 && snh > 0
-                          ? cropCoverRenderedSize(
-                              snw,
-                              snh,
-                              CROP_PREVIEW_PX,
-                              photoSetupZoom
-                            )
-                          : {
-                              w: CROP_PREVIEW_PX * photoSetupZoom,
-                              h: CROP_PREVIEW_PX * photoSetupZoom,
-                            };
-                      return (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={previewUrl}
-                          alt=""
-                          draggable={false}
-                          onLoad={(e) => {
-                            const el = e.currentTarget;
-                            setPhotoSetupNaturalSize({
-                              w: el.naturalWidth,
-                              h: el.naturalHeight,
-                            });
-                          }}
-                          style={{
-                            position: "absolute",
-                            left: photoSetupOffset.x,
-                            top: photoSetupOffset.y,
-                            width: setupImgRw,
-                            height: setupImgRh,
-                            pointerEvents: "none",
-                            maxWidth: "none",
-                          }}
-                        />
-                      );
-                    })()}
+                    <div
+                      className="select-none"
+                      style={{
+                        position: "relative",
+                        width: POLAROID_CROP_VIEWPORT_W,
+                        height: POLAROID_CROP_VIEWPORT_H,
+                        borderRadius: 2,
+                        overflow: "hidden",
+                        touchAction: "none",
+                        cursor: photoSetupDragging ? "grabbing" : "grab",
+                        backgroundColor: colors.avatarBg,
+                      }}
+                      onMouseDown={handlePhotoSetupCircleMouseDown}
+                      onTouchStart={handlePhotoSetupCircleTouchStart}
+                    >
+                      {(() => {
+                        const previewUrl = photoUrlFromRow(photoSetupModal);
+                        if (!previewUrl) return null;
+                        const snw = photoSetupNaturalSize?.w ?? 0;
+                        const snh = photoSetupNaturalSize?.h ?? 0;
+                        const { w: setupImgRw, h: setupImgRh } =
+                          snw > 0 && snh > 0
+                            ? cropCoverRenderedSize(
+                                snw,
+                                snh,
+                                POLAROID_CROP_VIEWPORT_W,
+                                POLAROID_CROP_VIEWPORT_H,
+                                photoSetupZoom
+                              )
+                            : {
+                                w: POLAROID_CROP_VIEWPORT_W * photoSetupZoom,
+                                h: POLAROID_CROP_VIEWPORT_H * photoSetupZoom,
+                              };
+                        return (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={previewUrl}
+                            alt=""
+                            draggable={false}
+                            onLoad={(e) => {
+                              const el = e.currentTarget;
+                              setPhotoSetupNaturalSize({
+                                w: el.naturalWidth,
+                                h: el.naturalHeight,
+                              });
+                            }}
+                            style={{
+                              position: "absolute",
+                              left: photoSetupOffset.x,
+                              top: photoSetupOffset.y,
+                              width: setupImgRw,
+                              height: setupImgRh,
+                              pointerEvents: "none",
+                              maxWidth: "none",
+                            }}
+                          />
+                        );
+                      })()}
+                    </div>
                   </div>
                 </div>
                 <div
