@@ -58,6 +58,7 @@ type PersonRow = {
   service_number: string | null;
   cause_of_death: string | null;
   marital_status: string | null;
+  surviving_spouse: string | null;
   notes: string | null;
   tree_id?: string | null;
   birth_place?: {
@@ -83,6 +84,8 @@ type TreePersonSearchRow = {
   last_name: string;
   birth_date: string | null;
 };
+
+type PersonDeskPanel = "none" | "margin" | "file" | "receipts";
 
 /**
  * Maps UI relationship choice (how the other person relates to the profile) to
@@ -148,6 +151,22 @@ function birthYearLabel(dateStr: string | null | undefined): string | null {
   const t = Date.parse(s);
   if (Number.isNaN(t)) return null;
   return String(new Date(t).getFullYear());
+}
+
+/** Display year for profile header (follows `formatDateString` conventions). */
+function personProfileYearFromDate(
+  d: string | null | undefined
+): string | null {
+  if (d == null) return null;
+  const raw = String(d).trim();
+  if (!raw) return null;
+  const formatted = formatDateString(raw);
+  if (/^\d{4}$/.test(formatted)) return formatted;
+  const segs = formatted.split("/");
+  const last = segs[segs.length - 1] ?? "";
+  if (/^\d{4}$/.test(last)) return last;
+  const m = raw.match(/(\d{4})/);
+  return m?.[1] ?? null;
 }
 
 function personMatchesNameTokens(
@@ -387,6 +406,95 @@ function eventDateLabel(ev: EventRow): string {
   }
 }
 
+/** Month and day only for the timeline column under the year (no repeated year). */
+function eventTimelineMonthDayLabel(ev: EventRow): string {
+  const d = ev.event_date?.trim();
+  if (!d) return "Date unknown";
+  try {
+    const parsed = new Date(d.replace(/-/g, "/"));
+    if (isNaN(parsed.getTime())) {
+      const alt = formatDateString(d).trim();
+      const noYear = alt.replace(/[,/\s-]*\d{4}\s*$/, "").trim();
+      return noYear || alt || "Date unknown";
+    }
+    const month = parsed.toLocaleDateString("en-US", { month: "long" });
+    const day = parsed.getDate();
+    return `${month.charAt(0).toUpperCase()}${month.slice(1).toLowerCase()} ${day}`;
+  } catch {
+    return "Date unknown";
+  }
+}
+
+/** Large year column for the life timeline (unknown dates → em dash). */
+function eventTimelineYearDisplay(ev: EventRow): string {
+  const d = ev.event_date?.trim();
+  if (!d) return "—";
+  const isoYear = /^(\d{4})/.exec(d);
+  if (isoYear) return isoYear[1]!;
+  try {
+    const parsed = new Date(d.replace(/-/g, "/"));
+    if (!isNaN(parsed.getTime())) return String(parsed.getFullYear());
+  } catch {
+    /* fall through */
+  }
+  const formatted = formatDateString(d);
+  const y4 = /^(\d{4})$/.exec(formatted);
+  if (y4) return y4[1]!;
+  const m = /(\d{4})/.exec(formatted);
+  if (m) return m[1]!;
+  return "—";
+}
+
+/**
+ * Timeline pill colors: only the badge uses accent; everything else stays neutral.
+ * Uses color-mix with page cream so chips read in light and dark themes.
+ */
+function timelineEventTypePillStyle(eventTypeRaw: string): {
+  background: string;
+  color: string;
+} {
+  const neutral = {
+    background:
+      "color-mix(in srgb, var(--dg-brown-border) 45%, var(--dg-cream))",
+    color: "var(--dg-brown-dark)",
+  };
+  const t = eventTypeRaw.trim().toLowerCase();
+  if (!t) return neutral;
+
+  const chip = (accent: string) => ({
+    background: `color-mix(in srgb, ${accent} 34%, var(--dg-cream))`,
+    color: "var(--dg-brown-dark)",
+  });
+
+  if (t === "marriage") return chip("rgb(196 90 120)");
+  if (t === "birth" || t === "baptism" || t === "christening")
+    return chip("rgb(70 130 185)");
+  if (t === "death" || t === "child died" || t === "spouse died")
+    return chip("rgb(95 85 125)");
+  if (t === "burial") return chip("rgb(115 108 98)");
+  if (t === "census") return chip("rgb(55 130 95)");
+  if (t === "residence") return chip("rgb(155 120 55)");
+  if (
+    t === "military service" ||
+    t === "enlistment" ||
+    t === "deployment" ||
+    t === "military transfer" ||
+    t === "military award" ||
+    t === "discharge" ||
+    t === "missing in action" ||
+    t === "killed in action" ||
+    t === "prisoner of war" ||
+    t.includes("military")
+  ) {
+    return chip("rgb(65 95 150)");
+  }
+  if (t === "land") return chip("rgb(130 105 60)");
+  if (t === "immigration" || t === "emigration") return chip("rgb(45 125 140)");
+  if (t === "child born") return chip("rgb(200 110 55)");
+  if (t === "occupation") return chip("rgb(105 75 155)");
+  return neutral;
+}
+
 function normalizeDateToMMDDYYYY(raw: string | null): string {
   const s = (raw ?? "").trim();
   if (!s) return "";
@@ -501,8 +609,83 @@ const POLAROID_CROP_VIEWPORT_W = 220;
 const POLAROID_CROP_VIEWPORT_H = 275;
 
 /** Image window inside header polaroids (same aspect as `POLAROID_CROP_VIEWPORT_*`). */
-const HEADER_POLAROID_IMG_W = 168;
-const HEADER_POLAROID_IMG_H = 210;
+const HEADER_POLAROID_IMG_W = 128;
+const HEADER_POLAROID_IMG_H = 160;
+
+/** Click target around stacked polaroids (includes rotation / stack offsets). */
+const HEADER_POLAROID_BTN_W = 186;
+const HEADER_POLAROID_BTN_H = 236;
+
+/** Top and side mat; bottom “chin” is 2.5× the edge (polaroid proportions). */
+const HEADER_POLAROID_FRAME_EDGE_PX = 8;
+const HEADER_POLAROID_FRAME_CHIN_PX = HEADER_POLAROID_FRAME_EDGE_PX * 2.5;
+const HEADER_POLAROID_FRAME_PAD =
+  `${HEADER_POLAROID_FRAME_EDGE_PX}px ${HEADER_POLAROID_FRAME_EDGE_PX}px ${HEADER_POLAROID_FRAME_CHIN_PX}px` as const;
+
+/** Front at 0°; back cards tilt with ~10px peek (center pivot). */
+const HEADER_POLAROID_STACK_LAYERS = [
+  { rot: 0, x: 0, y: 0 },
+  { rot: -6, x: -10, y: 10 },
+  { rot: 3, x: 10, y: -10 },
+] as const;
+
+/** Light mode only — do not use for dark (see `HEADER_POLAROID_PRINT_FILTER_DARK`). */
+const HEADER_POLAROID_PRINT_FILTER_LIGHT =
+  "contrast(1.1) sepia(0.15) brightness(1.05)" as const;
+
+const HEADER_POLAROID_PRINT_FILTER_DARK =
+  "contrast(1.15) sepia(0.2) brightness(0.95)" as const;
+
+/** Dark-mode polaroid mat (replaces cream frame); chin uses same fill via padding + background. */
+const HEADER_POLAROID_FRAME_DARK = "#b0a08a" as const;
+
+const HEADER_POLAROID_DARK_DEPTH_INSET =
+  "inset 0 0 8px rgba(0,0,0,0.4)" as const;
+
+function headerPolaroidFrameLayerStyle(
+  isDark: boolean,
+  stackIndex: number,
+  totalLayers: number
+): CSSProperties {
+  const isFront = stackIndex === 0;
+  const isRearmost = totalLayers > 1 && stackIndex === totalLayers - 1;
+
+  let boxShadow: string;
+  if (isDark) {
+    if (isFront) {
+      boxShadow =
+        "0 4px 14px rgb(var(--dg-shadow-rgb) / 0.42), 0 1px 3px rgb(0 0 0 / 0.45), inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent), " +
+        HEADER_POLAROID_DARK_DEPTH_INSET;
+    } else if (isRearmost) {
+      boxShadow =
+        "0 20px 52px rgb(var(--dg-shadow-rgb) / 0.32), 0 10px 28px rgb(0 0 0 / 0.32), 0 0 0 1px rgba(0,0,0,0.28), " +
+        HEADER_POLAROID_DARK_DEPTH_INSET;
+    } else {
+      boxShadow =
+        "0 12px 32px rgb(var(--dg-shadow-rgb) / 0.36), 0 4px 16px rgb(0 0 0 / 0.28), inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent), " +
+        HEADER_POLAROID_DARK_DEPTH_INSET;
+    }
+  } else if (isFront) {
+    boxShadow =
+      "0 3px 12px rgb(var(--dg-shadow-rgb) / 0.2), 0 1px 3px rgb(0 0 0 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.04)";
+  } else if (isRearmost) {
+    boxShadow =
+      "0 16px 42px rgb(var(--dg-shadow-rgb) / 0.13), 0 7px 20px rgb(0 0 0 / 0.07)";
+  } else {
+    boxShadow =
+      "0 9px 26px rgb(var(--dg-shadow-rgb) / 0.15), 0 3px 10px rgb(0 0 0 / 0.07)";
+  }
+
+  return {
+    backgroundColor: isDark ? HEADER_POLAROID_FRAME_DARK : colors.cream,
+    padding: HEADER_POLAROID_FRAME_PAD,
+    borderRadius: 3,
+    border: isDark
+      ? `1px solid ${HEADER_POLAROID_FRAME_DARK}`
+      : `1px solid ${colors.brownBorder}`,
+    boxShadow,
+  };
+}
 
 type HeaderPolaroidLayer =
   | { kind: "row"; row: Record<string, unknown> }
@@ -637,16 +820,6 @@ function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
   return "?";
 }
 
-/** "Male" / "Female" for header pill; Unknown or other values → hidden. */
-function genderBadgeLabel(
-  gender: string | null | undefined
-): "Male" | "Female" | null {
-  const n = (gender ?? "").trim().toLowerCase();
-  if (n === "male") return "Male";
-  if (n === "female") return "Female";
-  return null;
-}
-
 function IconPencil({ className }: { className?: string }) {
   return (
     <svg
@@ -664,38 +837,6 @@ function IconPencil({ className }: { className?: string }) {
     >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  );
-}
-
-/** Classic vertical filing cabinet: frame + three drawers with bar pulls. */
-function IconFilingCabinet({
-  className,
-  size = 26,
-}: {
-  className?: string;
-  size?: number;
-}) {
-  return (
-    <svg
-      className={className}
-      xmlns="http://www.w3.org/2000/svg"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.65}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="3.5" y="2" width="17" height="20" rx="1.75" />
-      <line x1="4.5" y1="8.35" x2="19.5" y2="8.35" strokeWidth={1.35} opacity={0.92} />
-      <line x1="4.5" y1="14.65" x2="19.5" y2="14.65" strokeWidth={1.35} opacity={0.92} />
-      <line x1="9" y1="5.15" x2="15" y2="5.15" strokeWidth={2.15} />
-      <line x1="9" y1="11.45" x2="15" y2="11.45" strokeWidth={2.15} />
-      <line x1="9" y1="17.75" x2="15" y2="17.75" strokeWidth={2.15} />
     </svg>
   );
 }
@@ -863,7 +1004,134 @@ function firstStoryFullInCluster(cluster: EventCluster): {
   return { text: "", eventId: sorted[0]?.id ?? "" };
 }
 
-const FAMILY_MEMBER_AVATAR_VP = 40;
+const FAMILY_MEMBER_DOSSIER_SQUARE = 44;
+
+/** Profile-centric relationship label for the family sidebar (e.g. Father, Sister). */
+function relationshipUiLabelForProfile(
+  relationshipType: string,
+  person: PersonRow
+): string {
+  const g = (person.gender ?? "").trim().toLowerCase();
+  const t = relationshipType.trim().toLowerCase();
+  if (t === "parent") {
+    if (g === "male") return "Father";
+    if (g === "female") return "Mother";
+    return "Parent";
+  }
+  if (t === "child") {
+    if (g === "male") return "Son";
+    if (g === "female") return "Daughter";
+    return "Child";
+  }
+  if (t === "spouse") return "Spouse";
+  if (t === "sibling") {
+    if (g === "male") return "Brother";
+    if (g === "female") return "Sister";
+    return "Sibling";
+  }
+  return relationshipType;
+}
+
+/** Assign linked parents to father / mother slots using gender when possible. */
+function partitionParentsIntoSlots(parents: PersonRow[]): {
+  father: PersonRow | null;
+  mother: PersonRow | null;
+  overflow: PersonRow[];
+} {
+  const used = new Set<string>();
+  let father: PersonRow | null = null;
+  let mother: PersonRow | null = null;
+
+  for (const p of parents) {
+    const g = (p.gender ?? "").trim().toLowerCase();
+    if (g === "male" && !father) {
+      father = p;
+      used.add(p.id);
+    } else if (g === "female" && !mother) {
+      mother = p;
+      used.add(p.id);
+    }
+  }
+  for (const p of parents) {
+    if (used.has(p.id)) continue;
+    if (!father) {
+      father = p;
+      used.add(p.id);
+    } else if (!mother) {
+      mother = p;
+      used.add(p.id);
+    }
+  }
+  const overflow = parents.filter((p) => !used.has(p.id));
+  return { father, mother, overflow };
+}
+
+function UnknownParentSlot({
+  roleLabel,
+  disabled,
+  onAdd,
+}: {
+  roleLabel: "Father" | "Mother";
+  disabled: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className="group relative flex w-full max-w-full cursor-pointer items-start gap-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-55"
+      style={{
+        backgroundColor: "transparent",
+        border: "none",
+        color: "inherit",
+      }}
+      aria-label={`Add ${roleLabel.toLowerCase()} — link existing or create new`}
+      onClick={onAdd}
+    >
+      <div
+        className="flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed"
+        style={{
+          position: "relative",
+          width: FAMILY_MEMBER_DOSSIER_SQUARE,
+          height: FAMILY_MEMBER_DOSSIER_SQUARE,
+          backgroundColor: colors.avatarBg,
+          borderColor: `${colors.brownBorder}aa`,
+          color: colors.avatarInitials,
+        }}
+      >
+        <span
+          className="text-sm font-bold opacity-70"
+          style={{ fontFamily: serif }}
+          aria-hidden
+        >
+          ?
+        </span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p
+          className="break-words text-[15px] font-semibold leading-snug"
+          style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
+        >
+          Unknown
+        </p>
+        <p
+          className="mt-0.5 text-[11px] leading-snug"
+          style={{ fontFamily: sans, color: colors.brownMuted }}
+        >
+          {disabled
+            ? "Open this profile from your tree to add."
+            : "Click to link or create…"}
+        </p>
+      </div>
+      <span
+        className="shrink-0 self-start pt-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
+        style={{ fontFamily: sans, color: colors.brownMuted }}
+      >
+        {roleLabel}
+      </span>
+    </button>
+  );
+}
 
 function FamilyMemberCard({
   p,
@@ -872,6 +1140,7 @@ function FamilyMemberCard({
   crop_zoom,
   natural_width,
   natural_height,
+  relationshipLabel,
   onEditRelationship,
 }: {
   p: PersonRow;
@@ -880,13 +1149,14 @@ function FamilyMemberCard({
   crop_zoom?: number | null;
   natural_width?: number | null;
   natural_height?: number | null;
+  relationshipLabel: string;
   onEditRelationship?: () => void;
 }) {
-  const last = p.last_name.trim() || "—";
-  const firstMiddle = [p.first_name, p.middle_name ?? ""]
+  const displayName = [p.first_name, p.middle_name ?? "", p.last_name]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" ");
+  const nameLine = displayName.trim() || "—";
   const photo =
     (p as { photo_url?: string | null }).photo_url ?? null;
 
@@ -907,8 +1177,8 @@ function FamilyMemberCard({
     const { w: rw, h: rh } = cropCoverRenderedSize(
       natural_width,
       natural_height,
-      FAMILY_MEMBER_AVATAR_VP,
-      FAMILY_MEMBER_AVATAR_VP,
+      FAMILY_MEMBER_DOSSIER_SQUARE,
+      FAMILY_MEMBER_DOSSIER_SQUARE,
       crop_zoom
     );
     const offset = cropPercentToOffsetCover(
@@ -916,8 +1186,8 @@ function FamilyMemberCard({
       crop_y,
       rw,
       rh,
-      FAMILY_MEMBER_AVATAR_VP,
-      FAMILY_MEMBER_AVATAR_VP
+      FAMILY_MEMBER_DOSSIER_SQUARE,
+      FAMILY_MEMBER_DOSSIER_SQUARE
     );
     pixelAvatarStyle = {
       position: "absolute",
@@ -929,39 +1199,30 @@ function FamilyMemberCard({
     };
   }
 
+  const dateDetail = [
+    p.birth_date ? `b. ${formatDateString(p.birth_date)}` : "",
+    p.death_date ? `d. ${formatDateString(p.death_date)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <Link
       href={`/person/${p.id}`}
-      className="relative flex gap-2 rounded-lg border p-2 transition hover:-translate-y-0.5"
+      className="flex min-w-0 items-start gap-3 py-3"
       style={{
-        borderColor: colors.brownBorder,
-        backgroundColor: colors.cream,
-        boxShadow: "0 1px 4px rgb(var(--dg-shadow-rgb) / 0.06)",
         textDecoration: "none",
         color: "inherit",
+        backgroundColor: "transparent",
       }}
     >
-      {onEditRelationship ? (
-        <button
-          type="button"
-          className="absolute right-1.5 top-1.5 rounded px-1 text-xs"
-          style={{ color: colors.brownMuted }}
-          aria-label="Edit relationship"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onEditRelationship();
-          }}
-        >
-          ✎
-        </button>
-      ) : null}
       <div
-        className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-1"
+        className="shrink-0 overflow-hidden rounded-md"
         style={{
           position: "relative",
+          width: FAMILY_MEMBER_DOSSIER_SQUARE,
+          height: FAMILY_MEMBER_DOSSIER_SQUARE,
           backgroundColor: colors.avatarBg,
-          borderColor: colors.brownBorder,
         }}
       >
         {photo ? (
@@ -983,7 +1244,7 @@ function FamilyMemberCard({
           />
         ) : (
           <span
-            className="flex h-full w-full items-center justify-center text-xs font-bold"
+            className="flex h-full w-full items-center justify-center text-sm font-bold"
             style={{ fontFamily: serif, color: colors.avatarInitials }}
           >
             {initials(p)}
@@ -992,77 +1253,44 @@ function FamilyMemberCard({
       </div>
       <div className="min-w-0 flex-1">
         <p
-          className="truncate text-sm font-bold leading-tight"
+          className="break-words text-[15px] font-semibold leading-snug"
           style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
         >
-          {firstMiddle || last}
+          {nameLine}
         </p>
-        {firstMiddle ? (
+        {dateDetail ? (
           <p
-            className="truncate text-xs leading-tight"
-            style={{ fontFamily: serif, color: "var(--dg-brown-muted)" }}
+            className="mt-0.5 break-words text-[11px] leading-snug"
+            style={{ fontFamily: sans, color: colors.brownMuted }}
           >
-            {last}
+            {dateDetail}
           </p>
         ) : null}
-        <p
-          className="mt-0.5 text-xs italic leading-tight"
-          style={{ fontFamily: sans, color: colors.brownMid }}
+      </div>
+      <div className="flex shrink-0 items-start justify-end gap-1.5 self-start pt-0.5">
+        {onEditRelationship ? (
+          <button
+            type="button"
+            className="rounded px-0.5 text-xs leading-none"
+            style={{ color: colors.brownMuted }}
+            aria-label="Edit relationship"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onEditRelationship();
+            }}
+          >
+            ✎
+          </button>
+        ) : null}
+        <span
+          className="max-w-[5.5rem] text-right text-[10px] font-bold uppercase leading-snug tracking-[0.14em]"
+          style={{ fontFamily: sans, color: colors.brownMuted, wordBreak: "break-word" }}
         >
-          {p.birth_date
-            ? `b. ${formatDateString(p.birth_date)}`
-            : ""}
-          {p.birth_date && p.death_date ? " · " : ""}
-          {p.death_date ? `d. ${formatDateString(p.death_date)}` : ""}
-        </p>
+          {relationshipLabel}
+        </span>
       </div>
     </Link>
-  );
-}
-
-function FamilyGroup({
-  title,
-  members,
-  relationshipMetaByPersonId,
-  onEditRelationship,
-}: {
-  title: string;
-  members: PersonRow[];
-  relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
-  onEditRelationship: (meta: RelationshipMeta) => void;
-}) {
-  if (members.length === 0) return null;
-  return (
-    <div className="mb-5">
-      <h3
-        className="mb-2 text-xs font-bold uppercase tracking-widest"
-        style={{ fontFamily: sans, color: colors.brownMuted }}
-      >
-        {title}
-      </h3>
-      <ul className="space-y-2">
-        {members.map((p) => (
-          <li key={p.id}>
-            {(() => {
-              const relMeta = relationshipMetaByPersonId[p.id];
-              return (
-            <FamilyMemberCard
-              p={p}
-              crop_x={p.crop_x}
-              crop_y={p.crop_y}
-              crop_zoom={p.crop_zoom}
-              natural_width={p.natural_width}
-              natural_height={p.natural_height}
-              onEditRelationship={
-                relMeta ? () => onEditRelationship(relMeta) : undefined
-              }
-            />
-              );
-            })()}
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 
@@ -1072,12 +1300,15 @@ function CollapsibleFamilyGroup({
   relationshipMetaByPersonId,
   onEditRelationship,
   defaultExpanded = false,
+  defaultRelationshipType = "sibling",
 }: {
   title: string;
   members: PersonRow[];
   relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
   onEditRelationship: (meta: RelationshipMeta) => void;
   defaultExpanded?: boolean;
+  /** Used when `relationshipMetaByPersonId` has no row for a member. */
+  defaultRelationshipType?: string;
 }) {
   const baseId = useId();
   const headerId = `${baseId}-hdr`;
@@ -1116,14 +1347,20 @@ function CollapsibleFamilyGroup({
       {expanded ? (
         <ul
           id={listId}
-          className="space-y-2"
+          className="m-0 list-none p-0"
           role="region"
           aria-labelledby={headerId}
         >
           {members.map((p) => (
-            <li key={p.id}>
+            <li
+              key={p.id}
+              className="border-0 border-b border-solid last:border-b-0"
+              style={{ borderBottomColor: colors.brownBorder }}
+            >
               {(() => {
                 const relMeta = relationshipMetaByPersonId[p.id];
+                const relType =
+                  relMeta?.relationshipType ?? defaultRelationshipType;
                 return (
                   <FamilyMemberCard
                     p={p}
@@ -1132,6 +1369,10 @@ function CollapsibleFamilyGroup({
                     crop_zoom={p.crop_zoom}
                     natural_width={p.natural_width}
                     natural_height={p.natural_height}
+                    relationshipLabel={relationshipUiLabelForProfile(
+                      relType,
+                      p
+                    )}
                     onEditRelationship={
                       relMeta ? () => onEditRelationship(relMeta) : undefined
                     }
@@ -1195,7 +1436,7 @@ function SpouseWithChildrenCollapsible({
           className="min-w-0 flex-1 text-xs font-bold uppercase tracking-widest"
           style={{ color: colors.brownMuted }}
         >
-          <span className="block truncate">{headerText}</span>
+          <span className="block break-words">{headerText}</span>
           <span
             className="mt-0.5 block text-[0.65rem] font-semibold normal-case tracking-normal"
             style={{ color: colors.brownMid }}
@@ -1215,24 +1456,39 @@ function SpouseWithChildrenCollapsible({
       {expanded ? (
         <div
           id={panelId}
-          className="space-y-3 border-l-2 pl-3"
-          style={{ borderColor: `${colors.brownBorder}99` }}
+          className="space-y-3"
           role="region"
           aria-labelledby={headerId}
         >
-          <FamilyMemberCard
-            p={spouse}
-            crop_x={spouse.crop_x}
-            crop_y={spouse.crop_y}
-            crop_zoom={spouse.crop_zoom}
-            natural_width={spouse.natural_width}
-            natural_height={spouse.natural_height}
-            onEditRelationship={
-              spouseRelMeta
-                ? () => onEditRelationship(spouseRelMeta)
-                : undefined
-            }
-          />
+          <ul className="m-0 list-none p-0">
+            <li
+              className={
+                kids.length > 0
+                  ? "border-0 border-b border-solid"
+                  : undefined
+              }
+              style={
+                kids.length > 0
+                  ? { borderBottomColor: colors.brownBorder }
+                  : undefined
+              }
+            >
+              <FamilyMemberCard
+                p={spouse}
+                crop_x={spouse.crop_x}
+                crop_y={spouse.crop_y}
+                crop_zoom={spouse.crop_zoom}
+                natural_width={spouse.natural_width}
+                natural_height={spouse.natural_height}
+                relationshipLabel="Spouse"
+                onEditRelationship={
+                  spouseRelMeta
+                    ? () => onEditRelationship(spouseRelMeta)
+                    : undefined
+                }
+              />
+            </li>
+          </ul>
           <div>
             <button
               type="button"
@@ -1251,11 +1507,23 @@ function SpouseWithChildrenCollapsible({
               >
                 Children
               </h4>
-              <ul className="space-y-2">
-                {kids.map((p) => {
+              <ul className="m-0 list-none p-0">
+                {kids.map((p, i) => {
                   const relMeta = relationshipMetaByPersonId[p.id];
                   return (
-                    <li key={p.id}>
+                    <li
+                      key={p.id}
+                      className={
+                        i < kids.length - 1
+                          ? "border-0 border-b border-solid"
+                          : undefined
+                      }
+                      style={
+                        i < kids.length - 1
+                          ? { borderBottomColor: colors.brownBorder }
+                          : undefined
+                      }
+                    >
                       <FamilyMemberCard
                         p={p}
                         crop_x={p.crop_x}
@@ -1263,6 +1531,10 @@ function SpouseWithChildrenCollapsible({
                         crop_zoom={p.crop_zoom}
                         natural_width={p.natural_width}
                         natural_height={p.natural_height}
+                        relationshipLabel={relationshipUiLabelForProfile(
+                          relMeta?.relationshipType ?? "child",
+                          p
+                        )}
                         onEditRelationship={
                           relMeta
                             ? () => onEditRelationship(relMeta)
@@ -1354,7 +1626,8 @@ function TimelineEventStoryBlock({
           <div
             className="pointer-events-none absolute bottom-0 left-0 right-0 h-12"
             style={{
-              background: `linear-gradient(to bottom, transparent, ${colors.cream})`,
+              background:
+                "linear-gradient(to bottom, transparent, var(--dg-cream))",
             }}
             aria-hidden
           />
@@ -1451,9 +1724,7 @@ export default function PersonProfilePage() {
   const [editRelType, setEditRelType] = useState("");
   const [editRelBusy, setEditRelBusy] = useState(false);
   const [editRelError, setEditRelError] = useState<string | null>(null);
-  const [fileSectionExpanded, setFileSectionExpanded] = useState(true);
-  const [fileReceiptsCabinetOpen, setFileReceiptsCabinetOpen] = useState(false);
-  const [marginSidebarNotesOpen, setMarginSidebarNotesOpen] = useState(false);
+  const [deskPanelOpen, setDeskPanelOpen] = useState<PersonDeskPanel>("none");
   const [signedDocUrls, setSignedDocUrls] = useState<Map<string, string>>(
     new Map()
   );
@@ -1507,6 +1778,11 @@ export default function PersonProfilePage() {
     death_place_id: string | null;
     death_place_display: string;
     gender: string;
+    marital_status: string;
+    surviving_spouse: string;
+    military_branch: string;
+    service_number: string;
+    cause_of_death: string;
     notes: string;
   } | null>(null);
   const [personEditSaving, setPersonEditSaving] = useState(false);
@@ -1918,7 +2194,7 @@ export default function PersonProfilePage() {
     const { data: personData, error: personErr } = await supabase
       .from("persons")
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
       .eq("id", personId)
       .eq("user_id", user.id)
@@ -1981,6 +2257,7 @@ export default function PersonProfilePage() {
       service_number: raw.service_number ?? null,
       cause_of_death: raw.cause_of_death ?? null,
       marital_status: raw.marital_status ?? null,
+      surviving_spouse: raw.surviving_spouse ?? null,
     };
 
     const { data: eventData, error: eventErr } = await supabase
@@ -2055,7 +2332,7 @@ export default function PersonProfilePage() {
       const { data: relPeople, error: rpErr } = await supabase
         .from("persons")
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, photo_url"
+          "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender"
         )
         .eq("user_id", user.id)
         .in("id", relatedIds);
@@ -3844,6 +4121,11 @@ export default function PersonProfilePage() {
       death_place_display: person.death_place ? formatPlace(person.death_place) : "",
       death_place_id: person.death_place_id ?? null,
       gender: genderVal,
+      marital_status: person.marital_status ?? "",
+      surviving_spouse: person.surviving_spouse ?? "",
+      military_branch: person.military_branch ?? "",
+      service_number: person.service_number ?? "",
+      cause_of_death: person.cause_of_death ?? "",
       notes: person.notes ?? "",
     });
     setPersonEditError(null);
@@ -3906,12 +4188,17 @@ export default function PersonProfilePage() {
         birth_place_id: resolvedBirthPlaceId,
         death_place_id: resolvedDeathPlaceId,
         gender: d.gender.trim() || null,
+        marital_status: d.marital_status.trim() || null,
+        surviving_spouse: d.surviving_spouse.trim() || null,
+        military_branch: d.military_branch.trim() || null,
+        service_number: d.service_number.trim() || null,
+        cause_of_death: d.cause_of_death.trim() || null,
         notes: d.notes.trim() || null,
       })
       .eq("id", personId)
       .eq("user_id", user.id)
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
       )
       .maybeSingle();
 
@@ -4012,6 +4299,7 @@ export default function PersonProfilePage() {
       service_number: dup.service_number ?? null,
       cause_of_death: dup.cause_of_death ?? null,
       marital_status: dup.marital_status ?? null,
+      surviving_spouse: dup.surviving_spouse ?? null,
       notes: dup.notes ?? null,
     };
     setMergeSelectedDup(normalized);
@@ -4081,6 +4369,8 @@ export default function PersonProfilePage() {
     tab?: "find" | "create";
     relationship?: FamilyRelationshipChoice;
     coParentId?: string | null;
+    /** Prefills create form when user switches to Create tab. */
+    createGenderDefault?: "male" | "female";
   }) {
     resetAddFamilyModalFormState();
     if (opts?.tab) setAddFamilyTab(opts.tab);
@@ -4090,6 +4380,11 @@ export default function PersonProfilePage() {
     }
     if (opts?.coParentId) {
       setAddFamilyCoParentId(opts.coParentId);
+    }
+    if (opts?.createGenderDefault === "male") {
+      setAddFamilyCreateGender("Male");
+    } else if (opts?.createGenderDefault === "female") {
+      setAddFamilyCreateGender("Female");
     }
     setAddFamilyModalOpen(true);
   }
@@ -4795,13 +5090,39 @@ export default function PersonProfilePage() {
       if (!v) return;
       out.push({ label, value: v });
     };
+    if (person.birth_date) {
+      const raw = String(person.birth_date).trim();
+      if (raw) {
+        out.push({ label: "DATE OF BIRTH", value: formatDateString(raw) });
+      }
+    }
+    if (person.birth_place) {
+      const place = formatPlace(person.birth_place).trim();
+      if (place) out.push({ label: "PLACE OF BIRTH", value: place });
+    }
+    add("GENDER", person.gender);
+    if (person.death_date) {
+      const raw = String(person.death_date).trim();
+      if (raw) {
+        out.push({ label: "DATE OF DEATH", value: formatDateString(raw) });
+      }
+    }
+    if (person.death_place) {
+      const place = formatPlace(person.death_place).trim();
+      if (place) out.push({ label: "PLACE OF DEATH", value: place });
+    }
+    add("MARITAL STATUS", person.marital_status);
+    add("SURVIVING SPOUSE", person.surviving_spouse);
+    add("CAUSE OF DEATH", person.cause_of_death);
     add("MILITARY BRANCH", person.military_branch);
     add("SERVICE NUMBER", person.service_number);
-    add("CAUSE OF DEATH", person.cause_of_death);
-    add("MARITAL STATUS", person.marital_status);
-    add("GENDER", person.gender);
     return out;
   }, [person]);
+
+  const parentSlots = useMemo(
+    () => partitionParentsIntoSlots(family.parents),
+    [family.parents]
+  );
 
   if (loading) {
     return (
@@ -4956,31 +5277,6 @@ export default function PersonProfilePage() {
     );
   }
 
-  const lastName = person.last_name.trim() || "—";
-  const firstMiddle = [person.first_name, person.middle_name ?? ""]
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join(" ");
-
-  const headerGenderBadge = genderBadgeLabel(person.gender);
-  const headerBirthPlaceStr = person.birth_place ? formatPlace(person.birth_place) : "";
-  const headerHasBirthPlace = headerBirthPlaceStr.trim().length > 0;
-
-  const birthLine = [
-    person.birth_date ? `b. ${formatDateString(person.birth_date)}` : null,
-    headerHasBirthPlace ? headerBirthPlaceStr : null,
-  ].filter(Boolean).join("  ·  ");
-
-  const headerDeathPlaceStr = person.death_place
-    ? formatPlace(person.death_place)
-    : "";
-  const deathLine = [
-    person.death_date ? `d. ${formatDateString(person.death_date)}` : null,
-    headerDeathPlaceStr || null,
-  ].filter(Boolean).join("  ·  ");
-
-  const headerNoDates = !birthLine && !deathLine;
-
   const personFullName = [
     person.first_name,
     person.middle_name ?? "",
@@ -5006,17 +5302,62 @@ export default function PersonProfilePage() {
   };
 
   const documentRecordIds = new Set<string>();
+  const eventDateByEventId = new Map<string, string | null>();
+  const documentEventDatesByRecordId = new Map<string, string[]>();
+  const pushDocumentEventDate = (recordId: string, rawDate: string | null | undefined) => {
+    const normalized = (rawDate ?? "").trim();
+    if (!documentEventDatesByRecordId.has(recordId)) {
+      documentEventDatesByRecordId.set(recordId, []);
+    }
+    if (!normalized) return;
+    const list = documentEventDatesByRecordId.get(recordId)!;
+    if (!list.includes(normalized)) list.push(normalized);
+  };
   for (const e of events) {
+    eventDateByEventId.set(e.id, e.event_date);
     const id = e.record_id?.trim();
-    if (id && recordsById.has(id)) documentRecordIds.add(id);
+    if (id && recordsById.has(id)) {
+      documentRecordIds.add(id);
+      pushDocumentEventDate(id, e.event_date);
+    }
   }
   for (const s of eventSources) {
     const id = s.record_id?.trim();
-    if (id && recordsById.has(id)) documentRecordIds.add(id);
+    if (id && recordsById.has(id)) {
+      documentRecordIds.add(id);
+      pushDocumentEventDate(id, eventDateByEventId.get(s.event_id) ?? null);
+    }
   }
-  const documentRecords = [...documentRecordIds].map(
-    (id) => recordsById.get(id)!
-  );
+  const documentRecords: {
+    record: RecordRow;
+    eventDateLabel: string;
+    eventDateMs: number | null;
+  }[] = [];
+  for (const id of documentRecordIds) {
+    const record = recordsById.get(id);
+    if (!record) continue;
+    const eventDates = documentEventDatesByRecordId.get(id) ?? [];
+    const earliestKnown = eventDates
+      .map((raw) => ({ raw, ms: parseEventDateMs(raw) }))
+      .filter((d): d is { raw: string; ms: number } => d.ms != null)
+      .sort((a, b) => a.ms - b.ms)[0];
+    documentRecords.push({
+      record,
+      eventDateLabel: earliestKnown
+        ? formatDateString(earliestKnown.raw)
+        : "Date unknown",
+      eventDateMs: earliestKnown?.ms ?? null,
+    });
+  }
+  documentRecords.sort((a, b) => {
+    if (a.eventDateMs == null && b.eventDateMs == null) {
+      return recordTypeLabel(a.record).localeCompare(recordTypeLabel(b.record));
+    }
+    if (a.eventDateMs == null) return 1;
+    if (b.eventDateMs == null) return -1;
+    if (a.eventDateMs !== b.eventDateMs) return a.eventDateMs - b.eventDateMs;
+    return recordTypeLabel(a.record).localeCompare(recordTypeLabel(b.record));
+  });
 
   return (
     <div className="pb-16">
@@ -5083,46 +5424,43 @@ export default function PersonProfilePage() {
         </div>
       </nav>
 
-      {/* Header */}
+      {/* Header — same horizontal inset as body (`px-4 lg:px-8`) so Actions lines up with desk tabs */}
       <header
-        className="border-b px-4 py-10 sm:px-8"
+        className="pb-3 pt-5 lg:pb-4 lg:pt-6"
         style={{
-          backgroundColor: colors.parchment,
-          borderColor: `${colors.brownBorder}44`,
+          backgroundColor: "transparent",
         }}
       >
-        <div className="relative mx-auto flex max-w-5xl flex-row items-start gap-10">
-          <button
-            type="button"
-            className="relative shrink-0 border-none bg-transparent p-0"
-            style={{
-              width: 228,
-              height: 292,
-              cursor: "pointer",
-            }}
-            aria-label="Open photo gallery — manage photos, crop, tags, and primary"
-            onClick={() => setPortraitsGalleryOpen(true)}
-          >
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6 lg:px-8">
+          <div className="shrink-0 self-start">
+            <button
+              type="button"
+              className="relative shrink-0 border-none bg-transparent p-0"
+              style={{
+                width: HEADER_POLAROID_BTN_W,
+                height: HEADER_POLAROID_BTN_H,
+                cursor: "pointer",
+              }}
+              aria-label="Open photo gallery — manage photos, crop, tags, and primary"
+              onClick={() => setPortraitsGalleryOpen(true)}
+            >
             {headerPolaroidLayers.length === 0 ? (
               <div
                 className="absolute left-1/2 top-1/2"
                 style={{
-                  transform: "translate(-50%, -50%) rotate(-2deg)",
+                  transform: "translate(-50%, -50%)",
                   transformOrigin: "center center",
                 }}
               >
                 <div
-                  style={{
-                    backgroundColor: colors.cream,
-                    padding: "10px 12px 32px",
-                    boxShadow:
-                      "0 10px 28px rgb(var(--dg-shadow-rgb) / 0.16), 0 1px 0 rgb(0 0 0 / 0.05)",
-                    borderRadius: 3,
-                    border: `1px solid ${colors.brownBorder}`,
-                  }}
+                  style={headerPolaroidFrameLayerStyle(
+                    theme === "dark",
+                    0,
+                    1
+                  )}
                 >
                   <div
-                    className="flex items-center justify-center text-5xl font-bold"
+                    className="flex items-center justify-center text-4xl font-bold"
                     style={{
                       width: HEADER_POLAROID_IMG_W,
                       height: HEADER_POLAROID_IMG_H,
@@ -5139,7 +5477,6 @@ export default function PersonProfilePage() {
             ) : (
               [...headerPolaroidLayers]
                 .map((layer, stackIndex) => ({ layer, stackIndex }))
-                .sort((a, b) => b.stackIndex - a.stackIndex)
                 .map(({ layer, stackIndex }) => {
                   const key = headerPolaroidLayerKey(layer);
                   const { url, crop, naturalW, naturalH } =
@@ -5156,14 +5493,12 @@ export default function PersonProfilePage() {
                       ? naturalH
                       : 0);
                   const stackStyle =
-                    (
-                      [
-                        { rot: -2.5, x: 0, y: 0 },
-                        { rot: 7, x: -12, y: 8 },
-                        { rot: -10, x: -20, y: 14 },
-                      ] as const
-                    )[stackIndex] ?? { rot: 0, x: 0, y: 0 };
-                  const z = 12 + stackIndex * 10;
+                    HEADER_POLAROID_STACK_LAYERS[stackIndex] ??
+                    HEADER_POLAROID_STACK_LAYERS[0];
+                  /** Layer 0 is primary (front); higher indices sit underneath. */
+                  const stackDepth = headerPolaroidLayers.length - 1 - stackIndex;
+                  const z = 12 + stackDepth * 10;
+                  const nLayers = headerPolaroidLayers.length;
                   return (
                     <div
                       key={key}
@@ -5175,14 +5510,11 @@ export default function PersonProfilePage() {
                       }}
                     >
                       <div
-                        style={{
-                          backgroundColor: colors.cream,
-                          padding: "10px 12px 32px",
-                          boxShadow:
-                            "0 10px 28px rgb(var(--dg-shadow-rgb) / 0.16), 0 1px 0 rgb(0 0 0 / 0.05)",
-                          borderRadius: 3,
-                          border: `1px solid ${colors.brownBorder}`,
-                        }}
+                        style={headerPolaroidFrameLayerStyle(
+                          theme === "dark",
+                          stackIndex,
+                          nLayers
+                        )}
                       >
                         <div
                           style={{
@@ -5246,6 +5578,10 @@ export default function PersonProfilePage() {
                                   opacity: 1,
                                   pointerEvents: "none" as const,
                                   maxWidth: "none",
+                                  filter:
+                                    theme === "dark"
+                                      ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                      : HEADER_POLAROID_PRINT_FILTER_LIGHT,
                                 };
                               })()}
                             />
@@ -5256,86 +5592,48 @@ export default function PersonProfilePage() {
                   );
                 })
             )}
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="min-w-0 w-full max-w-full">
-              {firstMiddle ? (
-                <p
-                  className="mb-1 leading-snug"
-                  style={{
-                    fontFamily: serif,
-                    fontSize: 14,
-                    color: colors.brownMid,
-                  }}
-                >
-                  {firstMiddle}
-                </p>
-              ) : null}
-              <h1
-                className="text-4xl font-bold leading-tight sm:text-5xl"
-                style={{ fontFamily: serif, color: colors.brownDark }}
+            </button>
+          </div>
+          <div className="min-w-0 w-full flex-1 self-start text-left sm:w-auto sm:self-center sm:pl-0">
+            <h1
+              className="text-3xl font-bold leading-tight sm:text-4xl sm:leading-[1.08]"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              {personFullName || "—"}
+            </h1>
+            <div
+              className="mt-2.5 grid w-full max-w-md grid-cols-2 gap-x-10 gap-y-1 text-left sm:gap-x-14"
+              style={{ fontFamily: sans }}
+            >
+              <div
+                className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
+                style={{ color: colors.brownMuted }}
               >
-                {lastName}
-              </h1>
-              <p
-                className="mt-2 leading-snug"
-                style={{
-                  fontFamily: sans,
-                  fontSize: 13,
-                  color: colors.brownMuted,
-                }}
+                ENTERED THE CHAT
+              </div>
+              <div
+                className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
+                style={{ color: colors.brownMuted }}
               >
-                {(() => {
-                  const yearFrom = (d: string | null | undefined): string | null => {
-                    if (d == null) return null;
-                    const raw = String(d).trim();
-                    if (!raw) return null;
-                    const formatted = formatDateString(raw);
-                    if (/^\d{4}$/.test(formatted)) return formatted;
-                    const segs = formatted.split("/");
-                    const last = segs[segs.length - 1] ?? "";
-                    if (/^\d{4}$/.test(last)) return last;
-                    const m = raw.match(/(\d{4})/);
-                    return m?.[1] ?? null;
-                  };
-                  const by = yearFrom(person.birth_date);
-                  const dy = yearFrom(person.death_date);
-                  const place = headerBirthPlaceStr.trim();
-                  if (!by && !dy && !place) return "Dates unknown";
-                  let core = "";
-                  if (by && dy) core = `b. ${by} — d. ${dy}`;
-                  else if (by) core = `b. ${by}`;
-                  else if (dy) core = `d. ${dy}`;
-                  return place ? (core ? `${core} · ${place}` : place) : core;
-                })()}
-              </p>
-              {headerGenderBadge ? (
-                <div className="mt-2">
-                  <span
-                    className="inline-block shrink-0 font-medium leading-none"
-                    style={{
-                      fontFamily: sans,
-                      fontSize: 12,
-                      padding: "2px 10px",
-                      borderRadius: 12,
-                      backgroundColor: "var(--dg-badge-tan-bg)",
-                      color: "var(--dg-badge-tan-fg)",
-                    }}
-                  >
-                    {headerGenderBadge}
-                  </span>
-                </div>
-              ) : null}
+                CHECKED OUT
+              </div>
+              <div
+                className="text-base font-medium tabular-nums leading-snug sm:text-lg"
+                style={{ color: colors.brownDark }}
+              >
+                {personProfileYearFromDate(person.birth_date) ?? "—"}
+              </div>
+              <div
+                className="text-base font-medium tabular-nums leading-snug sm:text-lg"
+                style={{ color: colors.brownDark }}
+              >
+                {personProfileYearFromDate(person.death_date) ?? "—"}
+              </div>
             </div>
           </div>
           <div
             ref={headerActionsDropdownRef}
-            className="relative z-[100]"
-            style={{
-              position: "absolute",
-              top: 0,
-              right: 0,
-            }}
+            className="relative z-[100] flex shrink-0 flex-col items-stretch gap-2 self-end sm:self-start sm:items-end"
           >
           <input
             ref={headerPhotoFileInputRef}
@@ -5350,26 +5648,27 @@ export default function PersonProfilePage() {
               if (f) void uploadPhoto(f);
             }}
           />
-          <button
-            type="button"
-            style={btnOutline}
-            aria-expanded={headerMenuOpen}
-            aria-haspopup="menu"
-            aria-controls="person-header-actions-menu"
-            id="person-header-actions-trigger"
-            onClick={() => setHeaderMenuOpen((o) => !o)}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              Actions
-              <span aria-hidden>▾</span>
-            </span>
-          </button>
-          {headerMenuOpen ? (
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              style={btnOutline}
+              aria-expanded={headerMenuOpen}
+              aria-haspopup="menu"
+              aria-controls="person-header-actions-menu"
+              id="person-header-actions-trigger"
+              onClick={() => setHeaderMenuOpen((o) => !o)}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                Actions
+                <span aria-hidden>▾</span>
+              </span>
+            </button>
+            {headerMenuOpen ? (
             <div
               id="person-header-actions-menu"
               role="menu"
               aria-labelledby="person-header-actions-trigger"
-              className="absolute left-0 top-full z-[100] mt-1"
+              className="absolute right-0 top-full z-[100] mt-1"
               style={{
                 minWidth: 200,
                 backgroundColor: colors.cream,
@@ -5478,269 +5777,12 @@ export default function PersonProfilePage() {
           ) : null}
           </div>
         </div>
+        </div>
       </header>
 
-      <section
-        aria-label="The File"
-        style={{
-          backgroundColor: colors.parchment,
-          borderBottom: `1px solid ${colors.brownBorder}`,
-        }}
-      >
-        <div className="mx-auto max-w-6xl px-4 lg:px-8">
-          <div className="flex w-full items-center gap-3 py-3">
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3 text-left"
-              style={{
-                background: "transparent",
-                border: "none",
-                paddingLeft: 0,
-                paddingRight: 0,
-              }}
-              aria-expanded={fileSectionExpanded}
-              onClick={() => setFileSectionExpanded((v) => !v)}
-            >
-              <span
-                className="tracking-wide"
-                style={{
-                  fontFamily: sans,
-                  fontSize: 11,
-                  textTransform: "uppercase",
-                  color: colors.brownMuted,
-                }}
-              >
-                The File
-              </span>
-              <svg
-                width={14}
-                height={14}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke={colors.brownMuted}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-                style={{
-                  flexShrink: 0,
-                  transform: fileSectionExpanded
-                    ? "rotate(180deg)"
-                    : "rotate(0deg)",
-                  transition: "transform 0.15s ease",
-                }}
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-200 sm:h-12 sm:w-12"
-              style={{
-                backgroundColor: fileReceiptsCabinetOpen
-                  ? colors.cream
-                  : "transparent",
-                color: colors.brownDark,
-                boxShadow: fileReceiptsCabinetOpen
-                  ? "inset 0 1px 0 var(--dg-inset-highlight)"
-                  : "none",
-              }}
-              aria-expanded={fileReceiptsCabinetOpen}
-              aria-controls="file-receipts-cabinet"
-              title={
-                fileReceiptsCabinetOpen
-                  ? "Close receipts drawer"
-                  : "Open receipts drawer"
-              }
-              onClick={() => setFileReceiptsCabinetOpen((v) => !v)}
-            >
-              <IconFilingCabinet size={28} />
-            </button>
-          </div>
-          {fileSectionExpanded && fileChips.length > 0 ? (
-            <div className="flex flex-wrap gap-2 pb-4">
-              {fileChips.map(({ label, value }) => (
-                <div
-                  key={label}
-                  className="inline-flex min-w-0 max-w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5"
-                  style={{ backgroundColor: colors.cream }}
-                >
-                  <span
-                    className="font-medium uppercase tracking-wide"
-                    style={{
-                      fontFamily: sans,
-                      fontSize: 10,
-                      letterSpacing: "0.06em",
-                      color: colors.brownMuted,
-                    }}
-                  >
-                    {label}
-                  </span>
-                  <span
-                    className="break-words text-sm leading-snug"
-                    style={{
-                      fontFamily: serif,
-                      color: colors.brownDark,
-                    }}
-                  >
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          <div
-            id="file-receipts-cabinet"
-            aria-hidden={!fileReceiptsCabinetOpen}
-            className="motion-reduce:transition-none"
-            style={{
-              display: "grid",
-              gridTemplateRows: fileReceiptsCabinetOpen ? "1fr" : "0fr",
-              transition: "grid-template-rows 0.45s ease",
-            }}
-          >
-            <div className="min-h-0 overflow-hidden">
-              <div
-                className="pb-4 pt-1"
-                style={{
-                  transform: fileReceiptsCabinetOpen
-                    ? "translateY(0)"
-                    : "translateY(-10px)",
-                  opacity: fileReceiptsCabinetOpen ? 1 : 0,
-                  transition: "transform 0.4s ease, opacity 0.3s ease",
-                }}
-              >
-                <div
-                  className="mb-3 flex flex-col gap-1.5"
-                  style={{ perspective: "800px" }}
-                  aria-hidden
-                >
-                  {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className="h-1.5 rounded-sm"
-                      style={{
-                        backgroundColor: colors.brownBorder,
-                        opacity: 0.35 + i * 0.12,
-                        transform: fileReceiptsCabinetOpen
-                          ? "translateY(0)"
-                          : "translateY(-10px)",
-                        transition: `transform 0.35s ease ${80 + i * 70}ms`,
-                      }}
-                    />
-                  ))}
-                </div>
-                <div
-                  className="rounded-lg border px-4 py-4 sm:px-5 sm:py-5"
-                  style={{
-                    backgroundColor: colors.cream,
-                    borderColor: colors.brownBorder,
-                    boxShadow:
-                      "inset 0 2px 6px rgb(var(--dg-shadow-rgb) / 0.06), 0 6px 20px rgb(var(--dg-shadow-rgb) / 0.08)",
-                  }}
-                >
-                  <h3
-                    className="mb-4 text-xl font-bold"
-                    style={{ fontFamily: serif, color: colors.brownDark }}
-                  >
-                    Receipts
-                  </h3>
-                  {documentRecords.length === 0 ? (
-                    <p
-                      className="text-sm italic"
-                      style={{ fontFamily: sans, color: colors.brownMuted }}
-                    >
-                      No documents linked through events yet.
-                    </p>
-                  ) : (
-                    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {documentRecords.map((rec) => {
-                        const href = signedDocUrls.get(rec.id);
-                        const label = recordTypeLabel(rec);
-                        return (
-                          <li key={rec.id}>
-                            <div
-                              className="h-full rounded-lg border p-4"
-                              style={{
-                                backgroundColor: colors.parchment,
-                                borderColor: colors.brownBorder,
-                                boxShadow:
-                                  "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)",
-                              }}
-                            >
-                              {href ? (
-                                <a
-                                  href={href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-bold leading-snug underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                  style={{
-                                    fontFamily: serif,
-                                    color: colors.forest,
-                                  }}
-                                >
-                                  {label}
-                                </a>
-                              ) : (
-                                <p
-                                  className="font-bold leading-snug"
-                                  style={{
-                                    fontFamily: serif,
-                                    color: colors.brownDark,
-                                  }}
-                                >
-                                  {label}
-                                </p>
-                              )}
-                              <p
-                                className="mt-2 text-xs italic"
-                                style={{
-                                  fontFamily: sans,
-                                  color: colors.brownMuted,
-                                }}
-                              >
-                                Uploaded {formatUploadedAt(rec.created_at)}
-                              </p>
-                              {rec.file_type ? (
-                                <p
-                                  className="mt-1 text-[10px] uppercase tracking-wider"
-                                  style={{
-                                    fontFamily: sans,
-                                    color: colors.brownMuted,
-                                  }}
-                                >
-                                  {rec.file_type}
-                                </p>
-                              ) : null}
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
+      <div className="mx-auto max-w-6xl px-4 pb-8 pt-0 lg:px-8">
         <div id="section-details">
-          <div
-            className="tracking-wide"
-            style={{
-              fontFamily: sans,
-              fontSize: 11,
-              textTransform: "uppercase",
-              color: colors.brownMuted,
-              paddingTop: "2rem",
-              paddingBottom: "0.75rem",
-            }}
-          >
-            The Story
-          </div>
-          <div className="grid gap-10 lg:grid-cols-[1fr_318px] lg:gap-12">
+          <div className="grid gap-5 lg:grid-cols-[1fr_340px] lg:gap-7">
             <section>
               <div
                 className="mb-6 flex items-center justify-between border-b pb-2"
@@ -5750,7 +5792,7 @@ export default function PersonProfilePage() {
                   className="text-2xl font-bold"
                   style={{ fontFamily: serif, color: colors.brownDark }}
                 >
-                  Life &amp; records
+                  The Tea
                 </h2>
                 <button
                   type="button"
@@ -5763,7 +5805,7 @@ export default function PersonProfilePage() {
                     border: `1px solid ${colors.brownBorder}`,
                   }}
                 >
-                  + Add Event
+                  New Intel
                 </button>
               </div>
               {timelineEvents.length === 0 ? (
@@ -5774,14 +5816,8 @@ export default function PersonProfilePage() {
                   No events recorded yet.
                 </p>
               ) : (
-                <div className="relative pl-6">
-                  <div
-                    className="absolute bottom-0 left-[0.75rem] top-0 w-px"
-                    style={{ backgroundColor: colors.brownBorder }}
-                    aria-hidden
-                  />
-                  <ul className="space-y-0">
-                    {timelineEvents.map((ev) => {
+                <ul className="flex flex-col">
+                  {timelineEvents.map((ev, timelineIndex) => {
                       const mergeGroup = eventsSharingTimelineDedupeKey(
                         ev,
                         events
@@ -5811,38 +5847,58 @@ export default function PersonProfilePage() {
                       return (
                         <li
                           key={listKey}
-                          className="flex items-start gap-3 pb-8"
+                          className="flex"
+                          style={{
+                            paddingTop: timelineIndex > 0 ? "2rem" : undefined,
+                            borderTopWidth: timelineIndex > 0 ? 1 : undefined,
+                            borderTopStyle:
+                              timelineIndex > 0 ? "solid" : undefined,
+                            borderTopColor:
+                              timelineIndex > 0
+                                ? colors.brownBorder
+                                : undefined,
+                          }}
                         >
                           <div
-                            className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-                            style={{
-                              backgroundColor: colors.brownDark,
-                            }}
-                          />
-                          <div
-                            className="min-w-[7rem] shrink-0 sm:min-w-[8rem]"
-                            style={{ fontFamily: serif }}
+                            className="shrink-0"
+                            style={{ width: 120, fontFamily: serif }}
                           >
                             <span
-                              className="block text-sm font-bold tracking-wide"
-                              style={{ color: colors.brownMuted }}
+                              className="block text-[2rem] font-bold leading-[1.05] tracking-tight tabular-nums sm:text-[2.35rem]"
+                              style={{ color: colors.brownDark }}
                             >
-                              {eventDateLabel(ev)}
+                              {eventTimelineYearDisplay(ev)}
+                            </span>
+                            <span
+                              className="mt-2 block text-[11px] font-medium leading-snug sm:text-xs"
+                              style={{
+                                fontFamily: sans,
+                                color: colors.brownMuted,
+                              }}
+                            >
+                              {eventTimelineMonthDayLabel(ev)}
+                            </span>
+                            <span
+                              className="mt-2.5 inline-block max-w-full rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize leading-snug tracking-wide"
+                              style={{
+                                fontFamily: sans,
+                                ...timelineEventTypePillStyle(typ),
+                                wordBreak: "break-word",
+                              }}
+                            >
+                              {typ}
                             </span>
                           </div>
                           <div
-                            className="min-w-0 flex-1 pl-4 sm:pl-6"
-                            style={{ borderColor: "transparent" }}
-                          >
-                            <div
-                              className="group relative rounded-md border px-4 py-3"
-                              style={{
-                                backgroundColor: colors.cream,
-                                borderColor: `${colors.brownBorder}99`,
-                                boxShadow:
-                                  "inset 0 1px 0 var(--dg-inset-highlight)",
-                              }}
-                            >
+                            className="mx-4 shrink-0 self-stretch sm:mx-5"
+                            style={{
+                              width: 1,
+                              backgroundColor: colors.brownBorder,
+                            }}
+                            aria-hidden
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="group relative">
                               {!isEditing ? (
                                 <div
                                   className="absolute right-2 top-2 z-20 flex gap-0.5 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:group-focus-within:opacity-100"
@@ -6272,7 +6328,7 @@ export default function PersonProfilePage() {
                                       </div>
                                     ) : null}
                                   </div>
-                                  <div className="mt-3">
+                                  <div className="mt-3 pb-6">
                                     <div className="flex items-center gap-3">
                                       {linkedSources.length > 0 ? (
                                         <button
@@ -6456,7 +6512,7 @@ export default function PersonProfilePage() {
                                       </div>
                                     ) : null}
                                     {sourcesOpen && linkedSources.length > 0 ? (
-                                      <ul className="mt-1 w-full space-y-1.5 pl-0.5">
+                                      <ul className="mt-4 w-full space-y-1.5 pl-0.5">
                                         {linkedSources.map((src) => (
                                           <li key={src.id}>
                                             <div className="flex items-center gap-2">
@@ -6590,7 +6646,7 @@ export default function PersonProfilePage() {
                                   </div>
                                   {eventDeleteConfirmId === ev.id ? (
                                     <div
-                                      className="mt-4 flex flex-wrap items-center gap-2 border-t pt-3"
+                                      className="mt-8 flex flex-wrap items-center gap-2 border-t pt-4"
                                       style={{
                                         borderColor: `${colors.brownBorder}99`,
                                       }}
@@ -6647,36 +6703,152 @@ export default function PersonProfilePage() {
                       );
                     })}
                   </ul>
-                </div>
               )}
             </section>
 
-            <div className="flex w-full min-w-0 flex-row items-start gap-2 lg:sticky lg:top-6 lg:self-start">
+            {/* Grid ties both columns to one row; negative margin lifts this column toward the profile name (h1) — tuned so the card top meets the name cap height, not above it */}
+            <div className="flex w-full min-w-0 flex-row items-stretch gap-2 lg:z-10 lg:-mt-[9rem] lg:sticky lg:top-2 lg:self-start xl:-mt-[9.5rem]">
               <div
-                className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border shadow-md"
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col self-stretch overflow-hidden rounded-lg"
                 style={{
-                  backgroundColor: colors.cream,
-                  borderColor: colors.brownBorder,
-                  boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.06)",
+                  border: `1px solid ${colors.brownBorder}`,
                 }}
               >
-                <aside className="relative z-0 border-0 p-5 shadow-none">
+                <aside className="relative z-0 flex min-h-0 flex-1 flex-col border-0 px-3 py-2 shadow-none sm:px-3">
                 <h2
-                  className="mb-4 text-xl font-bold"
+                  className="mb-3 whitespace-nowrap text-base font-bold leading-tight tracking-tight sm:text-lg lg:text-xl"
                   style={{ fontFamily: serif, color: colors.brownDark }}
                 >
-                  Immediate family
+                  The Usual Suspects
                 </h2>
-              <FamilyGroup
-                title="Parents"
-                members={family.parents}
-                relationshipMetaByPersonId={relationshipMetaByPersonId}
-                onEditRelationship={(meta) => {
-                  setEditRelModal(meta);
-                  setEditRelType(meta.relationshipType);
-                  setEditRelError(null);
-                }}
-              />
+              <div className="mb-5">
+                <h3
+                  className="mb-2 text-xs font-bold uppercase tracking-widest"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Parents
+                </h3>
+                <ul className="m-0 list-none p-0">
+                  <li
+                    className="border-0 border-b border-solid last:border-b-0"
+                    style={{ borderBottomColor: colors.brownBorder }}
+                  >
+                    {parentSlots.father ? (
+                      <FamilyMemberCard
+                        p={parentSlots.father}
+                        crop_x={parentSlots.father.crop_x}
+                        crop_y={parentSlots.father.crop_y}
+                        crop_zoom={parentSlots.father.crop_zoom}
+                        natural_width={parentSlots.father.natural_width}
+                        natural_height={parentSlots.father.natural_height}
+                        relationshipLabel="Father"
+                        onEditRelationship={
+                          relationshipMetaByPersonId[parentSlots.father.id]
+                            ? () => {
+                                const m =
+                                  relationshipMetaByPersonId[
+                                    parentSlots.father!.id
+                                  ];
+                                if (m) {
+                                  setEditRelModal(m);
+                                  setEditRelType(m.relationshipType);
+                                  setEditRelError(null);
+                                }
+                              }
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <UnknownParentSlot
+                        roleLabel="Father"
+                        disabled={effectiveTreeIdForFamily === ""}
+                        onAdd={() =>
+                          openAddFamilyModal({
+                            relationship: "parent",
+                            createGenderDefault: "male",
+                          })
+                        }
+                      />
+                    )}
+                  </li>
+                  <li
+                    className="border-0 border-b border-solid last:border-b-0"
+                    style={{ borderBottomColor: colors.brownBorder }}
+                  >
+                    {parentSlots.mother ? (
+                      <FamilyMemberCard
+                        p={parentSlots.mother}
+                        crop_x={parentSlots.mother.crop_x}
+                        crop_y={parentSlots.mother.crop_y}
+                        crop_zoom={parentSlots.mother.crop_zoom}
+                        natural_width={parentSlots.mother.natural_width}
+                        natural_height={parentSlots.mother.natural_height}
+                        relationshipLabel="Mother"
+                        onEditRelationship={
+                          relationshipMetaByPersonId[parentSlots.mother.id]
+                            ? () => {
+                                const m =
+                                  relationshipMetaByPersonId[
+                                    parentSlots.mother!.id
+                                  ];
+                                if (m) {
+                                  setEditRelModal(m);
+                                  setEditRelType(m.relationshipType);
+                                  setEditRelError(null);
+                                }
+                              }
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <UnknownParentSlot
+                        roleLabel="Mother"
+                        disabled={effectiveTreeIdForFamily === ""}
+                        onAdd={() =>
+                          openAddFamilyModal({
+                            relationship: "parent",
+                            createGenderDefault: "female",
+                          })
+                        }
+                      />
+                    )}
+                  </li>
+                  {parentSlots.overflow.map((p) => (
+                    <li
+                      key={p.id}
+                      className="border-0 border-b border-solid last:border-b-0"
+                      style={{ borderBottomColor: colors.brownBorder }}
+                    >
+                      {(() => {
+                        const relMeta = relationshipMetaByPersonId[p.id];
+                        return (
+                          <FamilyMemberCard
+                            p={p}
+                            crop_x={p.crop_x}
+                            crop_y={p.crop_y}
+                            crop_zoom={p.crop_zoom}
+                            natural_width={p.natural_width}
+                            natural_height={p.natural_height}
+                            relationshipLabel={relationshipUiLabelForProfile(
+                              relMeta?.relationshipType ?? "parent",
+                              p
+                            )}
+                            onEditRelationship={
+                              relMeta
+                                ? () => {
+                                    setEditRelModal(relMeta);
+                                    setEditRelType(relMeta.relationshipType);
+                                    setEditRelError(null);
+                                  }
+                                : undefined
+                            }
+                          />
+                        );
+                      })()}
+                    </li>
+                  ))}
+                </ul>
+              </div>
               <CollapsibleFamilyGroup
                 title="Siblings"
                 members={family.siblings}
@@ -6713,6 +6885,7 @@ export default function PersonProfilePage() {
                   title="Other children"
                   members={family.otherChildren}
                   relationshipMetaByPersonId={relationshipMetaByPersonId}
+                  defaultRelationshipType="child"
                   defaultExpanded={family.spouseWithChildrenGroups.length === 0}
                   onEditRelationship={(meta) => {
                     setEditRelModal(meta);
@@ -6721,19 +6894,8 @@ export default function PersonProfilePage() {
                   }}
                 />
               ) : null}
-              {family.parents.length === 0 &&
-              family.spouses.length === 0 &&
-              family.siblings.length === 0 &&
-              family.children.length === 0 ? (
-                <p
-                  className="text-sm italic"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                >
-                  No relationships linked yet.
-                </p>
-              ) : null}
               <div
-                className="mt-4 border-t pt-3"
+                className="mt-auto border-t pt-3"
                 style={{ borderColor: `${colors.brownBorder}99` }}
               >
                 <button
@@ -6763,6 +6925,232 @@ export default function PersonProfilePage() {
                 </aside>
 
                 <div
+                  id="person-desk-file-panel"
+                  className="absolute inset-0 z-[30] flex min-h-full min-w-0 flex-col overflow-hidden rounded-xl transition-[transform] duration-[250ms] ease-out"
+                  style={{
+                    backgroundColor: colors.parchment,
+                    backgroundImage:
+                      "repeating-linear-gradient(to bottom, transparent 0, transparent 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 27px)",
+                    boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.08)",
+                    transform:
+                      deskPanelOpen === "file"
+                        ? "translateX(0)"
+                        : "translateX(100%)",
+                    pointerEvents: deskPanelOpen === "file" ? "auto" : "none",
+                  }}
+                  role="dialog"
+                  {...(deskPanelOpen === "file" ? { "aria-modal": true } : {})}
+                  aria-hidden={deskPanelOpen !== "file"}
+                  aria-labelledby="person-desk-file-title"
+                >
+                  <div className="flex shrink-0 items-center gap-2 px-2 pb-1 pt-2 sm:px-3 sm:pt-2.5">
+                    <button
+                      type="button"
+                      className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-xl leading-none opacity-75 transition hover:opacity-100"
+                      style={{
+                        fontFamily: sans,
+                        color: colors.brownMuted,
+                        cursor: "pointer",
+                      }}
+                      aria-label="Close Vitals"
+                      title="Close"
+                      onClick={() => setDeskPanelOpen("none")}
+                    >
+                      ×
+                    </button>
+                    <p
+                      id="person-desk-file-title"
+                      className="min-w-0 flex-1 text-left text-xs font-bold uppercase tracking-[0.12em]"
+                      style={{ fontFamily: sans, color: colors.brownMid }}
+                    >
+                      Vitals
+                    </p>
+                    <button
+                      type="button"
+                      className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-md border-0 bg-transparent opacity-75 transition hover:opacity-100"
+                      style={{
+                        fontFamily: sans,
+                        color: colors.brownMuted,
+                        cursor: "pointer",
+                      }}
+                      aria-label="Edit person — vitals are saved from Edit person"
+                      title="Edit vitals (opens Edit person)"
+                      onClick={() => {
+                        setDeskPanelOpen("none");
+                        openEditPersonModal();
+                      }}
+                    >
+                      <IconPencil className="shrink-0" />
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
+                    {fileChips.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {fileChips.map(({ label, value }) => (
+                          <div
+                            key={label}
+                            className="inline-flex min-w-0 max-w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5"
+                            style={{ backgroundColor: colors.cream }}
+                          >
+                            <span
+                              className="font-medium uppercase tracking-wide"
+                              style={{
+                                fontFamily: sans,
+                                fontSize: 10,
+                                letterSpacing: "0.06em",
+                                color: colors.brownMuted,
+                              }}
+                            >
+                              {label}
+                            </span>
+                            <span
+                              className="break-words text-sm leading-snug"
+                              style={{
+                                fontFamily: serif,
+                                color: colors.brownDark,
+                              }}
+                            >
+                              {value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p
+                        className="text-sm italic"
+                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      >
+                        Nothing on file yet.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  id="person-desk-receipts-panel"
+                  className="absolute inset-0 z-[30] flex min-h-full min-w-0 flex-col overflow-hidden rounded-xl transition-[transform] duration-[250ms] ease-out"
+                  style={{
+                    backgroundColor: colors.parchment,
+                    backgroundImage:
+                      "repeating-linear-gradient(to bottom, transparent 0, transparent 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 27px)",
+                    boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.08)",
+                    transform:
+                      deskPanelOpen === "receipts"
+                        ? "translateX(0)"
+                        : "translateX(100%)",
+                    pointerEvents:
+                      deskPanelOpen === "receipts" ? "auto" : "none",
+                  }}
+                  role="dialog"
+                  {...(deskPanelOpen === "receipts"
+                    ? { "aria-modal": true }
+                    : {})}
+                  aria-hidden={deskPanelOpen !== "receipts"}
+                  aria-labelledby="person-desk-receipts-title"
+                >
+                  <div className="flex shrink-0 justify-start px-2 pb-1 pt-2 sm:px-3 sm:pt-2.5">
+                    <button
+                      type="button"
+                      className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-xl leading-none opacity-75 transition hover:opacity-100"
+                      style={{
+                        fontFamily: sans,
+                        color: colors.brownMuted,
+                        cursor: "pointer",
+                      }}
+                      aria-label="Close Receipts"
+                      title="Close"
+                      onClick={() => setDeskPanelOpen("none")}
+                    >
+                      ×
+                    </button>
+                    <span id="person-desk-receipts-title" className="sr-only">
+                      Receipts
+                    </span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
+                    <div
+                      className="rounded-lg border px-4 py-4 sm:px-5 sm:py-5"
+                      style={{
+                        backgroundColor: colors.cream,
+                        borderColor: colors.brownBorder,
+                        boxShadow:
+                          "inset 0 2px 6px rgb(var(--dg-shadow-rgb) / 0.06), 0 6px 20px rgb(var(--dg-shadow-rgb) / 0.08)",
+                      }}
+                    >
+                      <h3
+                        className="mb-4 text-xl font-bold"
+                        style={{ fontFamily: serif, color: colors.brownDark }}
+                      >
+                        Receipts
+                      </h3>
+                      {documentRecords.length === 0 ? (
+                        <p
+                          className="text-sm italic"
+                          style={{
+                            fontFamily: sans,
+                            color: colors.brownMuted,
+                          }}
+                        >
+                          No documents linked through events yet.
+                        </p>
+                      ) : (
+                        <ul
+                          className="m-0 list-none border-t p-0"
+                          style={{ borderColor: `${colors.brownBorder}88` }}
+                        >
+                          {documentRecords.map((item) => {
+                            const rec = item.record;
+                            const href = signedDocUrls.get(rec.id);
+                            const label = recordTypeLabel(rec);
+                            return (
+                              <li
+                                key={rec.id}
+                                className="border-b py-3"
+                                style={{ borderColor: `${colors.brownBorder}88` }}
+                              >
+                                {href ? (
+                                  <a
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="font-bold leading-snug underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                    style={{
+                                      fontFamily: serif,
+                                      color: colors.forest,
+                                    }}
+                                  >
+                                    {label}
+                                  </a>
+                                ) : (
+                                  <p
+                                    className="font-bold leading-snug"
+                                    style={{
+                                      fontFamily: serif,
+                                      color: colors.brownDark,
+                                    }}
+                                  >
+                                    {label}
+                                  </p>
+                                )}
+                                <p
+                                  className="mt-1 text-xs italic"
+                                  style={{
+                                    fontFamily: sans,
+                                    color: colors.brownMuted,
+                                  }}
+                                >
+                                  Event date {item.eventDateLabel}
+                                </p>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div
                 id="person-margin-notes-panel"
                 className="absolute inset-0 z-[30] flex min-h-full min-w-0 flex-col overflow-hidden rounded-xl transition-[transform] duration-[250ms] ease-out"
                 style={{
@@ -6770,14 +7158,15 @@ export default function PersonProfilePage() {
                   backgroundImage:
                     "repeating-linear-gradient(to bottom, transparent 0, transparent 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 27px)",
                   boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.08)",
-                  transform: marginSidebarNotesOpen
-                    ? "translateX(0)"
-                    : "translateX(100%)",
-                  pointerEvents: marginSidebarNotesOpen ? "auto" : "none",
+                  transform:
+                    deskPanelOpen === "margin"
+                      ? "translateX(0)"
+                      : "translateX(100%)",
+                  pointerEvents: deskPanelOpen === "margin" ? "auto" : "none",
                 }}
                 role="dialog"
-                {...(marginSidebarNotesOpen ? { "aria-modal": true } : {})}
-                aria-hidden={!marginSidebarNotesOpen}
+                {...(deskPanelOpen === "margin" ? { "aria-modal": true } : {})}
+                aria-hidden={deskPanelOpen !== "margin"}
                 aria-labelledby="person-margin-notes-title"
               >
                 <div className="flex shrink-0 justify-start px-2 pb-1 pt-2 sm:px-3 sm:pt-2.5">
@@ -6791,7 +7180,7 @@ export default function PersonProfilePage() {
                     }}
                     aria-label="Close The Margin"
                     title="Close"
-                    onClick={() => setMarginSidebarNotesOpen(false)}
+                    onClick={() => setDeskPanelOpen("none")}
                   >
                     ×
                   </button>
@@ -6861,36 +7250,76 @@ export default function PersonProfilePage() {
                 </div>
               </div>
             </div>
-              <button
-                type="button"
-                className="mt-5 flex h-[7.5rem] w-9 shrink-0 cursor-pointer flex-row items-stretch gap-1.5 self-start rounded-r-lg border pl-1 pr-1.5 shadow-md"
-                style={{
-                  backgroundColor: colors.parchment,
-                  borderColor: colors.brownBorder,
-                  boxShadow: "0 3px 12px rgb(var(--dg-shadow-rgb) / 0.07)",
-                }}
-                aria-expanded={marginSidebarNotesOpen}
-                aria-controls="person-margin-notes-panel"
-                onClick={() => setMarginSidebarNotesOpen(true)}
-                title="Open The Margin"
-              >
-                <span
-                  className="w-px shrink-0 self-stretch"
-                  style={{ backgroundColor: colors.brownBorder }}
-                  aria-hidden
-                />
-                <span
-                  className="flex flex-1 items-center justify-center text-[10px] font-medium uppercase tracking-[0.14em]"
-                  style={{
-                    fontFamily: sans,
-                    color: colors.brownMuted,
-                    writingMode: "vertical-rl",
-                    transform: "rotate(180deg)",
-                  }}
-                >
-                  The Margin
-                </span>
-              </button>
+              <div className="flex w-12 shrink-0 flex-col gap-2 self-start">
+                {(
+                  [
+                    {
+                      panel: "margin" as const,
+                      label: "Margin",
+                      controlsId: "person-margin-notes-panel",
+                      idleBg:
+                        "color-mix(in srgb, var(--dg-parchment-deep) 68%, var(--dg-brown-border) 32%)",
+                      idleText: colors.brownMuted,
+                    },
+                    {
+                      panel: "file" as const,
+                      label: "Vitals",
+                      controlsId: "person-desk-file-panel",
+                      idleBg:
+                        "color-mix(in srgb, var(--dg-cream) 58%, var(--dg-parchment) 42%)",
+                      idleText: colors.brownMid,
+                    },
+                    {
+                      panel: "receipts" as const,
+                      label: "Receipts",
+                      controlsId: "person-desk-receipts-panel",
+                      idleBg:
+                        "color-mix(in srgb, var(--dg-parchment) 70%, var(--dg-forest) 30%)",
+                      idleText: colors.brownDark,
+                    },
+                  ] as const
+                ).map((t) => {
+                  const open = deskPanelOpen === t.panel;
+                  return (
+                    <button
+                      key={t.panel}
+                      type="button"
+                      className="relative flex h-[6.25rem] w-full min-w-0 shrink-0 cursor-pointer flex-col items-center justify-center rounded-r-lg border-2 py-2 pl-1.5 pr-2 shadow-md sm:h-28"
+                      style={{
+                        backgroundColor: open ? colors.cream : t.idleBg,
+                        borderColor: open
+                          ? colors.brownOutline
+                          : colors.brownBorder,
+                        boxShadow: open
+                          ? "0 2px 14px rgb(var(--dg-shadow-rgb) / 0.12), inset 0 1px 0 var(--dg-inset-highlight)"
+                          : "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)",
+                      }}
+                      aria-expanded={open}
+                      aria-controls={t.controlsId}
+                      title={t.label}
+                      onClick={() =>
+                        setDeskPanelOpen((c) =>
+                          c === t.panel ? "none" : t.panel
+                        )
+                      }
+                    >
+                      <span
+                        className="max-h-full px-0.5 text-center text-[10px] font-semibold uppercase tracking-[0.16em] sm:text-[11px]"
+                        style={{
+                          fontFamily: sans,
+                          writingMode: "vertical-rl",
+                          transform: "rotate(180deg)",
+                          textOrientation: "mixed",
+                          color: open ? colors.brownDark : t.idleText,
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {t.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -7154,7 +7583,7 @@ export default function PersonProfilePage() {
           }}
         >
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border p-6 shadow-xl"
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
@@ -7169,6 +7598,12 @@ export default function PersonProfilePage() {
             >
               Edit person
             </h2>
+            <p
+              className="-mt-3 mb-5 text-xs leading-snug"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              All fields stored on this profile. Leave blank when unknown.
+            </p>
             <div className="space-y-3">
               <div>
                 <label
@@ -7275,34 +7710,6 @@ export default function PersonProfilePage() {
                   className="mb-1 block text-xs font-bold uppercase tracking-wide"
                   style={{ fontFamily: sans, color: colors.brownMuted }}
                 >
-                  Death place
-                </label>
-                <PlaceInput
-                  value={editPersonDraft.death_place_display}
-                  onChange={(v) =>
-                    setEditPersonDraft((d) =>
-                      d ? { ...d, death_place_display: v, death_place_id: null } : null
-                    )
-                  }
-                  onPlaceSelect={(place) =>
-                    setEditPersonDraft((d) =>
-                      d
-                        ? {
-                            ...d,
-                            death_place_display: place.display,
-                            death_place_id: place.id,
-                          }
-                        : null
-                    )
-                  }
-                  style={modalInputStyle}
-                />
-              </div>
-              <div>
-                <label
-                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                >
                   Birth place
                 </label>
                 <PlaceInput
@@ -7319,6 +7726,34 @@ export default function PersonProfilePage() {
                             ...d,
                             birth_place_display: place.display,
                             birth_place_id: place.id,
+                          }
+                        : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Death place
+                </label>
+                <PlaceInput
+                  value={editPersonDraft.death_place_display}
+                  onChange={(v) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, death_place_display: v, death_place_id: null } : null
+                    )
+                  }
+                  onPlaceSelect={(place) =>
+                    setEditPersonDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            death_place_display: place.display,
+                            death_place_id: place.id,
                           }
                         : null
                     )
@@ -7357,6 +7792,109 @@ export default function PersonProfilePage() {
                     </option>
                   ) : null}
                 </select>
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-marital"
+                >
+                  Marital status
+                </label>
+                <input
+                  id="edit-marital"
+                  type="text"
+                  value={editPersonDraft.marital_status}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, marital_status: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                  placeholder="e.g. Married, Widowed"
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-surviving-spouse"
+                >
+                  Surviving spouse
+                </label>
+                <input
+                  id="edit-surviving-spouse"
+                  type="text"
+                  value={editPersonDraft.surviving_spouse}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, surviving_spouse: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                  placeholder="Full name as on the record"
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-military-branch"
+                >
+                  Military branch
+                </label>
+                <input
+                  id="edit-military-branch"
+                  type="text"
+                  value={editPersonDraft.military_branch}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, military_branch: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-service-number"
+                >
+                  Service number
+                </label>
+                <input
+                  id="edit-service-number"
+                  type="text"
+                  value={editPersonDraft.service_number}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, service_number: e.target.value } : null
+                    )
+                  }
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="edit-cause-of-death"
+                >
+                  Cause of death
+                </label>
+                <textarea
+                  id="edit-cause-of-death"
+                  rows={2}
+                  value={editPersonDraft.cause_of_death}
+                  onChange={(e) =>
+                    setEditPersonDraft((d) =>
+                      d ? { ...d, cause_of_death: e.target.value } : null
+                    )
+                  }
+                  className="resize-y"
+                  style={modalInputStyle}
+                />
               </div>
               <div>
                 <label
@@ -9180,7 +9718,7 @@ export default function PersonProfilePage() {
                 className="text-lg font-semibold"
                 style={{ fontFamily: serif, color: colors.brownDark }}
               >
-                Add Event
+                New Intel
               </h3>
               <button
                 type="button"
