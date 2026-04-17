@@ -158,6 +158,7 @@ create table public.photos (
   user_id uuid not null references auth.users (id) on delete cascade,
   file_url text not null,
   photo_date text,
+  caption text,
   natural_width double precision,
   natural_height double precision,
   crop_x double precision,
@@ -186,6 +187,22 @@ create table public.photo_tags (
 create index if not exists photo_tags_user_id_idx on public.photo_tags (user_id);
 create index if not exists photo_tags_person_id_idx on public.photo_tags (person_id);
 create index if not exists photo_tags_photo_id_idx on public.photo_tags (photo_id);
+
+-- ---------------------------------------------------------------------------
+-- public.photo_event_tags
+-- ---------------------------------------------------------------------------
+create table public.photo_event_tags (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  photo_id uuid not null references public.photos (id) on delete cascade,
+  event_id uuid not null references public.events (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (photo_id, event_id)
+);
+
+create index if not exists photo_event_tags_user_id_idx on public.photo_event_tags (user_id);
+create index if not exists photo_event_tags_photo_id_idx on public.photo_event_tags (photo_id);
+create index if not exists photo_event_tags_event_id_idx on public.photo_event_tags (event_id);
 
 -- ---------------------------------------------------------------------------
 -- public.person_notes (from migration 20260327120000)

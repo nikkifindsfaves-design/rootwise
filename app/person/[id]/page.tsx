@@ -294,6 +294,19 @@ type EventSourceRow = {
   created_at: string;
 };
 
+type PhotoEventTagRow = {
+  photo_id: string;
+  event_id: string;
+};
+
+type LinkedSourceItem = {
+  id: string;
+  label: string;
+  url: string | null;
+  kind: "document" | "web";
+  host: string | null;
+};
+
 const SIGNED_URL_EXPIRY_SEC = 3600;
 
 type EventCluster = {
@@ -325,6 +338,54 @@ function documentsObjectPathFromFileUrl(fileUrl: string): string | null {
     return null;
   }
   return null;
+}
+
+function normalizeWebUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolveRecordHref(
+  record: RecordRow,
+  signedDocUrls: Map<string, string>
+): string | null {
+  const signed = signedDocUrls.get(record.id)?.trim();
+  if (signed) return signed;
+  const raw = record.file_url?.trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return null;
+}
+
+function isWebRecord(record: RecordRow): boolean {
+  const fileType = (record.file_type ?? "").trim().toLowerCase();
+  if (fileType === "text/uri-list") return true;
+  const raw = record.file_url?.trim();
+  if (!raw || !/^https?:\/\//i.test(raw)) return false;
+  return documentsObjectPathFromFileUrl(raw) == null;
+}
+
+function sourceHostLabel(href: string | null): string | null {
+  if (!href) return null;
+  try {
+    const host = new URL(href).hostname.trim().toLowerCase();
+    if (!host) return null;
+    return host.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }
 
 function parseEventDateMs(s: string | null | undefined): number | null {
@@ -360,9 +421,9 @@ function clusterLinkedSources(
   sourcesByEventId: Map<string, EventSourceRow[]>,
   recordsById: Map<string, RecordRow>,
   signedDocUrls: Map<string, string>
-): { id: string; label: string; url: string | null }[] {
+): LinkedSourceItem[] {
   const seen = new Set<string>();
-  const out: { id: string; label: string; url: string | null }[] = [];
+  const out: LinkedSourceItem[] = [];
 
   for (const ev of cluster.events) {
     for (const row of sourcesByEventId.get(ev.id) ?? []) {
@@ -370,20 +431,26 @@ function clusterLinkedSources(
       if (!rid || seen.has(rid) || !recordsById.has(rid)) continue;
       seen.add(rid);
       const rec = recordsById.get(rid)!;
+      const href = resolveRecordHref(rec, signedDocUrls);
       out.push({
         id: rid,
         label: recordTypeLabel(rec),
-        url: signedDocUrls.get(rid) ?? null,
+        url: href,
+        kind: isWebRecord(rec) ? "web" : "document",
+        host: sourceHostLabel(href),
       });
     }
     const legacy = ev.record_id?.trim();
     if (legacy && !seen.has(legacy) && recordsById.has(legacy)) {
       seen.add(legacy);
       const rec = recordsById.get(legacy)!;
+      const href = resolveRecordHref(rec, signedDocUrls);
       out.push({
         id: legacy,
         label: recordTypeLabel(rec),
-        url: signedDocUrls.get(legacy) ?? null,
+        url: href,
+        kind: isWebRecord(rec) ? "web" : "document",
+        host: sourceHostLabel(href),
       });
     }
   }
@@ -904,6 +971,28 @@ function IconTag({ className }: { className?: string }) {
   );
 }
 
+function IconPhoto({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" ry="2" />
+      <circle cx="9" cy="10" r="2" />
+      <path d="M21 16l-5-5L5 19" />
+    </svg>
+  );
+}
+
 function formatUploadedAt(iso: string | null): string {
   if (!iso) return "—";
   try {
@@ -917,6 +1006,14 @@ function formatUploadedAt(iso: string | null): string {
   } catch {
     return iso;
   }
+}
+
+function photoYearLabel(photoDateRaw: unknown): string {
+  if (typeof photoDateRaw !== "string") return "—";
+  const s = photoDateRaw.trim();
+  if (!s) return "—";
+  const y = s.match(/(\d{4})/);
+  return y?.[1] ?? "—";
 }
 
 function sortEventsChronologically(events: EventRow[]): EventRow[] {
@@ -937,6 +1034,38 @@ function parseCreatedAtMs(s: string | null | undefined): number {
   if (s == null || String(s).trim() === "") return 0;
   const t = Date.parse(String(s));
   return Number.isNaN(t) ? 0 : t;
+}
+
+function personBirthSortMs(raw: string | null | undefined): number | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) return t;
+  const y = s.match(/(\d{4})/);
+  if (!y) return null;
+  const byYear = Date.parse(`${y[1]}-01-01`);
+  return Number.isNaN(byYear) ? null : byYear;
+}
+
+function personNameSortKey(p: PersonRow): string {
+  return [p.first_name, p.middle_name ?? "", p.last_name]
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function sortPeopleOldestToYoungest(rows: PersonRow[]): PersonRow[] {
+  return [...rows].sort((a, b) => {
+    const am = personBirthSortMs(a.birth_date);
+    const bm = personBirthSortMs(b.birth_date);
+    if (am == null && bm == null) {
+      return personNameSortKey(a).localeCompare(personNameSortKey(b));
+    }
+    if (am == null) return 1;
+    if (bm == null) return -1;
+    if (am !== bm) return am - bm;
+    return personNameSortKey(a).localeCompare(personNameSortKey(b));
+  });
 }
 
 /** Same bucket = one timeline row (after dedupe). */
@@ -1141,6 +1270,8 @@ function FamilyMemberCard({
   natural_width,
   natural_height,
   relationshipLabel,
+  nameMeta,
+  hideRelationshipLabel = false,
   onEditRelationship,
 }: {
   p: PersonRow;
@@ -1150,6 +1281,8 @@ function FamilyMemberCard({
   natural_width?: number | null;
   natural_height?: number | null;
   relationshipLabel: string;
+  nameMeta?: string | null;
+  hideRelationshipLabel?: boolean;
   onEditRelationship?: () => void;
 }) {
   const displayName = [p.first_name, p.middle_name ?? "", p.last_name]
@@ -1252,12 +1385,22 @@ function FamilyMemberCard({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p
-          className="break-words text-[15px] font-semibold leading-snug"
-          style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
-        >
-          {nameLine}
-        </p>
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <p
+            className="break-words text-[15px] font-semibold leading-snug"
+            style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
+          >
+            {nameLine}
+          </p>
+          {nameMeta ? (
+            <span
+              className="shrink-0 text-[11px] font-semibold"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              {nameMeta}
+            </span>
+          ) : null}
+        </div>
         {dateDetail ? (
           <p
             className="mt-0.5 break-words text-[11px] leading-snug"
@@ -1283,12 +1426,14 @@ function FamilyMemberCard({
             ✎
           </button>
         ) : null}
-        <span
-          className="max-w-[5.5rem] text-right text-[10px] font-bold uppercase leading-snug tracking-[0.14em]"
-          style={{ fontFamily: sans, color: colors.brownMuted, wordBreak: "break-word" }}
-        >
-          {relationshipLabel}
-        </span>
+        {!hideRelationshipLabel ? (
+          <span
+            className="max-w-[5.5rem] text-right text-[10px] font-bold uppercase leading-snug tracking-[0.14em]"
+            style={{ fontFamily: sans, color: colors.brownMuted, wordBreak: "break-word" }}
+          >
+            {relationshipLabel}
+          </span>
+        ) : null}
       </div>
     </Link>
   );
@@ -1301,6 +1446,7 @@ function CollapsibleFamilyGroup({
   onEditRelationship,
   defaultExpanded = false,
   defaultRelationshipType = "sibling",
+  containerClassName = "mb-3",
 }: {
   title: string;
   members: PersonRow[];
@@ -1309,6 +1455,7 @@ function CollapsibleFamilyGroup({
   defaultExpanded?: boolean;
   /** Used when `relationshipMetaByPersonId` has no row for a member. */
   defaultRelationshipType?: string;
+  containerClassName?: string;
 }) {
   const baseId = useId();
   const headerId = `${baseId}-hdr`;
@@ -1318,7 +1465,7 @@ function CollapsibleFamilyGroup({
   if (members.length === 0) return null;
 
   return (
-    <div className="mb-5">
+    <div className={containerClassName}>
       <button
         type="button"
         id={headerId}
@@ -1390,6 +1537,7 @@ function CollapsibleFamilyGroup({
 function SpouseWithChildrenCollapsible({
   spouse,
   children: kids,
+  marriageYear,
   relationshipMetaByPersonId,
   onEditRelationship,
   onAddChildWithSpouse,
@@ -1397,116 +1545,95 @@ function SpouseWithChildrenCollapsible({
 }: {
   spouse: PersonRow;
   children: PersonRow[];
+  marriageYear?: string | null;
   relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
   onEditRelationship: (meta: RelationshipMeta) => void;
   onAddChildWithSpouse: (spouse: PersonRow) => void;
   defaultExpanded?: boolean;
 }) {
   const baseId = useId();
-  const headerId = `${baseId}-hdr`;
   const panelId = `${baseId}-panel`;
+  const toggleId = `${baseId}-toggle`;
   const [expanded, setExpanded] = useState(defaultExpanded);
 
-  const label = [spouse.first_name, spouse.middle_name ?? "", spouse.last_name]
+  const childCountLabel = kids.length === 1 ? "1 child" : `${kids.length} children`;
+  const spouseRelMeta = relationshipMetaByPersonId[spouse.id];
+  const spouseName = [spouse.first_name, spouse.middle_name ?? "", spouse.last_name]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" ");
-  const headerText = label || "Spouse";
-  const childLabel =
-    kids.length === 0
-      ? "0 children"
-      : kids.length === 1
-        ? "1 child"
-        : `${kids.length} children`;
-
-  const spouseRelMeta = relationshipMetaByPersonId[spouse.id];
 
   return (
-    <div className="mb-5">
-      <button
-        type="button"
-        id={headerId}
-        aria-expanded={expanded}
-        aria-controls={panelId}
-        onClick={() => setExpanded((v) => !v)}
-        className="mb-2 flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-0 py-1 text-left transition hover:border-[color-mix(in_srgb,var(--dg-brown-border)_55%,transparent)]"
-        style={{ fontFamily: sans }}
+    <div
+      className="mb-3 rounded-md border p-2.5"
+      style={{
+        borderColor: colors.brownBorder,
+        borderLeftWidth: 3,
+        borderLeftColor: "color-mix(in srgb, var(--dg-forest) 60%, var(--dg-brown-border))",
+        backgroundColor: "color-mix(in srgb, var(--dg-parchment) 82%, var(--dg-cream))",
+      }}
+    >
+      <p
+        className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em]"
+        style={{ fontFamily: sans, color: colors.brownMuted }}
       >
-        <span
-          className="min-w-0 flex-1 text-xs font-bold uppercase tracking-widest"
-          style={{ color: colors.brownMuted }}
+        Spouse
+      </p>
+      <div
+        className="border-0 border-b border-solid"
+        style={{ borderBottomColor: colors.brownBorder }}
+      >
+        <FamilyMemberCard
+          p={spouse}
+          crop_x={spouse.crop_x}
+          crop_y={spouse.crop_y}
+          crop_zoom={spouse.crop_zoom}
+          natural_width={spouse.natural_width}
+          natural_height={spouse.natural_height}
+          relationshipLabel=""
+          nameMeta={marriageYear ? `m. ${marriageYear}` : null}
+          hideRelationshipLabel
+          onEditRelationship={
+            spouseRelMeta ? () => onEditRelationship(spouseRelMeta) : undefined
+          }
+        />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between">
+        <button
+          type="button"
+          id={toggleId}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-2 border-none bg-transparent p-0 text-left text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline"
+          style={{ fontFamily: sans, color: colors.brownMuted }}
         >
-          <span className="block break-words">{headerText}</span>
           <span
-            className="mt-0.5 block text-[0.65rem] font-semibold normal-case tracking-normal"
-            style={{ color: colors.brownMid }}
+            className="inline-flex h-4 w-4 items-center justify-center text-[11px] leading-none"
+            aria-hidden
           >
-            Spouse · {childLabel}
-          </span>
-        </span>
-        <span
-          className="flex shrink-0 items-center gap-2 text-xs font-semibold tabular-nums"
-          style={{ color: colors.brownMuted }}
-        >
-          <span aria-hidden className="inline-block w-3 text-center">
             {expanded ? "−" : "+"}
           </span>
-        </span>
-      </button>
+          <span>{expanded ? `Hide ${childCountLabel}` : `Show ${childCountLabel}`}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onAddChildWithSpouse(spouse)}
+          className="border-none bg-transparent p-0 text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline"
+          style={{ fontFamily: sans, color: colors.forest }}
+        >
+          + Add child
+        </button>
+      </div>
       {expanded ? (
         <div
           id={panelId}
-          className="space-y-3"
+          className="mt-2 space-y-3"
           role="region"
-          aria-labelledby={headerId}
+          aria-labelledby={toggleId}
         >
-          <ul className="m-0 list-none p-0">
-            <li
-              className={
-                kids.length > 0
-                  ? "border-0 border-b border-solid"
-                  : undefined
-              }
-              style={
-                kids.length > 0
-                  ? { borderBottomColor: colors.brownBorder }
-                  : undefined
-              }
-            >
-              <FamilyMemberCard
-                p={spouse}
-                crop_x={spouse.crop_x}
-                crop_y={spouse.crop_y}
-                crop_zoom={spouse.crop_zoom}
-                natural_width={spouse.natural_width}
-                natural_height={spouse.natural_height}
-                relationshipLabel="Spouse"
-                onEditRelationship={
-                  spouseRelMeta
-                    ? () => onEditRelationship(spouseRelMeta)
-                    : undefined
-                }
-              />
-            </li>
-          </ul>
-          <div>
-            <button
-              type="button"
-              onClick={() => onAddChildWithSpouse(spouse)}
-              className="border-none bg-transparent p-0 text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline"
-              style={{ fontFamily: sans, color: colors.forest }}
-            >
-              + Add child with this spouse
-            </button>
-          </div>
           {kids.length > 0 ? (
             <div>
-              <h4
-                className="mb-2 text-xs font-bold uppercase tracking-widest"
-                style={{ fontFamily: sans, color: colors.brownMuted }}
-              >
-                Children
-              </h4>
               <ul className="m-0 list-none p-0">
                 {kids.map((p, i) => {
                   const relMeta = relationshipMetaByPersonId[p.id];
@@ -1695,10 +1822,14 @@ export default function PersonProfilePage() {
   const [person, setPerson] = useState<PersonRow | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [photoRows, setPhotoRows] = useState<Record<string, unknown>[]>([]);
+  const [photoEventTags, setPhotoEventTags] = useState<PhotoEventTagRow[]>([]);
   const [polaroidNaturalByKey, setPolaroidNaturalByKey] = useState<
     Record<string, { w: number; h: number }>
   >({});
   const [portraitsGalleryOpen, setPortraitsGalleryOpen] = useState(false);
+  const [eventPhotoGalleryEventId, setEventPhotoGalleryEventId] = useState<
+    string | null
+  >(null);
   const [recordsById, setRecordsById] = useState<Map<string, RecordRow>>(
     new Map()
   );
@@ -1868,11 +1999,15 @@ export default function PersonProfilePage() {
     null
   );
   const [sourceUploading, setSourceUploading] = useState(false);
+  const [pendingSourceMode, setPendingSourceMode] = useState<"file" | "link">(
+    "file"
+  );
   const [pendingSourceFile, setPendingSourceFile] = useState<{
     eventId: string;
     file: File;
   } | null>(null);
   const [pendingSourceName, setPendingSourceName] = useState("");
+  const [pendingSourceUrl, setPendingSourceUrl] = useState("");
   const [editingResearchNotesEventId, setEditingResearchNotesEventId] =
     useState<string | null>(null);
   const headerActionsDropdownRef = useRef<HTMLDivElement>(null);
@@ -1882,8 +2017,15 @@ export default function PersonProfilePage() {
     string,
     unknown
   > | null>(null);
+  const [photoPreviewModal, setPhotoPreviewModal] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1.0);
+  const [cropModalDate, setCropModalDate] = useState("");
+  const [cropModalCaption, setCropModalCaption] = useState("");
+  const [cropModalEventId, setCropModalEventId] = useState<string | null>(null);
   const [cropNaturalSize, setCropNaturalSize] = useState<{
     w: number;
     h: number;
@@ -1904,6 +2046,8 @@ export default function PersonProfilePage() {
   } | null>(null);
   const [photoSetupZoom, setPhotoSetupZoom] = useState(1.0);
   const [photoSetupDate, setPhotoSetupDate] = useState("");
+  const [photoSetupCaption, setPhotoSetupCaption] = useState("");
+  const [photoSetupEventId, setPhotoSetupEventId] = useState<string | null>(null);
   const [photoSetupTags, setPhotoSetupTags] = useState<PhotoSetupTagPerson[]>(
     []
   );
@@ -1946,6 +2090,7 @@ export default function PersonProfilePage() {
     photoSetupModal && typeof photoSetupModal.id === "string"
       ? photoSetupModal.id
       : null;
+  const eventIds = useMemo(() => events.map((e) => e.id), [events]);
 
   useEffect(() => {
     setExpandedTimelineNotesKeys(new Set());
@@ -1989,6 +2134,10 @@ export default function PersonProfilePage() {
     setAddFamilyCreateBusy(false);
     setAddFamilyCreateError(null);
     setCropModalPhoto(null);
+    setPhotoPreviewModal(null);
+    setCropModalDate("");
+    setCropModalCaption("");
+    setCropModalEventId(null);
     setRelationshipMetaByPersonId({});
     setEditRelModal(null);
     setEditRelType("");
@@ -2003,6 +2152,8 @@ export default function PersonProfilePage() {
     photoSetupOffsetHydratedRef.current = false;
     setPhotoSetupZoom(1.0);
     setPhotoSetupDate("");
+    setPhotoSetupCaption("");
+    setPhotoSetupEventId(null);
     setPhotoSetupTags([]);
     setPhotoSetupTagSearch("");
     setPhotoSetupTagResults([]);
@@ -2015,8 +2166,10 @@ export default function PersonProfilePage() {
     setTagModalResults([]);
     setTagModalSaving(false);
     setTagModalError(null);
+    setPhotoEventTags([]);
     setHeaderMenuOpen(false);
     setPortraitsGalleryOpen(false);
+    setEventPhotoGalleryEventId(null);
     setPolaroidNaturalByKey({});
   }, [personId]);
 
@@ -2062,12 +2215,44 @@ export default function PersonProfilePage() {
   useEffect(() => {
     if (!photoSetupModalId) {
       setPhotoSetupNaturalSize(null);
+      setPhotoSetupDate("");
+      setPhotoSetupCaption("");
+      setPhotoSetupEventId(null);
       return;
     }
     setPhotoSetupNaturalSize(null);
     setPhotoSetupOffset({ x: 0, y: 0 });
     photoSetupOffsetHydratedRef.current = false;
-  }, [photoSetupModalId]);
+    const photoDate =
+      photoSetupModal && typeof photoSetupModal.photo_date === "string"
+        ? photoSetupModal.photo_date
+        : "";
+    const caption =
+      photoSetupModal && typeof photoSetupModal.caption === "string"
+        ? photoSetupModal.caption
+        : "";
+    setPhotoSetupDate(photoDate);
+    setPhotoSetupCaption(caption);
+    const linked = photoEventTags.find((t) => t.photo_id === photoSetupModalId);
+    setPhotoSetupEventId(linked?.event_id ?? null);
+  }, [photoSetupModalId, photoSetupModal, photoEventTags]);
+
+  useEffect(() => {
+    if (!cropModalPhotoId) {
+      setCropModalDate("");
+      setCropModalCaption("");
+      setCropModalEventId(null);
+      return;
+    }
+    const row = photoRows.find((r) => r.id === cropModalPhotoId) ?? null;
+    const photoDate =
+      row && typeof row.photo_date === "string" ? row.photo_date : "";
+    const caption = row && typeof row.caption === "string" ? row.caption : "";
+    setCropModalDate(photoDate);
+    setCropModalCaption(caption);
+    const linked = photoEventTags.find((t) => t.photo_id === cropModalPhotoId);
+    setCropModalEventId(linked?.event_id ?? null);
+  }, [cropModalPhotoId, photoRows, photoEventTags]);
 
   useEffect(() => {
     if (!cropModalPhoto || !cropNaturalSize || cropOffsetHydratedRef.current) {
@@ -2569,7 +2754,7 @@ export default function PersonProfilePage() {
     const childIdArr = [...children];
     if (spouses.size === 0) {
       spouseWithChildrenGroups = [];
-      otherChildrenRows = pick(children);
+      otherChildrenRows = sortPeopleOldestToYoungest(pick(children));
     } else if (childIdArr.length === 0) {
       spouseWithChildrenGroups = pick(spouses).map((s) => ({
         spouse: s,
@@ -2631,7 +2816,9 @@ export default function PersonProfilePage() {
       const spouseRows = pick(spouses);
       const groups = spouseRows.map((s) => ({
         spouse: s,
-        children: pick(new Set(childrenBySpouseId.get(s.id) ?? [])),
+        children: sortPeopleOldestToYoungest(
+          pick(new Set(childrenBySpouseId.get(s.id) ?? []))
+        ),
       }));
 
       const birthSortKey = (iso: string | null): string => {
@@ -2669,7 +2856,9 @@ export default function PersonProfilePage() {
       });
 
       spouseWithChildrenGroups = groups;
-      otherChildrenRows = pick(new Set(ungroupedChildIds));
+      otherChildrenRows = sortPeopleOldestToYoungest(
+        pick(new Set(ungroupedChildIds))
+      );
     }
 
     let photosParsed: Record<string, unknown>[] = [];
@@ -2796,6 +2985,23 @@ export default function PersonProfilePage() {
         return tb - ta;
       });
 
+    let photoEventTagRows: PhotoEventTagRow[] = [];
+    const sortedEventIds = sortedEvents.map((e) => e.id);
+    if (tagPhotoIds.length > 0 && sortedEventIds.length > 0) {
+      const { data: petData, error: petErr } = await supabase
+        .from("photo_event_tags")
+        .select("photo_id, event_id")
+        .eq("user_id", user.id)
+        .in("photo_id", tagPhotoIds)
+        .in("event_id", sortedEventIds);
+      if (petErr) {
+        setError(petErr.message);
+        setLoading(false);
+        return;
+      }
+      photoEventTagRows = (petData ?? []) as PhotoEventTagRow[];
+    }
+
     let sourceRows: EventSourceRow[] = [];
     const eventIds = sortedEvents.map((e) => e.id);
     if (eventIds.length > 0) {
@@ -2863,12 +3069,13 @@ export default function PersonProfilePage() {
     setEvents(sortedEvents);
     setEventSources(sourceRows);
     setPhotoRows(photosParsed);
+    setPhotoEventTags(photoEventTagRows);
     setRecordsById(recMap);
     setFamily({
       parents: pick(parents),
       spouses: pick(spouses),
-      siblings: pick(siblings),
-      children: pick(children),
+      siblings: sortPeopleOldestToYoungest(pick(siblings)),
+      children: sortPeopleOldestToYoungest(pick(children)),
       spouseWithChildrenGroups,
       otherChildren: otherChildrenRows,
     });
@@ -3103,10 +3310,56 @@ export default function PersonProfilePage() {
     return m;
   }, [eventSources]);
 
+  const photoRowById = useMemo(() => {
+    const m = new Map<string, Record<string, unknown>>();
+    for (const row of photoRows) {
+      if (typeof row.id === "string") m.set(row.id, row);
+    }
+    return m;
+  }, [photoRows]);
+
+  const eventPhotosByEventId = useMemo(() => {
+    const m = new Map<string, Record<string, unknown>[]>();
+    for (const link of photoEventTags) {
+      const row = photoRowById.get(link.photo_id);
+      if (!row) continue;
+      if (!m.has(link.event_id)) m.set(link.event_id, []);
+      m.get(link.event_id)!.push(row);
+    }
+    return m;
+  }, [photoEventTags, photoRowById]);
+
   const timelineEvents = useMemo(
     () => sortEventsChronologically(dedupeTimelineEvents(events)),
     [events]
   );
+
+  const marriageEventYears = useMemo(() => {
+    const years: string[] = [];
+    for (const ev of events) {
+      if ((ev.event_type ?? "").trim().toLowerCase() !== "marriage") continue;
+      const d = (ev.event_date ?? "").trim();
+      if (!d) continue;
+      const m = d.match(/(\d{4})/);
+      if (m?.[1]) years.push(m[1]);
+    }
+    return years;
+  }, [events]);
+
+  const marriageYearBySpouseId = useMemo(() => {
+    const out = new Map<string, string>();
+    const spouseGroups = family.spouseWithChildrenGroups;
+    if (spouseGroups.length === 0 || marriageEventYears.length === 0) return out;
+    if (spouseGroups.length === 1) {
+      out.set(spouseGroups[0]!.spouse.id, marriageEventYears[0]!);
+      return out;
+    }
+    if (spouseGroups.length !== marriageEventYears.length) return out;
+    for (let i = 0; i < spouseGroups.length; i++) {
+      out.set(spouseGroups[i]!.spouse.id, marriageEventYears[i]!);
+    }
+    return out;
+  }, [family.spouseWithChildrenGroups, marriageEventYears]);
 
   function extFromImageFile(file: File): string {
     const t = (file.type || "").toLowerCase();
@@ -3243,6 +3496,8 @@ export default function PersonProfilePage() {
       setPhotoSetupModal(inserted);
       setPhotoSetupZoom(1.0);
       setPhotoSetupDate("");
+      setPhotoSetupCaption("");
+      setPhotoSetupEventId(null);
       setPhotoSetupTagSearch("");
       setPhotoSetupTagResults([]);
       setPhotoSetupError(null);
@@ -3355,11 +3610,38 @@ export default function PersonProfilePage() {
     await load();
   }
 
+  async function savePhotoEventLink(
+    supabase: ReturnType<typeof createClient>,
+    userId: string,
+    photoId: string,
+    selectedEventId: string | null
+  ): Promise<string | null> {
+    if (!eventIds.length) return null;
+    const { error: delErr } = await supabase
+      .from("photo_event_tags")
+      .delete()
+      .eq("photo_id", photoId)
+      .eq("user_id", userId)
+      .in("event_id", eventIds);
+    if (delErr) return delErr.message;
+    if (!selectedEventId) return null;
+    const { error: insErr } = await supabase.from("photo_event_tags").insert({
+      photo_id: photoId,
+      event_id: selectedEventId,
+      user_id: userId,
+    });
+    if (insErr) return insErr.message;
+    return null;
+  }
+
   async function saveCropPosition(
     photoRowId: string,
     x: number,
     y: number,
-    zoom: number
+    zoom: number,
+    photoDate: string,
+    caption: string,
+    eventId: string | null
   ) {
     // requires crop_zoom on photos; crop_x, crop_y, crop_zoom on photo_tags for tagged rows
     const supabase = createClient();
@@ -3394,6 +3676,28 @@ export default function PersonProfilePage() {
           .eq("user_id", user.id);
     if (error) {
       setPhotoUploadError(error.message);
+      return;
+    }
+    const { error: metaErr } = await supabase
+      .from("photos")
+      .update({
+        photo_date: photoDate.trim() || null,
+        caption: caption.trim() || null,
+      })
+      .eq("id", photoRowId)
+      .eq("user_id", user.id);
+    if (metaErr) {
+      setPhotoUploadError(metaErr.message);
+      return;
+    }
+    const eventLinkErr = await savePhotoEventLink(
+      supabase,
+      user.id,
+      photoRowId,
+      eventId
+    );
+    if (eventLinkErr) {
+      setPhotoUploadError(eventLinkErr);
       return;
     }
     await load();
@@ -3956,10 +4260,12 @@ export default function PersonProfilePage() {
       );
       const cz = Math.min(3, Math.max(1, photoSetupZoom));
       const dateTrim = photoSetupDate.trim();
+      const captionTrim = photoSetupCaption.trim();
       const { error: upErr } = await supabase
         .from("photos")
         .update({
           photo_date: dateTrim === "" ? null : dateTrim,
+          caption: captionTrim === "" ? null : captionTrim,
         })
         .eq("id", photoId)
         .eq("user_id", user.id);
@@ -4022,8 +4328,20 @@ export default function PersonProfilePage() {
           return;
         }
       }
+      const eventLinkErr = await savePhotoEventLink(
+        supabase,
+        user.id,
+        photoId,
+        photoSetupEventId
+      );
+      if (eventLinkErr) {
+        setPhotoSetupError(eventLinkErr);
+        return;
+      }
       photoSetupSearchSeqRef.current += 1;
       setPhotoSetupModal(null);
+      setPhotoSetupCaption("");
+      setPhotoSetupEventId(null);
       await load();
     } finally {
       setPhotoSetupSaving(false);
@@ -4034,6 +4352,8 @@ export default function PersonProfilePage() {
     photoSetupSearchSeqRef.current += 1;
     setPhotoSetupModal(null);
     setPhotoSetupError(null);
+    setPhotoSetupCaption("");
+    setPhotoSetupEventId(null);
     void load();
   }
 
@@ -5018,11 +5338,63 @@ export default function PersonProfilePage() {
       setAddingSourceEventId(null);
       setPendingSourceFile(null);
       setPendingSourceName("");
+      setPendingSourceUrl("");
+      setPendingSourceMode("file");
       await load();
     } catch (err) {
       const msg = err instanceof Error ? err.message : JSON.stringify(err);
       console.error("Source upload failed:", msg);
       alert("Upload failed: " + msg);
+    } finally {
+      setSourceUploading(false);
+    }
+  }
+
+  async function handleAddSourceLink(eventId: string, rawUrl: string) {
+    const normalized = normalizeWebUrl(rawUrl);
+    if (!normalized) {
+      alert("Please enter a valid web link.");
+      return;
+    }
+    setSourceUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: recordRow, error: recordErr } = await supabase
+        .from("records")
+        .insert({
+          user_id: user.id,
+          tree_id: person?.tree_id ?? null,
+          file_type: "text/uri-list",
+          file_url: normalized,
+          record_type: pendingSourceName.trim() || "Web link",
+        })
+        .select("id")
+        .maybeSingle();
+
+      if (recordErr || !recordRow) throw recordErr;
+
+      await supabase.from("event_sources").insert({
+        event_id: eventId,
+        record_id: recordRow.id,
+        notes: pendingSourceName.trim() || null,
+        user_id: user.id,
+      });
+
+      setAddingSourceEventId(null);
+      setPendingSourceFile(null);
+      setPendingSourceName("");
+      setPendingSourceUrl("");
+      setPendingSourceMode("file");
+      await load();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.error("Source link save failed:", msg);
+      alert("Could not save link: " + msg);
     } finally {
       setSourceUploading(false);
     }
@@ -5839,6 +6211,8 @@ export default function PersonProfilePage() {
                       );
                       const sourcesOpen =
                         expandedTimelineSourcesKeys.has(ev.id);
+                      const eventPhotoCount =
+                        eventPhotosByEventId.get(ev.id)?.length ?? 0;
                       const descLines =
                         clusterDescriptionLines(mergeCluster);
                       const listKey = ev.id;
@@ -5900,44 +6274,46 @@ export default function PersonProfilePage() {
                           <div className="min-w-0 flex-1">
                             <div className="group relative">
                               {!isEditing ? (
-                                <div
-                                  className="absolute right-2 top-2 z-20 flex gap-0.5 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:group-focus-within:opacity-100"
-                                  role="toolbar"
-                                  aria-label="Event actions"
-                                >
-                                  <button
-                                    type="button"
-                                    title="Edit event"
-                                    className="rounded border border-transparent p-1.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
-                                    style={{
-                                      color: colors.brownMid,
-                                      cursor: "pointer",
-                                      backgroundColor: "transparent",
-                                    }}
-                                    onClick={() => {
-                                      setEventDeleteConfirmId(null);
-                                      startEditEvent(ev);
-                                    }}
+                                <>
+                                  <div
+                                    className="absolute right-0 top-0 z-20 flex items-center gap-1 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                                    role="toolbar"
+                                    aria-label="Event actions"
                                   >
-                                    <IconPencil />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title="Delete event"
-                                    className="rounded border border-transparent p-1.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
-                                    style={{
-                                      color: "var(--dg-danger)",
-                                      cursor: "pointer",
-                                      backgroundColor: "transparent",
-                                    }}
-                                    onClick={() => {
-                                      cancelEditEvent();
-                                      setEventDeleteConfirmId(ev.id);
-                                    }}
-                                  >
-                                    <IconTrash />
-                                  </button>
-                                </div>
+                                    <button
+                                      type="button"
+                                      title="Edit event"
+                                      className="rounded border border-transparent p-1.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
+                                      style={{
+                                        color: colors.brownMid,
+                                        cursor: "pointer",
+                                        backgroundColor: "transparent",
+                                      }}
+                                      onClick={() => {
+                                        setEventDeleteConfirmId(null);
+                                        startEditEvent(ev);
+                                      }}
+                                    >
+                                      <IconPencil />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title="Delete event"
+                                      className="rounded border border-transparent p-1.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
+                                      style={{
+                                        color: "var(--dg-danger)",
+                                        cursor: "pointer",
+                                        backgroundColor: "transparent",
+                                      }}
+                                      onClick={() => {
+                                        cancelEditEvent();
+                                        setEventDeleteConfirmId(ev.id);
+                                      }}
+                                    >
+                                      <IconTrash />
+                                    </button>
+                                  </div>
+                                </>
                               ) : null}
                               {isEditing && eventEditDraft ? (
                                 <div className="space-y-3">
@@ -6328,7 +6704,7 @@ export default function PersonProfilePage() {
                                       </div>
                                     ) : null}
                                   </div>
-                                  <div className="mt-3 pb-6">
+                                  <div className="mt-4 px-0.5 pb-3 pt-3">
                                     <div className="flex items-center gap-3">
                                       {linkedSources.length > 0 ? (
                                         <button
@@ -6341,7 +6717,7 @@ export default function PersonProfilePage() {
                                           className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
                                           style={{
                                             fontFamily: sans,
-                                            color: colors.forest,
+                                            color: colors.brownMuted,
                                             fontWeight: 600,
                                             cursor: "pointer",
                                           }}
@@ -6352,14 +6728,50 @@ export default function PersonProfilePage() {
                                             : `Receipts (${linkedSources.length})`}
                                         </button>
                                       ) : null}
+                                      {!sourcesOpen && eventPhotoCount > 0 ? (
+                                        <span
+                                          className="inline-flex items-center gap-1 text-[11px]"
+                                          style={{
+                                            fontFamily: sans,
+                                            color: colors.brownMuted,
+                                          }}
+                                        >
+                                          <IconPhoto className="h-3.5 w-3.5" />
+                                          {eventPhotoCount}
+                                        </span>
+                                      ) : null}
+                                      {sourcesOpen ? (
+                                        <button
+                                          type="button"
+                                          title="View event photos"
+                                          className="ml-auto inline-flex items-center gap-1 rounded border border-transparent p-0.5 hover:border-[color-mix(in_srgb,var(--dg-brown-border)_60%,transparent)] hover:bg-[var(--dg-parchment)]"
+                                          style={{
+                                            color: colors.brownMid,
+                                            cursor: "pointer",
+                                            backgroundColor: "transparent",
+                                          }}
+                                          onClick={() =>
+                                            setEventPhotoGalleryEventId(ev.id)
+                                          }
+                                        >
+                                          <IconPhoto />
+                                          <span className="text-[10px] leading-none">
+                                            {eventPhotoCount}
+                                          </span>
+                                        </button>
+                                      ) : null}
                                       {linkedSources.length > 0 &&
                                       sourcesOpen &&
                                       !addingSourceEventId ? (
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setAddingSourceEventId(ev.id)
-                                          }
+                                          onClick={() => {
+                                            setAddingSourceEventId(ev.id);
+                                            setPendingSourceMode("file");
+                                            setPendingSourceFile(null);
+                                            setPendingSourceName("");
+                                            setPendingSourceUrl("");
+                                          }}
                                           title="Add source"
                                           className="border-none bg-transparent p-0 text-base leading-none font-bold"
                                           style={{
@@ -6375,9 +6787,13 @@ export default function PersonProfilePage() {
                                       addingSourceEventId !== ev.id ? (
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setAddingSourceEventId(ev.id)
-                                          }
+                                          onClick={() => {
+                                            setAddingSourceEventId(ev.id);
+                                            setPendingSourceMode("file");
+                                            setPendingSourceFile(null);
+                                            setPendingSourceName("");
+                                            setPendingSourceUrl("");
+                                          }}
                                           className="border-none bg-transparent p-0 text-left text-sm underline decoration-dotted underline-offset-2"
                                           style={{
                                             fontFamily: sans,
@@ -6392,46 +6808,58 @@ export default function PersonProfilePage() {
                                     </div>
                                     {addingSourceEventId === ev.id ? (
                                       <div className="mt-2">
-                                        <div className="flex items-center gap-2">
-                                          <label
-                                            className="cursor-pointer text-sm underline decoration-dotted underline-offset-2"
-                                            style={{
-                                              fontFamily: sans,
-                                              color: colors.forest,
-                                              fontWeight: 600,
-                                            }}
-                                          >
-                                            {sourceUploading
-                                              ? "Uploading…"
-                                              : "Choose file"}
-                                            <input
-                                              type="file"
-                                              accept=".jpg,.jpeg,.png,.pdf"
-                                              className="hidden"
-                                              disabled={sourceUploading}
-                                              onChange={(e) => {
-                                                const file =
-                                                  e.target.files?.[0];
-                                                if (file) {
-                                                  setPendingSourceFile({
-                                                    eventId: ev.id,
-                                                    file,
-                                                  });
-                                                  setPendingSourceName(
-                                                    file.name.replace(
-                                                      /\.[^/.]+$/,
-                                                      ""
-                                                    )
-                                                  );
-                                                }
-                                              }}
-                                            />
-                                          </label>
+                                        <div className="mb-2 flex items-center gap-2">
                                           <button
                                             type="button"
                                             onClick={() =>
-                                              setAddingSourceEventId(null)
+                                              setPendingSourceMode("file")
                                             }
+                                            className="rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                                            style={{
+                                              fontFamily: sans,
+                                              borderColor: colors.brownBorder,
+                                              color:
+                                                pendingSourceMode === "file"
+                                                  ? colors.cream
+                                                  : colors.brownDark,
+                                              backgroundColor:
+                                                pendingSourceMode === "file"
+                                                  ? colors.brownMid
+                                                  : "transparent",
+                                            }}
+                                          >
+                                            File
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setPendingSourceMode("link")
+                                            }
+                                            className="rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                                            style={{
+                                              fontFamily: sans,
+                                              borderColor: colors.brownBorder,
+                                              color:
+                                                pendingSourceMode === "link"
+                                                  ? colors.cream
+                                                  : colors.brownDark,
+                                              backgroundColor:
+                                                pendingSourceMode === "link"
+                                                  ? colors.brownMid
+                                                  : "transparent",
+                                            }}
+                                          >
+                                            Web link
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setAddingSourceEventId(null)
+                                              setPendingSourceFile(null);
+                                              setPendingSourceName("");
+                                              setPendingSourceUrl("");
+                                              setPendingSourceMode("file");
+                                            }}
                                             className="text-xs"
                                             style={{
                                               fontFamily: sans,
@@ -6441,9 +6869,132 @@ export default function PersonProfilePage() {
                                             Cancel
                                           </button>
                                         </div>
-                                        {pendingSourceFile?.eventId ===
-                                        ev.id ? (
+                                        {pendingSourceMode === "file" ? (
+                                          <>
+                                            <label
+                                              className="cursor-pointer text-sm underline decoration-dotted underline-offset-2"
+                                              style={{
+                                                fontFamily: sans,
+                                                color: colors.forest,
+                                                fontWeight: 600,
+                                              }}
+                                            >
+                                              {sourceUploading
+                                                ? "Uploading..."
+                                                : "Choose file"}
+                                              <input
+                                                type="file"
+                                                accept=".jpg,.jpeg,.png,.pdf"
+                                                className="hidden"
+                                                disabled={sourceUploading}
+                                                onChange={(e) => {
+                                                  const file =
+                                                    e.target.files?.[0];
+                                                  if (file) {
+                                                    setPendingSourceFile({
+                                                      eventId: ev.id,
+                                                      file,
+                                                    });
+                                                    setPendingSourceName(
+                                                      file.name.replace(
+                                                        /\.[^/.]+$/,
+                                                        ""
+                                                      )
+                                                    );
+                                                  }
+                                                }}
+                                              />
+                                            </label>
+                                            {pendingSourceFile?.eventId ===
+                                            ev.id ? (
+                                              <div className="mt-2 space-y-2">
+                                                <select
+                                                  value={pendingSourceName}
+                                                  onChange={(e) =>
+                                                    setPendingSourceName(
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  className="w-full rounded-md border px-3 py-2 text-sm"
+                                                  style={{
+                                                    fontFamily: sans,
+                                                    backgroundColor:
+                                                      "var(--dg-cream)",
+                                                    color: colors.brownDark,
+                                                    borderColor:
+                                                      colors.brownBorder,
+                                                  }}
+                                                >
+                                                  <option value="">
+                                                    Select record type...
+                                                  </option>
+                                                  {RECORD_TYPES.map((rt) => (
+                                                    <option key={rt} value={rt}>
+                                                      {rt}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                                <div className="flex gap-2">
+                                                  <button
+                                                    type="button"
+                                                    disabled={sourceUploading}
+                                                    onClick={() => {
+                                                      if (pendingSourceFile)
+                                                        void handleAddSource(
+                                                          ev.id,
+                                                          pendingSourceFile.file
+                                                        );
+                                                    }}
+                                                    className="rounded-md px-3 py-1.5 text-sm font-medium"
+                                                    style={{
+                                                      backgroundColor:
+                                                        "var(--dg-brown-mid, #8B6F4E)",
+                                                      color: "white",
+                                                      fontFamily: sans,
+                                                    }}
+                                                  >
+                                                    {sourceUploading
+                                                      ? "Uploading..."
+                                                      : "Upload"}
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setPendingSourceFile(null);
+                                                      setPendingSourceName("");
+                                                    }}
+                                                    className="rounded-md px-3 py-1.5 text-sm font-medium"
+                                                    style={{
+                                                      color: colors.brownMuted,
+                                                      fontFamily: sans,
+                                                    }}
+                                                  >
+                                                    Cancel
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ) : null}
+                                          </>
+                                        ) : (
                                           <div className="mt-2 space-y-2">
+                                            <input
+                                              type="url"
+                                              value={pendingSourceUrl}
+                                              onChange={(e) =>
+                                                setPendingSourceUrl(
+                                                  e.target.value
+                                                )
+                                              }
+                                              placeholder="https://..."
+                                              className="w-full rounded-md border px-3 py-2 text-sm"
+                                              style={{
+                                                fontFamily: sans,
+                                                backgroundColor:
+                                                  "var(--dg-cream)",
+                                                color: colors.brownDark,
+                                                borderColor: colors.brownBorder,
+                                              }}
+                                            />
                                             <select
                                               value={pendingSourceName}
                                               onChange={(e) =>
@@ -6461,7 +7012,7 @@ export default function PersonProfilePage() {
                                               }}
                                             >
                                               <option value="">
-                                                Select record type…
+                                                Select record type...
                                               </option>
                                               {RECORD_TYPES.map((rt) => (
                                                 <option key={rt} value={rt}>
@@ -6474,11 +7025,10 @@ export default function PersonProfilePage() {
                                                 type="button"
                                                 disabled={sourceUploading}
                                                 onClick={() => {
-                                                  if (pendingSourceFile)
-                                                    void handleAddSource(
-                                                      ev.id,
-                                                      pendingSourceFile.file
-                                                    );
+                                                  void handleAddSourceLink(
+                                                    ev.id,
+                                                    pendingSourceUrl
+                                                  );
                                                 }}
                                                 className="rounded-md px-3 py-1.5 text-sm font-medium"
                                                 style={{
@@ -6489,13 +7039,13 @@ export default function PersonProfilePage() {
                                                 }}
                                               >
                                                 {sourceUploading
-                                                  ? "Uploading…"
-                                                  : "Upload"}
+                                                  ? "Saving..."
+                                                  : "Save link"}
                                               </button>
                                               <button
                                                 type="button"
                                                 onClick={() => {
-                                                  setPendingSourceFile(null);
+                                                  setPendingSourceUrl("");
                                                   setPendingSourceName("");
                                                 }}
                                                 className="rounded-md px-3 py-1.5 text-sm font-medium"
@@ -6508,28 +7058,58 @@ export default function PersonProfilePage() {
                                               </button>
                                             </div>
                                           </div>
-                                        ) : null}
+                                        )}
                                       </div>
                                     ) : null}
                                     {sourcesOpen && linkedSources.length > 0 ? (
-                                      <ul className="mt-4 w-full space-y-1.5 pl-0.5">
+                                      <ul className="mt-2.5 w-full space-y-1.5 pl-0.5">
                                         {linkedSources.map((src) => (
                                           <li key={src.id}>
                                             <div className="flex items-center gap-2">
                                               {src.url ? (
-                                                <a
-                                                  href={src.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                                  style={{
-                                                    fontFamily: sans,
-                                                    color: colors.forest,
-                                                    fontWeight: 600,
-                                                  }}
-                                                >
-                                                  {src.label}
-                                                </a>
+                                                <div className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
+                                                  <a
+                                                    href={src.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-sm underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                                    style={{
+                                                      fontFamily: sans,
+                                                      color: colors.forest,
+                                                      fontWeight: 600,
+                                                    }}
+                                                  >
+                                                    {src.label}
+                                                  </a>
+                                                  <span
+                                                    className="rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+                                                    style={{
+                                                      fontFamily: sans,
+                                                      borderColor: `${colors.brownBorder}88`,
+                                                      color: colors.brownMuted,
+                                                      backgroundColor:
+                                                        src.kind === "web"
+                                                          ? `${colors.forest}14`
+                                                          : `${colors.brownBorder}14`,
+                                                    }}
+                                                  >
+                                                    {src.kind === "web"
+                                                      ? "Web link"
+                                                      : "Document"}
+                                                  </span>
+                                                  {src.kind === "web" &&
+                                                  src.host ? (
+                                                    <span
+                                                      className="text-xs italic"
+                                                      style={{
+                                                        fontFamily: sans,
+                                                        color: colors.brownMuted,
+                                                      }}
+                                                    >
+                                                      {src.host}
+                                                    </span>
+                                                  ) : null}
+                                                </div>
                                               ) : (
                                                 <span
                                                   className="text-sm"
@@ -6721,7 +7301,7 @@ export default function PersonProfilePage() {
                 >
                   The Usual Suspects
                 </h2>
-              <div className="mb-5">
+              <div className="mb-2">
                 <h3
                   className="mb-2 text-xs font-bold uppercase tracking-widest"
                   style={{ fontFamily: sans, color: colors.brownMuted }}
@@ -6848,23 +7428,32 @@ export default function PersonProfilePage() {
                     </li>
                   ))}
                 </ul>
+                {family.siblings.length > 0 ? (
+                  <div
+                    className="mt-2 border-t pt-2"
+                    style={{ borderTopColor: colors.brownBorder }}
+                  >
+                    <CollapsibleFamilyGroup
+                      title="Siblings"
+                      members={family.siblings}
+                      relationshipMetaByPersonId={relationshipMetaByPersonId}
+                      defaultExpanded={false}
+                      containerClassName="mb-0"
+                      onEditRelationship={(meta) => {
+                        setEditRelModal(meta);
+                        setEditRelType(meta.relationshipType);
+                        setEditRelError(null);
+                      }}
+                    />
+                  </div>
+                ) : null}
               </div>
-              <CollapsibleFamilyGroup
-                title="Siblings"
-                members={family.siblings}
-                relationshipMetaByPersonId={relationshipMetaByPersonId}
-                defaultExpanded={false}
-                onEditRelationship={(meta) => {
-                  setEditRelModal(meta);
-                  setEditRelType(meta.relationshipType);
-                  setEditRelError(null);
-                }}
-              />
               {family.spouseWithChildrenGroups.map((group, idx) => (
                 <SpouseWithChildrenCollapsible
                   key={group.spouse.id}
                   spouse={group.spouse}
                   children={group.children}
+                  marriageYear={marriageYearBySpouseId.get(group.spouse.id) ?? null}
                   relationshipMetaByPersonId={relationshipMetaByPersonId}
                   onAddChildWithSpouse={(spouse) =>
                     openAddFamilyModal({
@@ -7100,8 +7689,12 @@ export default function PersonProfilePage() {
                         >
                           {documentRecords.map((item) => {
                             const rec = item.record;
-                            const href = signedDocUrls.get(rec.id);
+                            const href = resolveRecordHref(rec, signedDocUrls);
                             const label = recordTypeLabel(rec);
+                            const kind: "web" | "document" = isWebRecord(rec)
+                              ? "web"
+                              : "document";
+                            const host = sourceHostLabel(href);
                             return (
                               <li
                                 key={rec.id}
@@ -7109,18 +7702,45 @@ export default function PersonProfilePage() {
                                 style={{ borderColor: `${colors.brownBorder}88` }}
                               >
                                 {href ? (
-                                  <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="font-bold leading-snug underline decoration-dotted underline-offset-2 hover:opacity-80"
-                                    style={{
-                                      fontFamily: serif,
-                                      color: colors.forest,
-                                    }}
-                                  >
-                                    {label}
-                                  </a>
+                                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-bold leading-snug underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                      style={{
+                                        fontFamily: serif,
+                                        color: colors.forest,
+                                      }}
+                                    >
+                                      {label}
+                                    </a>
+                                    <span
+                                      className="rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+                                      style={{
+                                        fontFamily: sans,
+                                        borderColor: `${colors.brownBorder}88`,
+                                        color: colors.brownMuted,
+                                        backgroundColor:
+                                          kind === "web"
+                                            ? `${colors.forest}14`
+                                            : `${colors.brownBorder}14`,
+                                      }}
+                                    >
+                                      {kind === "web" ? "Web link" : "Document"}
+                                    </span>
+                                    {kind === "web" && host ? (
+                                      <span
+                                        className="text-xs italic"
+                                        style={{
+                                          fontFamily: sans,
+                                          color: colors.brownMuted,
+                                        }}
+                                      >
+                                        {host}
+                                      </span>
+                                    ) : null}
+                                  </div>
                                 ) : (
                                   <p
                                     className="font-bold leading-snug"
@@ -7427,14 +8047,20 @@ export default function PersonProfilePage() {
                     typeof row.id === "string" ? row.id : `photo-${i}`;
                   const rowId = typeof row.id === "string" ? row.id : null;
                   const isPrimary = rowIsPrimaryForDisplay(row);
+                  const caption =
+                    typeof row.caption === "string" ? row.caption.trim() : "";
+                  const yearLabel = photoYearLabel(row.photo_date);
                   if (!url) return null;
                   const thumbCrop = personPhotoCropForRow(row);
                   const openCropModal = () => {
                     setCropModalPhoto(row);
                     setCropZoom(thumbCrop.zoom);
                   };
+                  const openPreviewModal = () => {
+                    setPhotoPreviewModal(row);
+                  };
                   return (
-                    <li key={pid}>
+                    <li key={pid} className="w-40">
                       <div
                         className="group relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
                         style={{
@@ -7450,8 +8076,8 @@ export default function PersonProfilePage() {
                               cursor: "pointer",
                               backgroundColor: "transparent",
                             }}
-                            aria-label="Adjust photo"
-                            onClick={openCropModal}
+                            aria-label="Open photo preview"
+                            onClick={openPreviewModal}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -7468,16 +8094,6 @@ export default function PersonProfilePage() {
                             className="h-full w-full object-cover"
                           />
                         )}
-                        {rowId ? (
-                          <div
-                            className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center bg-transparent transition-colors group-hover:bg-[color-mix(in_srgb,var(--dg-image-dim)_45%,transparent)]"
-                            aria-hidden
-                          >
-                            <span className="inline-flex scale-[2] opacity-0 transition-opacity group-hover:opacity-100">
-                              <IconPencil className="block text-[var(--dg-cream)] drop-shadow-md" />
-                            </span>
-                          </div>
-                        ) : null}
                         {isPrimary ? (
                           <span
                             className="pointer-events-none absolute left-1.5 top-1.5 z-[2] rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
@@ -7492,14 +8108,33 @@ export default function PersonProfilePage() {
                         ) : null}
                         {rowId ? (
                           <div
-                            className="absolute inset-0 z-[3] flex items-end justify-center gap-2 pb-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                            className="absolute right-2 top-2 z-[7] flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                             style={{
                               pointerEvents: "none",
-                              background:
-                                "linear-gradient(to top, color-mix(in srgb, var(--dg-photo-scrim) 70%, transparent), transparent)",
                             }}
                           >
                             <button
+                              type="button"
+                              className="rounded-md border p-1.5 shadow-sm"
+                              style={{
+                                fontFamily: sans,
+                                pointerEvents: "auto",
+                                borderColor: colors.cream,
+                                backgroundColor: colors.cream,
+                                color: colors.brownDark,
+                                cursor: "pointer",
+                              }}
+                              title="Edit photo"
+                              aria-label="Edit photo"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openCropModal();
+                              }}
+                            >
+                              <IconPencil />
+                            </button>
+                            {!isPrimary ? (
+                              <button
                               type="button"
                               className="rounded-md border p-1.5 shadow-sm"
                               style={{
@@ -7519,26 +8154,7 @@ export default function PersonProfilePage() {
                             >
                               <IconStar />
                             </button>
-                            <button
-                              type="button"
-                              className="rounded-md border p-1.5 shadow-sm"
-                              style={{
-                                fontFamily: sans,
-                                pointerEvents: "auto",
-                                borderColor: colors.cream,
-                                backgroundColor: colors.cream,
-                                color: colors.brownDark,
-                                cursor: "pointer",
-                              }}
-                              title="Tag people"
-                              aria-label="Tag people"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void openTagModal(row);
-                              }}
-                            >
-                              <IconTag />
-                            </button>
+                            ) : null}
                             <button
                               type="button"
                               className="rounded-md border p-1.5 shadow-sm"
@@ -7561,12 +8177,270 @@ export default function PersonProfilePage() {
                             </button>
                           </div>
                         ) : null}
+                        {caption ? (
+                          <div
+                            className="pointer-events-none absolute inset-x-0 bottom-0 z-[6] px-2 pb-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                            aria-hidden
+                            style={{
+                              background:
+                                "linear-gradient(to top, color-mix(in srgb, var(--dg-photo-scrim) 84%, transparent), transparent)",
+                            }}
+                          >
+                            <p
+                              className="line-clamp-2 text-xs leading-snug"
+                              style={{
+                                fontFamily: sans,
+                                color: "#ffffff",
+                                backgroundColor: "rgb(20 16 12 / 0.78)",
+                                borderRadius: 6,
+                                padding: "0.3rem 0.45rem",
+                                boxShadow: "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.35)",
+                              }}
+                            >
+                              {caption}
+                            </p>
+                          </div>
+                        ) : null}
                       </div>
+                      <p
+                        className="mt-1.5 text-[11px]"
+                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      >
+                        {yearLabel}
+                      </p>
                     </li>
                   );
                 })}
               </ul>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {eventPhotoGalleryEventId ? (
+        <div
+          className="fixed inset-0 z-[220] overflow-y-auto"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="event-photo-gallery-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEventPhotoGalleryEventId(null);
+          }}
+        >
+          <div
+            className="mx-auto my-8 w-full max-w-5xl rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {(() => {
+              const ev = events.find((row) => row.id === eventPhotoGalleryEventId) ?? null;
+              const eventPhotos =
+                eventPhotosByEventId.get(eventPhotoGalleryEventId) ?? [];
+              return (
+                <>
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                      <h2
+                        id="event-photo-gallery-title"
+                        className="text-2xl font-bold"
+                        style={{ fontFamily: serif, color: colors.brownDark }}
+                      >
+                        Event Photos
+                      </h2>
+                      {ev ? (
+                        <p
+                          className="mt-1 text-sm"
+                          style={{ fontFamily: sans, color: colors.brownMuted }}
+                        >
+                          {(ev.event_type || "Event").trim()} - {eventDateLabel(ev)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="text-2xl leading-none"
+                      style={{
+                        fontFamily: sans,
+                        color: colors.brownMuted,
+                        cursor: "pointer",
+                        backgroundColor: "transparent",
+                      }}
+                      aria-label="Close event photos"
+                      onClick={() => setEventPhotoGalleryEventId(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {eventPhotos.length === 0 ? (
+                    <p
+                      className="text-sm italic"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      No photos are tagged to this event yet.
+                    </p>
+                  ) : (
+                    <ul className="flex flex-wrap gap-4">
+                      {eventPhotos.map((row, i) => {
+                        const url = photoUrlFromRow(row);
+                        if (!url) return null;
+                        const key =
+                          typeof row.id === "string" ? row.id : `event-photo-${i}`;
+                        const caption =
+                          typeof row.caption === "string" ? row.caption.trim() : "";
+                        const yearLabel = photoYearLabel(row.photo_date);
+                        return (
+                          <li key={key} className="w-40">
+                            <div
+                              className="group relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
+                              style={{
+                                borderColor: colors.brownBorder,
+                                backgroundColor: colors.parchment,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="block h-full w-full border-none p-0"
+                                style={{ backgroundColor: "transparent", cursor: "zoom-in" }}
+                                aria-label="Open photo preview"
+                                onClick={() => setPhotoPreviewModal(row)}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={url}
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                />
+                              </button>
+                              {caption ? (
+                                <div
+                                  className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] px-2 pb-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                                  aria-hidden
+                                  style={{
+                                    background:
+                                      "linear-gradient(to top, color-mix(in srgb, var(--dg-photo-scrim) 84%, transparent), transparent)",
+                                  }}
+                                >
+                                  <p
+                                    className="line-clamp-2 text-xs leading-snug"
+                                    style={{
+                                      fontFamily: sans,
+                                      color: "#ffffff",
+                                      backgroundColor: "rgb(20 16 12 / 0.78)",
+                                      borderRadius: 6,
+                                      padding: "0.3rem 0.45rem",
+                                      boxShadow:
+                                        "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.35)",
+                                    }}
+                                  >
+                                    {caption}
+                                  </p>
+                                </div>
+                              ) : null}
+                            </div>
+                            <p
+                              className="mt-1.5 text-[11px]"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              {yearLabel}
+                            </p>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      ) : null}
+
+      {photoPreviewModal ? (
+        <div
+          className="fixed inset-0 z-[230] flex items-center justify-center overflow-y-auto p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="photo-preview-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPhotoPreviewModal(null);
+          }}
+        >
+          <div
+            className="my-4 w-full max-w-5xl rounded-lg border p-4 shadow-xl sm:p-6"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <h2
+                id="photo-preview-title"
+                className="text-2xl font-bold"
+                style={{ fontFamily: serif, color: colors.brownDark }}
+              >
+                Photo
+              </h2>
+              <button
+                type="button"
+                className="text-2xl leading-none"
+                style={{
+                  fontFamily: sans,
+                  color: colors.brownMuted,
+                  cursor: "pointer",
+                  backgroundColor: "transparent",
+                }}
+                aria-label="Close photo preview"
+                onClick={() => setPhotoPreviewModal(null)}
+              >
+                ×
+              </button>
+            </div>
+            {(() => {
+              const url = photoUrlFromRow(photoPreviewModal);
+              if (!url) return null;
+              const caption =
+                typeof photoPreviewModal.caption === "string"
+                  ? photoPreviewModal.caption.trim()
+                  : "";
+              const yearLabel = photoYearLabel(photoPreviewModal.photo_date);
+              return (
+                <>
+                  <div className="flex justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt=""
+                      className="max-h-[72vh] w-auto max-w-full rounded-md border object-contain"
+                      style={{ borderColor: colors.brownBorder }}
+                    />
+                  </div>
+                  <div className="mt-3">
+                    <p
+                      className="text-sm"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      {yearLabel}
+                    </p>
+                    {caption ? (
+                      <p
+                        className="mt-1 text-sm leading-relaxed"
+                        style={{ fontFamily: sans, color: colors.brownDark }}
+                      >
+                        {caption}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
@@ -9032,7 +9906,7 @@ export default function PersonProfilePage() {
 
       {cropModalPhoto ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
@@ -9042,11 +9916,13 @@ export default function PersonProfilePage() {
           }}
         >
           <div
-            className="w-full max-w-md rounded-lg border p-6 shadow-xl"
+            className="my-4 w-full max-w-md rounded-lg border p-6 shadow-xl"
             style={{
               backgroundColor: colors.parchment,
               borderColor: colors.brownBorder,
               boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+              maxHeight: "min(92vh, 920px)",
+              overflowY: "auto",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9167,6 +10043,65 @@ export default function PersonProfilePage() {
                 {Number(cropZoom.toFixed(2))}×
               </span>
             </div>
+            <div className="mt-5 space-y-3">
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="crop-photo-date"
+                >
+                  Date
+                </label>
+                <input
+                  id="crop-photo-date"
+                  type="text"
+                  value={cropModalDate}
+                  onChange={(e) => setCropModalDate(e.target.value)}
+                  placeholder="e.g. 1943 or 06/1943"
+                  autoComplete="off"
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="crop-photo-caption"
+                >
+                  Caption
+                </label>
+                <textarea
+                  id="crop-photo-caption"
+                  rows={2}
+                  value={cropModalCaption}
+                  onChange={(e) => setCropModalCaption(e.target.value)}
+                  className="resize-y"
+                  style={modalInputStyle}
+                />
+              </div>
+              <div>
+                <label
+                  className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  htmlFor="crop-photo-event"
+                >
+                  Event
+                </label>
+                <select
+                  id="crop-photo-event"
+                  value={cropModalEventId ?? ""}
+                  onChange={(e) => setCropModalEventId(e.target.value || null)}
+                  style={modalInputStyle}
+                >
+                  <option value="">No event tag</option>
+                  {events.map((ev) => (
+                    <option key={ev.id} value={ev.id}>
+                      {(ev.event_type || "Event").trim()} — {eventDateLabel(ev)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
             <div className="mt-8 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -9201,7 +10136,15 @@ export default function PersonProfilePage() {
                     POLAROID_CROP_VIEWPORT_W,
                     POLAROID_CROP_VIEWPORT_H
                   );
-                  void saveCropPosition(id, cx, cy, cropZoom);
+                  void saveCropPosition(
+                    id,
+                    cx,
+                    cy,
+                    cropZoom,
+                    cropModalDate,
+                    cropModalCaption,
+                    cropModalEventId
+                  );
                 }}
               >
                 Save
@@ -9389,6 +10332,48 @@ export default function PersonProfilePage() {
                     autoComplete="off"
                     style={modalInputStyle}
                   />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="photo-setup-caption"
+                  >
+                    Caption
+                  </label>
+                  <textarea
+                    id="photo-setup-caption"
+                    rows={2}
+                    value={photoSetupCaption}
+                    onChange={(e) => setPhotoSetupCaption(e.target.value)}
+                    placeholder="Add a caption"
+                    className="resize-y"
+                    style={modalInputStyle}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-bold uppercase tracking-wide"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                    htmlFor="photo-setup-event"
+                  >
+                    Event
+                  </label>
+                  <select
+                    id="photo-setup-event"
+                    value={photoSetupEventId ?? ""}
+                    onChange={(e) =>
+                      setPhotoSetupEventId(e.target.value || null)
+                    }
+                    style={modalInputStyle}
+                  >
+                    <option value="">No event tag</option>
+                    {events.map((ev) => (
+                      <option key={ev.id} value={ev.id}>
+                        {(ev.event_type || "Event").trim()} — {eventDateLabel(ev)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <p

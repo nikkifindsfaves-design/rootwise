@@ -1,6 +1,7 @@
 export const RECORD_TYPES = [
   "Birth Record",
   "Death Record",
+  "Burial Record",
   "Marriage Record",
   "Census Record",
   "Church Record",
