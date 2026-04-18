@@ -4,6 +4,11 @@ import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
 import { RECORD_TYPES } from "@/lib/records/record-types";
+import {
+  CANVAS_THEMES,
+  isCanvasThemeId,
+  type PhotoFrameStyle,
+} from "@/lib/themes/canvas-themes";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
@@ -18,7 +23,9 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 
 const serif =
@@ -679,6 +686,13 @@ const POLAROID_CROP_VIEWPORT_H = 275;
 const HEADER_POLAROID_IMG_W = 128;
 const HEADER_POLAROID_IMG_H = 160;
 
+/** Built-in white margin on the print (scrapbook header); tabs meet this outer box. */
+const HEADER_SCRAPBOOK_PRINT_BORDER_PX = 5;
+const HEADER_SCRAPBOOK_IMG_INNER_W =
+  HEADER_POLAROID_IMG_W - 2 * HEADER_SCRAPBOOK_PRINT_BORDER_PX;
+const HEADER_SCRAPBOOK_IMG_INNER_H =
+  HEADER_POLAROID_IMG_H - 2 * HEADER_SCRAPBOOK_PRINT_BORDER_PX;
+
 /** Click target around stacked polaroids (includes rotation / stack offsets). */
 const HEADER_POLAROID_BTN_W = 186;
 const HEADER_POLAROID_BTN_H = 236;
@@ -760,6 +774,187 @@ function headerPolaroidFrameLayerStyle(
       : `1px solid ${colors.brownBorder}`,
     boxShadow,
   };
+}
+
+/**
+ * Dead Gossip — no plate behind the print: only the profile header / page background shows through.
+ * Corner mounts and tilt provide the album look.
+ */
+function headerScrapbookAlbumPageStyle(_isDark: boolean): CSSProperties {
+  return {
+    position: "relative",
+    backgroundColor: "transparent",
+    padding: 0,
+    border: "none",
+    borderRadius: 0,
+    boxShadow: "none",
+  };
+}
+
+/** Deterministic 1–2° tilt per person so the print reads hand-placed, stable across reloads. */
+function scrapbookHeaderPhotoTiltDeg(personId: string): number {
+  if (!personId) return 1.35;
+  let h = 2166136261;
+  for (let i = 0; i < personId.length; i++) {
+    h = Math.imul(h ^ personId.charCodeAt(i), 16777619);
+  }
+  const u = (h >>> 0) / 2 ** 32;
+  const magnitude = 1 + u;
+  const sign = h & 1 ? 1 : -1;
+  return sign * magnitude;
+}
+
+/** Desk “Receipts” rail tab (idle) — defined in `app/globals.css` as `--dg-desk-receipts-tab-idle-bg`. */
+const RECEIPTS_TAB_IDLE_BG = "var(--dg-desk-receipts-tab-idle-bg)" as const;
+
+/** Desk “Margin” rail tab (idle) — defined in `app/globals.css` as `--dg-desk-margin-tab-idle-bg`. */
+const MARGIN_DESK_TAB_IDLE_BG = "var(--dg-desk-margin-tab-idle-bg)" as const;
+
+/** Scrapbook photo corner mounts (dark only): lighter than page bg / desk idle tabs so they stay readable. */
+const SCRAPBOOK_CORNER_MOUNT_BG_DARK =
+  "color-mix(in srgb, var(--dg-parchment) 58%, var(--dg-brown-mid) 42%)" as const;
+
+const SCRAPBOOK_CORNER_SHADOW_LIGHT = [
+  "inset 0 1px 1px rgba(255,255,255,0.38)",
+  "inset 0 -2px 4px rgba(0,0,0,0.08)",
+  "inset 0 0 12px rgba(0,0,0,0.05)",
+  "0 3px 8px rgba(0,0,0,0.14)",
+  "0 1px 3px rgba(0,0,0,0.1)",
+].join(", ");
+
+const SCRAPBOOK_CORNER_SHADOW_DARK =
+  "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)" as const;
+
+function subscribeHtmlDarkClass(cb: () => void) {
+  const el = document.documentElement;
+  const mo = new MutationObserver(() => cb());
+  mo.observe(el, { attributes: true, attributeFilter: ["class"] });
+  return () => mo.disconnect();
+}
+
+function snapshotHtmlHasDarkClass(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
+function snapshotHtmlHasDarkClassServer(): boolean {
+  return false;
+}
+
+/** Diagonal shift outward from each print corner (px along both axes). */
+const HEADER_SCRAPBOOK_TAB_OUTWARD = 2.5;
+
+const HEADER_SCRAPBOOK_TAB_PX = 30;
+
+/** Lift + ambient under the whole print (white margin + image) in scrapbook header. */
+function scrapbookHeaderPhotoLiftFilter(isDark: boolean): string {
+  return isDark
+    ? "drop-shadow(0 0 14px rgba(255, 248, 237, 0.095)) drop-shadow(0 0 6px rgba(255, 252, 245, 0.13)) drop-shadow(0 0 2px rgba(255, 255, 250, 0.16))"
+    : "drop-shadow(0 6px 14px rgba(0,0,0,0.14)) drop-shadow(0 2px 6px rgba(0,0,0,0.09)) drop-shadow(0 1px 2px rgba(0,0,0,0.06))";
+}
+
+/** Outer cast + inset edge on the white bordered print (works with `filter` lift). */
+function scrapbookPrintWrapperBoxShadow(isDark: boolean): string {
+  return isDark
+    ? [
+        "0 4px 14px rgba(0,0,0,0.34)",
+        "0 1px 4px rgba(0,0,0,0.28)",
+        "inset 0 1px 0 rgba(255,255,255,0.14)",
+        "inset 0 -2px 5px rgba(0,0,0,0.14)",
+      ].join(", ")
+    : [
+        "0 4px 14px rgba(0,0,0,0.1)",
+        "0 1px 4px rgba(0,0,0,0.06)",
+        "inset 0 1px 0 rgba(255,255,255,0.95)",
+        "inset 0 -2px 5px rgba(0,0,0,0.06)",
+      ].join(", ");
+}
+
+/** Slight recess / emulsion depth inside the image window (scrapbook only). */
+function scrapbookPhotoInnerInsetShadow(isDark: boolean): string {
+  return isDark
+    ? "inset 0 0 10px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.1)"
+    : "inset 0 0 10px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.14)";
+}
+
+function HeaderScrapbookCornerTabs() {
+  const htmlDark = useSyncExternalStore(
+    subscribeHtmlDarkClass,
+    snapshotHtmlHasDarkClass,
+    snapshotHtmlHasDarkClassServer
+  );
+  const t = HEADER_SCRAPBOOK_TAB_PX;
+  const o = HEADER_SCRAPBOOK_TAB_OUTWARD;
+  const fold: CSSProperties = {
+    position: "absolute",
+    width: t,
+    height: t,
+    pointerEvents: "none",
+    zIndex: 25,
+    backgroundColor: htmlDark
+      ? SCRAPBOOK_CORNER_MOUNT_BG_DARK
+      : RECEIPTS_TAB_IDLE_BG,
+    boxShadow: htmlDark ? SCRAPBOOK_CORNER_SHADOW_DARK : SCRAPBOOK_CORNER_SHADOW_LIGHT,
+  };
+  return (
+    <>
+      <span
+        data-dg-scrapbook-corner-mount=""
+        style={{
+          ...fold,
+          left: -o,
+          top: -o,
+          clipPath: "polygon(0 0, 100% 0, 0 100%)",
+        }}
+        aria-hidden
+      />
+      <span
+        data-dg-scrapbook-corner-mount=""
+        style={{
+          ...fold,
+          right: -o,
+          top: -o,
+          clipPath: "polygon(100% 0, 100% 100%, 0 0)",
+        }}
+        aria-hidden
+      />
+      <span
+        data-dg-scrapbook-corner-mount=""
+        style={{
+          ...fold,
+          left: -o,
+          bottom: -o,
+          clipPath: "polygon(0 100%, 100% 100%, 0 0)",
+        }}
+        aria-hidden
+      />
+      <span
+        data-dg-scrapbook-corner-mount=""
+        style={{
+          ...fold,
+          right: -o,
+          bottom: -o,
+          clipPath: "polygon(100% 100%, 100% 0, 0 100%)",
+        }}
+        aria-hidden
+      />
+    </>
+  );
+}
+
+/** Header profile photo mat; scrapbook = tilted print + corner mounts (no under-plate); oval = polaroid. */
+function profileHeaderPhotoFrameLayerStyle(
+  photoFrameStyle: PhotoFrameStyle,
+  isDark: boolean,
+  stackIndex: number,
+  totalLayers: number
+): CSSProperties {
+  switch (photoFrameStyle) {
+    case "scrapbook":
+      return headerScrapbookAlbumPageStyle(isDark);
+    case "polaroid":
+    case "oval":
+      return headerPolaroidFrameLayerStyle(isDark, stackIndex, totalLayers);
+  }
 }
 
 type HeaderPolaroidLayer =
@@ -1801,6 +1996,28 @@ function TimelineEventStoryBlock({
   );
 }
 
+type PersonProfilePageBodyProps = {
+  /**
+   * Resolved from `trees.canvas_theme` for the person row’s `tree_id`, or `"string"` when missing.
+   */
+  canvasTheme: string;
+  children: ReactNode;
+};
+
+/**
+ * Client shell for the loaded profile; receives the tree’s canvas theme for upcoming themed copy.
+ */
+function PersonProfilePageBody({
+  canvasTheme,
+  children,
+}: PersonProfilePageBodyProps) {
+  return (
+    <div className="contents" data-person-canvas-theme={canvasTheme}>
+      {children}
+    </div>
+  );
+}
+
 export default function PersonProfilePage() {
   const params = useParams();
   const router = useRouter();
@@ -1838,6 +2055,15 @@ export default function PersonProfilePage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [canvasTheme, setCanvasTheme] = useState("string");
+  const profileCanvasTheme = useMemo(() => {
+    const id = isCanvasThemeId(canvasTheme) ? canvasTheme : "string";
+    return CANVAS_THEMES[id];
+  }, [canvasTheme]);
+  const scrapbookPhotoTiltDeg = useMemo(
+    () => scrapbookHeaderPhotoTiltDeg(personId),
+    [personId]
+  );
   const [person, setPerson] = useState<PersonRow | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [photoRows, setPhotoRows] = useState<Record<string, unknown>[]>([]);
@@ -2464,6 +2690,24 @@ export default function PersonProfilePage() {
       surviving_spouse: raw.surviving_spouse ?? null,
     };
 
+    let resolvedCanvasTheme = "string";
+    if (personTreeId !== "") {
+      const { data: treeThemeRow, error: treeThemeErr } = await supabase
+        .from("trees")
+        .select("canvas_theme")
+        .eq("id", personTreeId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!treeThemeErr && treeThemeRow) {
+        const ct = (treeThemeRow as { canvas_theme?: string | null })
+          .canvas_theme;
+        if (typeof ct === "string" && ct.trim() !== "") {
+          resolvedCanvasTheme = ct.trim();
+        }
+      }
+    }
+
     const { data: eventData, error: eventErr } = await supabase
       .from("events")
       .select(
@@ -3085,6 +3329,7 @@ export default function PersonProfilePage() {
     }
 
     setPerson(p);
+    setCanvasTheme(resolvedCanvasTheme);
     setEvents(sortedEvents);
     setEventSources(sourceRows);
     setPhotoRows(photosParsed);
@@ -3314,6 +3559,14 @@ export default function PersonProfilePage() {
     }
     return [];
   }, [photoRows, person, headerPhotoUrl]);
+
+  /** Dead Gossip (scrapbook): one primary print in the header; other themes keep the polaroid stack. */
+  const headerProfilePhotoStackLayers = useMemo(() => {
+    if (profileCanvasTheme.photoFrameStyle === "scrapbook") {
+      return headerPolaroidLayers.slice(0, 1);
+    }
+    return headerPolaroidLayers;
+  }, [profileCanvasTheme.photoFrameStyle, headerPolaroidLayers]);
 
   const eventTypeSelectOptions = useMemo(
     () => buildEventTypeSelectOptions(events),
@@ -5751,7 +6004,8 @@ export default function PersonProfilePage() {
   });
 
   return (
-    <div className="pb-16">
+    <PersonProfilePageBody canvasTheme={canvasTheme}>
+      <div className="pb-16">
       <nav
         className="border-b px-4 py-3 sm:px-6"
         style={{
@@ -5831,6 +6085,10 @@ export default function PersonProfilePage() {
                 width: HEADER_POLAROID_BTN_W,
                 height: HEADER_POLAROID_BTN_H,
                 cursor: "pointer",
+                overflow:
+                  profileCanvasTheme.photoFrameStyle === "scrapbook"
+                    ? "visible"
+                    : undefined,
               }}
               aria-label="Open photo gallery — manage photos, crop, tags, and primary"
               onClick={() => setPortraitsGalleryOpen(true)}
@@ -5841,32 +6099,99 @@ export default function PersonProfilePage() {
                 style={{
                   transform: "translate(-50%, -50%)",
                   transformOrigin: "center center",
+                  overflow:
+                    profileCanvasTheme.photoFrameStyle === "scrapbook"
+                      ? "visible"
+                      : undefined,
                 }}
               >
                 <div
-                  style={headerPolaroidFrameLayerStyle(
+                  style={profileHeaderPhotoFrameLayerStyle(
+                    profileCanvasTheme.photoFrameStyle,
                     theme === "dark",
                     0,
                     1
                   )}
                 >
-                  <div
-                    className="flex items-center justify-center text-4xl font-bold"
-                    style={{
-                      width: HEADER_POLAROID_IMG_W,
-                      height: HEADER_POLAROID_IMG_H,
-                      backgroundColor: POLAROID_NO_PHOTO_BG,
-                      borderRadius: 1,
-                      fontFamily: serif,
-                      color: POLAROID_NO_PHOTO_INITIALS,
-                    }}
-                  >
-                    {person ? initials(person) : "?"}
-                  </div>
+                  {profileCanvasTheme.photoFrameStyle === "scrapbook" ? (
+                    <div
+                      style={{
+                        transform: `rotate(${scrapbookPhotoTiltDeg}deg)`,
+                        transformOrigin: "center center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "relative",
+                          width: HEADER_POLAROID_IMG_W,
+                          height: HEADER_POLAROID_IMG_H,
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            zIndex: 0,
+                            width: "100%",
+                            height: "100%",
+                            isolation: "isolate",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: "relative",
+                              zIndex: 1,
+                              width: HEADER_POLAROID_IMG_W,
+                              height: HEADER_POLAROID_IMG_H,
+                              padding: HEADER_SCRAPBOOK_PRINT_BORDER_PX,
+                              boxSizing: "border-box",
+                              backgroundColor: "#fff",
+                              borderRadius: 1,
+                              boxShadow: scrapbookPrintWrapperBoxShadow(
+                                theme === "dark"
+                              ),
+                              filter: scrapbookHeaderPhotoLiftFilter(
+                                theme === "dark"
+                              ),
+                            }}
+                          >
+                            <div
+                              className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                              style={{
+                                backgroundColor: POLAROID_NO_PHOTO_BG,
+                                borderRadius: 1,
+                                fontFamily: serif,
+                                color: POLAROID_NO_PHOTO_INITIALS,
+                                boxShadow: scrapbookPhotoInnerInsetShadow(
+                                  theme === "dark"
+                                ),
+                              }}
+                            >
+                              {person ? initials(person) : "?"}
+                            </div>
+                          </div>
+                        </div>
+                        <HeaderScrapbookCornerTabs />
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="flex items-center justify-center text-4xl font-bold"
+                      style={{
+                        width: HEADER_POLAROID_IMG_W,
+                        height: HEADER_POLAROID_IMG_H,
+                        backgroundColor: POLAROID_NO_PHOTO_BG,
+                        borderRadius: 1,
+                        fontFamily: serif,
+                        color: POLAROID_NO_PHOTO_INITIALS,
+                      }}
+                    >
+                      {person ? initials(person) : "?"}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
-              [...headerPolaroidLayers]
+              [...headerProfilePhotoStackLayers]
                 .map((layer, stackIndex) => ({ layer, stackIndex }))
                 .map(({ layer, stackIndex }) => {
                   const key = headerPolaroidLayerKey(layer);
@@ -5884,12 +6209,15 @@ export default function PersonProfilePage() {
                       ? naturalH
                       : 0);
                   const stackStyle =
-                    HEADER_POLAROID_STACK_LAYERS[stackIndex] ??
-                    HEADER_POLAROID_STACK_LAYERS[0];
+                    profileCanvasTheme.photoFrameStyle === "scrapbook"
+                      ? { rot: 0, x: 0, y: 0 }
+                      : HEADER_POLAROID_STACK_LAYERS[stackIndex] ??
+                        HEADER_POLAROID_STACK_LAYERS[0];
                   /** Layer 0 is primary (front); higher indices sit underneath. */
-                  const stackDepth = headerPolaroidLayers.length - 1 - stackIndex;
+                  const stackDepth =
+                    headerProfilePhotoStackLayers.length - 1 - stackIndex;
                   const z = 12 + stackDepth * 10;
-                  const nLayers = headerPolaroidLayers.length;
+                  const nLayers = headerProfilePhotoStackLayers.length;
                   return (
                     <div
                       key={key}
@@ -5898,98 +6226,237 @@ export default function PersonProfilePage() {
                         zIndex: z,
                         transform: `translate(calc(-50% + ${stackStyle.x}px), calc(-50% + ${stackStyle.y}px)) rotate(${stackStyle.rot}deg)`,
                         transformOrigin: "center center",
+                        overflow:
+                          profileCanvasTheme.photoFrameStyle === "scrapbook"
+                            ? "visible"
+                            : undefined,
                       }}
                     >
                       <div
-                        style={headerPolaroidFrameLayerStyle(
+                        style={profileHeaderPhotoFrameLayerStyle(
+                          profileCanvasTheme.photoFrameStyle,
                           theme === "dark",
                           stackIndex,
                           nLayers
                         )}
                       >
-                        <div
-                          style={{
-                            position: "relative",
-                            width: HEADER_POLAROID_IMG_W,
-                            height: HEADER_POLAROID_IMG_H,
-                            overflow: "hidden",
-                            backgroundColor: url
-                              ? colors.avatarBg
-                              : POLAROID_NO_PHOTO_BG,
-                            borderRadius: 1,
-                          }}
-                        >
-                          {url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={url}
-                              alt=""
-                              draggable={false}
-                              onLoad={(e) => {
-                                const el = e.currentTarget;
-                                setPolaroidNaturalByKey((prev) => ({
-                                  ...prev,
-                                  [key]: {
-                                    w: el.naturalWidth,
-                                    h: el.naturalHeight,
-                                  },
-                                }));
-                              }}
-                              style={(() => {
-                                if (nw <= 0 || nh <= 0) {
-                                  return {
-                                    position: "absolute" as const,
-                                    left: 0,
-                                    top: 0,
-                                    width: "100%",
-                                    height: "100%",
-                                    opacity: 0,
-                                  };
-                                }
-                                const { w: rw, h: rh } =
-                                  cropCoverRenderedSize(
-                                    nw,
-                                    nh,
-                                    HEADER_POLAROID_IMG_W,
-                                    HEADER_POLAROID_IMG_H,
-                                    crop.zoom
-                                  );
-                                const off = cropPercentToOffsetCover(
-                                  crop.x,
-                                  crop.y,
-                                  rw,
-                                  rh,
-                                  HEADER_POLAROID_IMG_W,
-                                  HEADER_POLAROID_IMG_H
-                                );
-                                return {
-                                  position: "absolute" as const,
-                                  left: off.x,
-                                  top: off.y,
-                                  width: rw,
-                                  height: rh,
-                                  opacity: 1,
-                                  pointerEvents: "none" as const,
-                                  maxWidth: "none",
-                                  filter:
-                                    theme === "dark"
-                                      ? HEADER_POLAROID_PRINT_FILTER_DARK
-                                      : HEADER_POLAROID_PRINT_FILTER_LIGHT,
-                                };
-                              })()}
-                            />
-                          ) : (
+                        {profileCanvasTheme.photoFrameStyle === "scrapbook" ? (
+                          <div
+                            style={{
+                              transform: `rotate(${scrapbookPhotoTiltDeg}deg)`,
+                              transformOrigin: "center center",
+                            }}
+                          >
                             <div
-                              className="flex h-full w-full items-center justify-center text-4xl font-bold"
                               style={{
-                                fontFamily: serif,
-                                color: POLAROID_NO_PHOTO_INITIALS,
+                                position: "relative",
+                                width: HEADER_POLAROID_IMG_W,
+                                height: HEADER_POLAROID_IMG_H,
                               }}
                             >
-                              {polaroidInitialsFromLayer(layer)}
+                              <div
+                                style={{
+                                  position: "relative",
+                                  zIndex: 0,
+                                  width: "100%",
+                                  height: "100%",
+                                  isolation: "isolate",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    position: "relative",
+                                    zIndex: 1,
+                                    width: HEADER_POLAROID_IMG_W,
+                                    height: HEADER_POLAROID_IMG_H,
+                                    padding: HEADER_SCRAPBOOK_PRINT_BORDER_PX,
+                                    boxSizing: "border-box",
+                                    backgroundColor: "#fff",
+                                    borderRadius: 1,
+                                    boxShadow: scrapbookPrintWrapperBoxShadow(
+                                      theme === "dark"
+                                    ),
+                                    filter: scrapbookHeaderPhotoLiftFilter(
+                                      theme === "dark"
+                                    ),
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      position: "relative",
+                                      width: "100%",
+                                      height: "100%",
+                                      overflow: "hidden",
+                                      backgroundColor: url
+                                        ? colors.avatarBg
+                                        : POLAROID_NO_PHOTO_BG,
+                                      boxShadow: scrapbookPhotoInnerInsetShadow(
+                                        theme === "dark"
+                                      ),
+                                    }}
+                                  >
+                                    {url ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={url}
+                                        alt=""
+                                        draggable={false}
+                                        onLoad={(e) => {
+                                          const el = e.currentTarget;
+                                          setPolaroidNaturalByKey((prev) => ({
+                                            ...prev,
+                                            [key]: {
+                                              w: el.naturalWidth,
+                                              h: el.naturalHeight,
+                                            },
+                                          }));
+                                        }}
+                                        style={(() => {
+                                          if (nw <= 0 || nh <= 0) {
+                                            return {
+                                              position: "absolute" as const,
+                                              left: 0,
+                                              top: 0,
+                                              width: "100%",
+                                              height: "100%",
+                                              opacity: 0,
+                                            };
+                                          }
+                                          const { w: rw, h: rh } =
+                                            cropCoverRenderedSize(
+                                              nw,
+                                              nh,
+                                              HEADER_SCRAPBOOK_IMG_INNER_W,
+                                              HEADER_SCRAPBOOK_IMG_INNER_H,
+                                              crop.zoom
+                                            );
+                                          const off = cropPercentToOffsetCover(
+                                            crop.x,
+                                            crop.y,
+                                            rw,
+                                            rh,
+                                            HEADER_SCRAPBOOK_IMG_INNER_W,
+                                            HEADER_SCRAPBOOK_IMG_INNER_H
+                                          );
+                                          const print =
+                                            theme === "dark"
+                                              ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                              : HEADER_POLAROID_PRINT_FILTER_LIGHT;
+                                          return {
+                                            position: "absolute" as const,
+                                            left: off.x,
+                                            top: off.y,
+                                            width: rw,
+                                            height: rh,
+                                            opacity: 1,
+                                            pointerEvents: "none" as const,
+                                            maxWidth: "none",
+                                            filter: print,
+                                          };
+                                        })()}
+                                      />
+                                    ) : (
+                                      <div
+                                        className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                                        style={{
+                                          fontFamily: serif,
+                                          color: POLAROID_NO_PHOTO_INITIALS,
+                                        }}
+                                      >
+                                        {polaroidInitialsFromLayer(layer)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <HeaderScrapbookCornerTabs />
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              position: "relative",
+                              width: HEADER_POLAROID_IMG_W,
+                              height: HEADER_POLAROID_IMG_H,
+                              overflow: "hidden",
+                              backgroundColor: url
+                                ? colors.avatarBg
+                                : POLAROID_NO_PHOTO_BG,
+                              borderRadius: 1,
+                            }}
+                          >
+                            {url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={url}
+                                alt=""
+                                draggable={false}
+                                onLoad={(e) => {
+                                  const el = e.currentTarget;
+                                  setPolaroidNaturalByKey((prev) => ({
+                                    ...prev,
+                                    [key]: {
+                                      w: el.naturalWidth,
+                                      h: el.naturalHeight,
+                                    },
+                                  }));
+                                }}
+                                style={(() => {
+                                  if (nw <= 0 || nh <= 0) {
+                                    return {
+                                      position: "absolute" as const,
+                                      left: 0,
+                                      top: 0,
+                                      width: "100%",
+                                      height: "100%",
+                                      opacity: 0,
+                                    };
+                                  }
+                                  const { w: rw, h: rh } =
+                                    cropCoverRenderedSize(
+                                      nw,
+                                      nh,
+                                      HEADER_POLAROID_IMG_W,
+                                      HEADER_POLAROID_IMG_H,
+                                      crop.zoom
+                                    );
+                                  const off = cropPercentToOffsetCover(
+                                    crop.x,
+                                    crop.y,
+                                    rw,
+                                    rh,
+                                    HEADER_POLAROID_IMG_W,
+                                    HEADER_POLAROID_IMG_H
+                                  );
+                                  return {
+                                    position: "absolute" as const,
+                                    left: off.x,
+                                    top: off.y,
+                                    width: rw,
+                                    height: rh,
+                                    opacity: 1,
+                                    pointerEvents: "none" as const,
+                                    maxWidth: "none",
+                                    filter:
+                                      theme === "dark"
+                                        ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                        : HEADER_POLAROID_PRINT_FILTER_LIGHT,
+                                  };
+                                })()}
+                              />
+                            ) : (
+                              <div
+                                className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                                style={{
+                                  fontFamily: serif,
+                                  color: POLAROID_NO_PHOTO_INITIALS,
+                                }}
+                              >
+                                {polaroidInitialsFromLayer(layer)}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -6017,7 +6484,7 @@ export default function PersonProfilePage() {
                   color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
                 }}
               >
-                ENTERED THE CHAT
+                {profileCanvasTheme.bornLabel}
               </div>
               <div
                 className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
@@ -6025,7 +6492,7 @@ export default function PersonProfilePage() {
                   color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
                 }}
               >
-                CHECKED OUT
+                {profileCanvasTheme.diedLabel}
               </div>
               <div
                 className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
@@ -6206,7 +6673,7 @@ export default function PersonProfilePage() {
                   className="text-2xl font-bold"
                   style={{ fontFamily: serif, color: colors.brownDark }}
                 >
-                  The Tea
+                  {profileCanvasTheme.timelineHeader}
                 </h2>
                 <button
                   type="button"
@@ -6219,7 +6686,7 @@ export default function PersonProfilePage() {
                     border: `1px solid ${colors.brownBorder}`,
                   }}
                 >
-                  New Intel
+                  {profileCanvasTheme.newEventButton}
                 </button>
               </div>
               {timelineEvents.length === 0 ? (
@@ -7341,7 +7808,7 @@ export default function PersonProfilePage() {
                   className="mb-3 whitespace-nowrap text-base font-bold leading-tight tracking-tight sm:text-lg lg:text-xl"
                   style={{ fontFamily: serif, color: colors.brownDark }}
                 >
-                  The Usual Suspects
+                  {profileCanvasTheme.familyPanelTitle}
                 </h2>
               <div className="mb-2">
                 <h3
@@ -7919,8 +8386,7 @@ export default function PersonProfilePage() {
                       panel: "margin" as const,
                       label: "Margin",
                       controlsId: "person-margin-notes-panel",
-                      idleBg:
-                        "color-mix(in srgb, var(--dg-parchment-deep) 68%, var(--dg-brown-border) 32%)",
+                      idleBg: MARGIN_DESK_TAB_IDLE_BG,
                       idleText: colors.brownMuted,
                     },
                     {
@@ -7935,8 +8401,7 @@ export default function PersonProfilePage() {
                       panel: "receipts" as const,
                       label: "Receipts",
                       controlsId: "person-desk-receipts-panel",
-                      idleBg:
-                        "color-mix(in srgb, var(--dg-parchment) 70%, var(--dg-forest) 30%)",
+                      idleBg: RECEIPTS_TAB_IDLE_BG,
                       idleText: colors.brownDark,
                     },
                   ] as const
@@ -10899,5 +11364,6 @@ export default function PersonProfilePage() {
         </div>
       )}
     </div>
+    </PersonProfilePageBody>
   );
 }
