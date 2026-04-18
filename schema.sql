@@ -33,6 +33,7 @@ create table public.trees (
   user_id uuid not null references auth.users (id) on delete cascade,
   name text not null,
   vibe text not null default 'classic',
+  canvas_theme text not null default 'string',
   created_at timestamptz not null default now()
 );
 

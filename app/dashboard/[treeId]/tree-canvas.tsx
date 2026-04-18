@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import {
   TransformComponent,
@@ -40,33 +41,240 @@ const CANVAS_INITIAL_SCALE = 1.2;
 
 /** Explicit pedigree layout (fixed canvas geometry). */
 const LAYOUT_CANVAS_W = 2400;
-const LAYOUT_NODE_W = 160;
-const LAYOUT_NODE_H = 90;
-const LAYOUT_BASE_Y = 1200;
-const LAYOUT_GEN_DY = 220;
-const LAYOUT_V_PAD = 80;
-const LAYOUT_MIN_NODE_GAP = 40;
 
-/** Pedigree connectors: horizontal couple bar offset from parent node top (see spec). */
-const PED_COUPLE_LINE_Y = 110;
-const PED_BRANCH_BAR_ABOVE_CHILD = 30;
+/** Polaroid-style tree cards (same proportions as profile header polaroids, smaller). */
+const TREE_POLAROID_EDGE = 5;
+const TREE_POLAROID_IMG_W = 88;
+const TREE_POLAROID_IMG_H = Math.round(
+  (TREE_POLAROID_IMG_W * 160) / 128
+);
+/** Room for two 11px lines at tight leading + gap before dates (avoids line-clamp clip). */
+const TREE_POLAROID_CAPTION_MIN_H = 46;
+const TREE_POLAROID_SET_ROOT_H = 22;
+const TREE_POLAROID_CAPTION_GAP = 6;
+
+const LAYOUT_NODE_W = TREE_POLAROID_EDGE * 2 + TREE_POLAROID_IMG_W;
+const LAYOUT_NODE_H =
+  TREE_POLAROID_EDGE +
+  TREE_POLAROID_IMG_H +
+  TREE_POLAROID_CAPTION_GAP +
+  TREE_POLAROID_CAPTION_MIN_H +
+  TREE_POLAROID_SET_ROOT_H;
+
+const LAYOUT_BASE_Y = 1200;
+const LAYOUT_GEN_DY = 300;
+const LAYOUT_V_PAD = 80;
+const LAYOUT_MIN_NODE_GAP = 80;
+
+/**
+ * Head center offset from card edge; stem overlaps the card (pins SVG above string lines above cards).
+ */
+const TREE_PIN_HEAD_OFFSET_Y = 12;
+const TREE_PIN_HEAD_R = 9;
+const TREE_PIN_STEM_W = 2.5;
+const TREE_PIN_STEM_LEN = 8;
+const TREE_PIN_STEM_FILL = "#5a0000";
+/** Local symbol: head at (11,11), viewBox height fits head + stem. */
+const TREE_PIN_SYMBOL_W = 22;
+const TREE_PIN_SYMBOL_H = 30;
+const TREE_PIN_HEAD_CX = 11;
+const TREE_PIN_HEAD_CY = 11;
+
+/** Flat copper tack on card face: near-circle ~10px, viewBox center (6,6). */
+const TREE_BRAD_SYMBOL_W = 12;
+const TREE_BRAD_SYMBOL_H = 12;
+const TREE_BRAD_CX = 6;
+const TREE_BRAD_CY = 6;
+/** Center Y from card top: below caption/dates on the polaroid face, not the outer bottom edge. */
+const TREE_COPPER_TACK_CENTER_Y_FROM_TOP =
+  TREE_POLAROID_EDGE +
+  TREE_POLAROID_IMG_H +
+  TREE_POLAROID_CAPTION_GAP +
+  TREE_POLAROID_CAPTION_MIN_H +
+  8;
+
+const TREE_THREAD_DARK = "#7a0000";
+const TREE_THREAD_BRIGHT = "#dc2626";
+const TREE_THREAD_STROKE_DARK = 3.5;
+const TREE_THREAD_STROKE_BRIGHT = 1.8;
 
 type LayoutEdge = { parent: string; child: string };
 
+/** Top-center pin (marriage + strings into children’s top pin). */
+function treeCardPinTopCenter(pos: { x: number; y: number }): {
+  x: number;
+  y: number;
+} {
+  return {
+    x: pos.x + LAYOUT_NODE_W / 2,
+    y: pos.y - TREE_PIN_HEAD_OFFSET_Y,
+  };
+}
+
+/**
+ * Copper tack on front of card (below dates); strings attach to tack center.
+ */
+function treeCardPinBottomCenter(pos: { x: number; y: number }): {
+  x: number;
+  y: number;
+} {
+  return {
+    x: pos.x + LAYOUT_NODE_W / 2,
+    y: pos.y + TREE_COPPER_TACK_CENTER_Y_FROM_TOP,
+  };
+}
+
+type TreeThreadSegment = {
+  key: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+type TreeGatheringPin = {
+  key: string;
+  x: number;
+  y: number;
+};
+
+function treePinTopUseTransform(wx: number, wy: number): string {
+  return `translate(${wx - TREE_PIN_HEAD_CX}, ${wy - TREE_PIN_HEAD_CY})`;
+}
+
+function treeBradUseTransform(wx: number, wy: number): string {
+  return `translate(${wx - TREE_BRAD_CX}, ${wy - TREE_BRAD_CY})`;
+}
+
+function TreeThreadLine({
+  x1,
+  y1,
+  x2,
+  y2,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}) {
+  return (
+    <g>
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        stroke={TREE_THREAD_DARK}
+        strokeWidth={TREE_THREAD_STROKE_DARK}
+        strokeLinecap="round"
+      />
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        stroke={TREE_THREAD_BRIGHT}
+        strokeWidth={TREE_THREAD_STROKE_BRIGHT}
+        strokeLinecap="round"
+      />
+    </g>
+  );
+}
+
+/** Hit target when a pin can bury or restore (same geometry as the pin symbol). */
+function TreePinActionWrap({
+  interactive,
+  ariaLabel,
+  onAction,
+  children,
+}: {
+  interactive: boolean;
+  ariaLabel: string | null;
+  onAction: () => void;
+  children: ReactNode;
+}) {
+  if (!interactive || !ariaLabel) return <>{children}</>;
+  return (
+    <g
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      style={{ cursor: "pointer", pointerEvents: "auto" }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onAction();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        e.stopPropagation();
+        onAction();
+      }}
+    >
+      <rect
+        width={TREE_PIN_SYMBOL_W}
+        height={TREE_PIN_SYMBOL_H}
+        fill="transparent"
+        pointerEvents="all"
+      />
+      {children}
+    </g>
+  );
+}
+
+function buildParentToChildren(edges: LayoutEdge[]): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  for (const { parent, child } of edges) {
+    if (!m.has(parent)) m.set(parent, []);
+    m.get(parent)!.push(child);
+  }
+  return m;
+}
+
 function normRelType(t: string): string {
   return t.trim().toLowerCase();
+}
+
+/**
+ * Canonical directed “older generation → younger” edge for layout and ancestor walks.
+ * Matches DB rows from review/person flows: parent/child swap, plus grandparent/grandchild.
+ */
+function directedGenerationalEdge(r: {
+  person_a_id: string;
+  person_b_id: string;
+  relationship_type: string;
+}): { parent: string; child: string } | null {
+  const t = normRelType(r.relationship_type);
+  if (t === "parent") {
+    return { parent: r.person_a_id, child: r.person_b_id };
+  }
+  if (t === "child") {
+    return { parent: r.person_b_id, child: r.person_a_id };
+  }
+  if (t === "grandparent") {
+    return { parent: r.person_a_id, child: r.person_b_id };
+  }
+  if (t === "grandchild") {
+    return { parent: r.person_b_id, child: r.person_a_id };
+  }
+  return null;
 }
 
 function parentChildEdges(
   relationships: TreeCanvasRelationship[],
   personSet: Set<string>
 ): LayoutEdge[] {
+  const seenEdge = new Set<string>();
   const out: LayoutEdge[] = [];
   for (const r of relationships) {
-    if (normRelType(r.relationship_type) !== "parent") continue;
-    const parent = r.person_a_id;
-    const child = r.person_b_id;
+    const pc = directedGenerationalEdge(r);
+    if (!pc) continue;
+    const { parent, child } = pc;
     if (!personSet.has(parent) || !personSet.has(child)) continue;
+    const dedupe = `${parent}->${child}`;
+    if (seenEdge.has(dedupe)) continue;
+    seenEdge.add(dedupe);
     out.push({ parent, child });
   }
   return out;
@@ -81,6 +289,25 @@ function buildParentsOfMap(
     parentsOf.get(child)!.add(parent);
   }
   return parentsOf;
+}
+
+/** All strict ancestors of `personId` (not including `personId`), walking upward iteratively. */
+function getAncestors(
+  personId: string,
+  parentsOf: Map<string, Set<string>>
+): Set<string> {
+  const out = new Set<string>();
+  const stack: string[] = [];
+  const roots = parentsOf.get(personId);
+  if (roots) for (const p of roots) stack.push(p);
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (out.has(id)) continue;
+    out.add(id);
+    const pars = parentsOf.get(id);
+    if (pars) for (const p of pars) stack.push(p);
+  }
+  return out;
 }
 
 function buildChildrenOfMap(
@@ -278,67 +505,239 @@ function computeExplicitTreeLayout(
   const xById = new Map<string, number>();
   const sortedIds = [...personIds].sort((a, b) => a.localeCompare(b));
 
+  // STEP 1 — identify family units (children who share the exact same parent set).
+  const familyUnits = new Map<string, string[]>();
+  for (const id of personIds) {
+    const pars = [...(parentsOf.get(id) ?? [])].filter((pid) =>
+      personSet.has(pid)
+    );
+    if (pars.length === 0) continue;
+    pars.sort((a, b) => a.localeCompare(b));
+    const key = pars.join("|");
+    if (!familyUnits.has(key)) familyUnits.set(key, []);
+    familyUnits.get(key)!.push(id);
+  }
+  for (const ids of familyUnits.values()) {
+    ids.sort((a, b) => a.localeCompare(b));
+  }
+
+  // STEP 2 — root, floaters, and true islands (no parents, no children).
   if (rootId && personSet.has(rootId)) {
     xById.set(rootId, LAYOUT_ROOT_X);
   }
+  for (const id of personIds) {
+    if (!reachable.has(id)) {
+      xById.set(id, centerX);
+      continue;
+    }
+    if (id === rootId && personSet.has(rootId)) continue;
+    const pars = [...(parentsOf.get(id) ?? [])].filter((pid) =>
+      personSet.has(pid)
+    );
+    const kids = [...(childrenOf.get(id) ?? [])].filter((c) =>
+      personSet.has(c)
+    );
+    if (pars.length === 0 && kids.length === 0) {
+      xById.set(id, centerX);
+    }
+  }
 
-  const maxPasses = Math.max(8, personIds.length * 3);
-  for (let pass = 0; pass < maxPasses; pass++) {
-    let changed = false;
+  let minGen = Infinity;
+  let maxGen = -Infinity;
+  for (const id of personIds) {
+    if (floaterSet.has(id)) continue;
+    const g = gen.get(id) ?? 0;
+    minGen = Math.min(minGen, g);
+    maxGen = Math.max(maxGen, g);
+  }
+  if (minGen === Infinity) {
+    minGen = 0;
+    maxGen = 0;
+  }
+
+  const clusterCenterByKey = new Map<string, number>();
+  const unitKeysSorted = [...familyUnits.keys()].sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  const placeFamilyUnitCluster = (
+    unitKey: string,
+    children: string[],
+    generation: number,
+    forceCluster: boolean
+  ) => {
+    const inUnit = children.filter(
+      (c) =>
+        reachable.has(c) &&
+        !floaterSet.has(c) &&
+        (gen.get(c) ?? 0) === generation
+    );
+    if (inUnit.length === 0) return;
+    if (!inUnit.every((c) => (gen.get(c) ?? 0) === generation)) return;
+
+    const parentIds = unitKey.split("|");
+    const positioned = parentIds.filter((p) => xById.has(p));
+    if (
+      parentIds.length > 0 &&
+      positioned.length === 0 &&
+      !forceCluster
+    ) {
+      return;
+    }
+
+    let clusterCenter: number;
+    if (positioned.length >= 2) {
+      clusterCenter =
+        positioned.reduce((s, p) => s + xById.get(p)!, 0) /
+        positioned.length;
+    } else if (positioned.length === 1) {
+      clusterCenter = xById.get(positioned[0]!)!;
+    } else {
+      clusterCenter = centerX;
+    }
+
+    const n = inUnit.length;
+    const clusterW =
+      n * LAYOUT_NODE_W + (n - 1) * LAYOUT_MIN_NODE_GAP;
+    let left = clusterCenter - clusterW / 2;
+    for (let i = 0; i < n; i++) {
+      const cid = inUnit[i]!;
+      xById.set(cid, left);
+      left += LAYOUT_NODE_W + LAYOUT_MIN_NODE_GAP;
+    }
+    clusterCenterByKey.set(unitKey, clusterCenter);
+  };
+
+  const runStep3TopDown = (forceCluster: boolean) => {
+    for (let g = maxGen; g >= minGen; g--) {
+      for (const unitKey of unitKeysSorted) {
+        const children = familyUnits.get(unitKey)!;
+        if (!children.every((c) => (gen.get(c) ?? 0) === g)) continue;
+        if (children.some((c) => !reachable.has(c) || floaterSet.has(c)))
+          continue;
+        placeFamilyUnitCluster(unitKey, children, g, forceCluster);
+      }
+    }
+  };
+
+  const fillParentXFromChildren = () => {
     for (const id of sortedIds) {
-      if (id === rootId && personSet.has(rootId)) {
-        if (xById.get(id) !== LAYOUT_ROOT_X) {
-          xById.set(id, LAYOUT_ROOT_X);
-          changed = true;
-        }
-        continue;
-      }
-      if (!reachable.has(id)) {
-        const prev = xById.get(id);
-        if (prev !== centerX) {
-          xById.set(id, centerX);
-          changed = true;
-        }
-        continue;
-      }
-
-      let nx: number | undefined;
-
+      if (id === rootId && personSet.has(rootId)) continue;
+      if (!reachable.has(id)) continue;
+      if (xById.has(id)) continue;
       const kids = [...(childrenOf.get(id) ?? [])].filter((c) =>
         personSet.has(c)
       );
-      const kidXs = kids.map((c) => xById.get(c)).filter((v): v is number => v !== undefined);
-      if (kidXs.length === 1) {
-        nx = kidXs[0]!;
-      } else if (kidXs.length >= 2) {
-        nx = kidXs.reduce((a, b) => a + b, 0) / kidXs.length;
-      }
+      const kidXs = kids
+        .map((c) => xById.get(c))
+        .filter((v): v is number => v !== undefined);
+      if (kidXs.length === 0) continue;
+      const nx =
+        kidXs.length === 1
+          ? kidXs[0]!
+          : kidXs.reduce((a, b) => a + b, 0) / kidXs.length;
+      xById.set(id, nx);
+    }
+  };
 
-      if (nx === undefined) {
-        const pars = [...(parentsOf.get(id) ?? [])].filter((pid) =>
-          personSet.has(pid)
-        );
-        const parXs = pars
-          .map((p) => xById.get(p))
-          .filter((v): v is number => v !== undefined);
-        if (parXs.length === 1) {
-          nx = parXs[0]!;
-        } else if (parXs.length >= 2) {
-          nx = parXs.reduce((a, b) => a + b, 0) / parXs.length;
-        }
-      }
+  // Propagate root x upward through ancestor generations before cluster placement.
+  fillParentXFromChildren();
+  fillParentXFromChildren();
+  fillParentXFromChildren();
+  fillParentXFromChildren();
+  fillParentXFromChildren();
+  runStep3TopDown(false);
+  fillParentXFromChildren();
+  runStep3TopDown(false);
+  fillParentXFromChildren();
+  runStep3TopDown(true);
+  fillParentXFromChildren();
 
-      if (nx === undefined) {
-        nx = centerX;
-      }
+  for (const id of personIds) {
+    if (!reachable.has(id) || floaterSet.has(id)) continue;
+    if (xById.has(id)) continue;
+    if (id === rootId && personSet.has(rootId)) continue;
+    xById.set(id, centerX);
+  }
 
-      const prev = xById.get(id);
-      if (prev === undefined || Math.abs(prev - nx) > 1e-9) {
-        xById.set(id, nx);
-        changed = true;
+  // STEP 5 — multi-partner parents: lay partner clusters side by side under parent x.
+  const parentToUnitKeys = new Map<string, Set<string>>();
+  for (const unitKey of unitKeysSorted) {
+    const parts = unitKey.split("|");
+    for (const p of parts) {
+      if (!parentToUnitKeys.has(p)) parentToUnitKeys.set(p, new Set());
+      parentToUnitKeys.get(p)!.add(unitKey);
+    }
+  }
+
+  const unitKeySetsEqual = (a: Set<string>, b: Set<string>) => {
+    if (a.size !== b.size) return false;
+    for (const x of a) if (!b.has(x)) return false;
+    return true;
+  };
+
+  const step5ProcessedParents = new Set<string>();
+  const multiPartnerParentIds = [...parentToUnitKeys.keys()]
+    .filter((pid) => parentToUnitKeys.get(pid)!.size > 1)
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const parentId of multiPartnerParentIds) {
+    if (parentId === rootId && personSet.has(rootId)) continue;
+    if (step5ProcessedParents.has(parentId)) continue;
+
+    const unitKeys = parentToUnitKeys.get(parentId)!;
+    const avgParentXForUnitKey = (uk: string): number | null => {
+      const xs = uk
+        .split("|")
+        .map((id) => xById.get(id))
+        .filter((v): v is number => v !== undefined);
+      if (xs.length === 0) return null;
+      return xs.reduce((s, v) => s + v, 0) / xs.length;
+    };
+    const keysSorted = [...unitKeys].sort((a, b) => {
+      const da = avgParentXForUnitKey(a);
+      const db = avgParentXForUnitKey(b);
+      if (da !== null && db !== null && da !== db) return da - db;
+      if (da !== null && db === null) return -1;
+      if (da === null && db !== null) return 1;
+      return a.localeCompare(b);
+    });
+
+    const clusterMeta: { width: number; children: string[] }[] = [];
+    for (const uk of keysSorted) {
+      const children = (familyUnits.get(uk) ?? []).filter(
+        (c) => reachable.has(c) && !floaterSet.has(c)
+      );
+      const n = children.length;
+      const clusterW =
+        n <= 0
+          ? 0
+          : n * LAYOUT_NODE_W + (n - 1) * LAYOUT_MIN_NODE_GAP;
+      clusterMeta.push({ width: clusterW, children });
+    }
+
+    const numClusters = clusterMeta.length;
+    const totalWidth =
+      clusterMeta.reduce((s, c) => s + c.width, 0) +
+      (numClusters > 1 ? (numClusters - 1) * LAYOUT_MIN_NODE_GAP : 0);
+
+    const parentX = xById.get(parentId) ?? centerX;
+    let startX = parentX - totalWidth / 2;
+
+    for (const { width: clusterW, children } of clusterMeta) {
+      let x = startX;
+      for (const cid of children) {
+        xById.set(cid, x);
+        x += LAYOUT_NODE_W + LAYOUT_MIN_NODE_GAP;
+      }
+      startX += clusterW + LAYOUT_MIN_NODE_GAP;
+    }
+
+    for (const [otherId, otherKeys] of parentToUnitKeys) {
+      if (unitKeySetsEqual(otherKeys, unitKeys)) {
+        step5ProcessedParents.add(otherId);
       }
     }
-    if (!changed) break;
   }
 
   for (const id of personIds) {
@@ -370,17 +769,80 @@ function computeExplicitTreeLayout(
     if (!moved) break;
   }
 
-  let maxConnectedY = LAYOUT_BASE_Y;
-  if (posById.size > 0) {
-    maxConnectedY = Math.max(...[...posById.values()].map((p) => p.y));
-  }
-
   const spouseOf = new Map<string, string>();
   for (const r of relationships) {
-    if (normRelType(r.relationship_type) === "spouse") {
+    const t = normRelType(r.relationship_type);
+    if (t === "spouse" || t === "married") {
       spouseOf.set(r.person_a_id, r.person_b_id);
       spouseOf.set(r.person_b_id, r.person_a_id);
     }
+  }
+
+  /** Keep couples contiguous on each generation row so unrelated nodes (e.g. siblings) never sit between spouses. */
+  const packSpousePairsIntoRows = () => {
+    const coupleGap = LAYOUT_MIN_NODE_GAP;
+    const nodeSpan = LAYOUT_NODE_W;
+    for (const [, ids] of byGen) {
+      const row = ids.filter((id) => reachable.has(id) && !floaterSet.has(id));
+      if (row.length <= 1) continue;
+
+      const rowSet = new Set(row);
+      const seen = new Set<string>();
+      const comps: { members: string[] }[] = [];
+      for (const id of row) {
+        if (seen.has(id)) continue;
+        const sid = spouseOf.get(id);
+        if (sid && rowSet.has(sid)) {
+          const [a, b] = id.localeCompare(sid) < 0 ? [id, sid] : [sid, id];
+          comps.push({ members: [a, b] });
+          seen.add(a);
+          seen.add(b);
+        } else {
+          comps.push({ members: [id] });
+          seen.add(id);
+        }
+      }
+
+      const compWidth = (m: string[]) =>
+        m.length === 1 ? nodeSpan : nodeSpan + coupleGap + nodeSpan;
+
+      comps.sort((c1, c2) => {
+        const minx = (m: string[]) =>
+          Math.min(...m.map((x) => posById.get(x)!.x));
+        return minx(c1.members) - minx(c2.members);
+      });
+
+      const nComp = comps.length;
+      const totalW =
+        comps.reduce((s, c) => s + compWidth(c.members), 0) +
+        (nComp > 1 ? (nComp - 1) * coupleGap : 0);
+
+      let sumX = 0;
+      for (const id of row) sumX += posById.get(id)!.x;
+      const center = sumX / row.length;
+
+      let left = center - totalW / 2;
+      for (let i = 0; i < nComp; i++) {
+        const m = comps[i]!.members;
+        if (m.length === 1) {
+          posById.get(m[0]!)!.x = left;
+        } else {
+          const [L, R] =
+            m[0]!.localeCompare(m[1]!) < 0
+              ? [m[0]!, m[1]!]
+              : [m[1]!, m[0]!];
+          posById.get(L)!.x = left;
+          posById.get(R)!.x = left + nodeSpan + coupleGap;
+        }
+        left += compWidth(m) + (i < nComp - 1 ? coupleGap : 0);
+      }
+    }
+  };
+  packSpousePairsIntoRows();
+
+  let maxConnectedY = LAYOUT_BASE_Y;
+  if (posById.size > 0) {
+    maxConnectedY = Math.max(...[...posById.values()].map((p) => p.y));
   }
 
   const handledFloaters = new Set<string>();
@@ -635,12 +1097,6 @@ export type TreeCanvasRelationship = {
   relationship_type: string;
 };
 
-type TreeConnectorPath = {
-  key: string;
-  d: string;
-  kind: "couple" | "default";
-};
-
 function displayName(p: TreeCanvasPerson): string {
   return [p.first_name, p.middle_name ?? "", p.last_name]
     .map((s) => s.trim())
@@ -653,6 +1109,58 @@ function initials(p: TreeCanvasPerson): string {
   const l = p.last_name.trim().charAt(0);
   const s = (f + l).toUpperCase();
   return s || "?";
+}
+
+function primaryDisplayYear(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const y4 = /^(\d{4})/.exec(s);
+  if (y4) return y4[1]!;
+  const iso = s.match(/^(\d{4})-/);
+  if (iso) return iso[1]!;
+  const fd = formatDateString(s);
+  const m = /(\d{4})/.exec(fd);
+  return m ? m[1]! : null;
+}
+
+function treeCardYearRange(p: TreeCanvasPerson): string {
+  const b = primaryDisplayYear(p.birth_date);
+  const d = primaryDisplayYear(p.death_date);
+  if (!b && !d) return "";
+  if (b && d) return `${b} – ${d}`;
+  if (b) return `${b} –`;
+  return `– ${d}`;
+}
+
+function treePolaroidFrameChrome(
+  generation: number,
+  isDark: boolean
+): CSSProperties {
+  const gen = treeNodeGenerationSurfaceStyle(generation);
+  if (isDark) {
+    return {
+      backgroundColor: TREE_POLAROID_FRAME_DARK,
+      borderRadius: 3,
+      border: `1px solid ${TREE_POLAROID_FRAME_DARK}`,
+      boxShadow: [
+        "0 4px 14px rgb(var(--dg-shadow-rgb) / 0.42)",
+        "0 1px 3px rgb(0 0 0 / 0.45)",
+        "inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent)",
+        TREE_POLAROID_DARK_DEPTH_INSET,
+      ].join(", "),
+    };
+  }
+  return {
+    background: gen.background as string,
+    borderRadius: 3,
+    border: `1px solid ${colors.brownBorder}`,
+    boxShadow: [
+      "0 3px 12px rgb(var(--dg-shadow-rgb) / 0.2)",
+      "0 1px 3px rgb(0 0 0 / 0.08)",
+      "0 0 0 1px rgb(0 0 0 / 0.04)",
+    ].join(", "),
+  };
 }
 
 function extFromImageFile(file: File): string {
@@ -716,19 +1224,69 @@ type ClientPrimaryPhotoRow = {
   crop_zoom: number | null;
 };
 
-const TREE_NODE_AVATAR_VP = 40;
 const TREE_PHOTO_CROP_PREVIEW_PX = 200;
 
+/** Match profile polaroid print treatment (light / dark). */
+const TREE_POLAROID_PRINT_FILTER_LIGHT =
+  "contrast(1.1) sepia(0.15) brightness(1.05)" as const;
+const TREE_POLAROID_PRINT_FILTER_DARK =
+  "contrast(1.15) sepia(0.2) brightness(0.95)" as const;
+
+/** Same mat color as profile polaroids in dark mode (`HEADER_POLAROID_FRAME_DARK` on person page). */
+const TREE_POLAROID_FRAME_DARK = "#b0a08a" as const;
+const TREE_POLAROID_DARK_DEPTH_INSET =
+  "inset 0 0 8px rgba(0, 0, 0, 0.4)" as const;
+
+/**
+ * Polaroid aperture when there is no photo. Warm dark brown (not pure black) so
+ * light initials read clearly. Initials use fixed light ink — `var(--dg-cream)` is
+ * dark in `.dark` and would disappear on this fill.
+ */
+const POLAROID_NO_PHOTO_BG =
+  "color-mix(in srgb, var(--dg-brown-mid) 38%, black)" as const;
+const POLAROID_NO_PHOTO_INITIALS = "rgb(255 252 247)" as const;
+
+/** Visual-only: tint by generation from anchor (root). Ancestors warmer; descendants lighter; anchor balanced. */
+function treeNodeGenerationSurfaceStyle(generation: number): CSSProperties {
+  const g = generation === -999 ? 0 : generation;
+  const anc = Math.max(0, g);
+  const desc = Math.max(0, -g);
+
+  if (anc > 0) {
+    const t = Math.min(anc, 4) / 4;
+    const deepPct = 22 + t * 38;
+    return {
+      background: `color-mix(in srgb, var(--dg-parchment-deep) ${deepPct}%, var(--dg-parchment) ${
+        100 - deepPct
+      }%)`,
+    };
+  }
+  if (desc > 0) {
+    const t = Math.min(desc, 4) / 4;
+    const creamPct = 62 + t * 32;
+    return {
+      background: `color-mix(in srgb, var(--dg-cream) ${creamPct}%, var(--dg-parchment) ${
+        100 - creamPct
+      }%)`,
+    };
+  }
+  return {
+    background: `color-mix(in srgb, var(--dg-parchment) 52%, var(--dg-cream) 48%)`,
+  };
+}
+
+/** Cover-fit rendered size inside a rectangular viewport (same math as profile polaroids). */
 function cropCoverRenderedSize(
   naturalW: number,
   naturalH: number,
-  viewportPx: number,
+  viewportW: number,
+  viewportH: number,
   zoom: number
 ): { w: number; h: number } {
-  const scale = Math.max(viewportPx / naturalW, viewportPx / naturalH);
+  const scale = Math.max(viewportW / naturalW, viewportH / naturalH) * zoom;
   return {
-    w: naturalW * scale * zoom,
-    h: naturalH * scale * zoom,
+    w: naturalW * scale,
+    h: naturalH * scale,
   };
 }
 
@@ -736,10 +1294,11 @@ function clampCropOffsetCover(
   offset: { x: number; y: number },
   renderedW: number,
   renderedH: number,
-  viewportPx: number
+  viewportW: number,
+  viewportH: number
 ): { x: number; y: number } {
-  const spanX = renderedW - viewportPx;
-  const spanY = renderedH - viewportPx;
+  const spanX = renderedW - viewportW;
+  const spanY = renderedH - viewportH;
   return {
     x: spanX > 0 ? Math.min(0, Math.max(-spanX, offset.x)) : 0,
     y: spanY > 0 ? Math.min(0, Math.max(-spanY, offset.y)) : 0,
@@ -751,10 +1310,11 @@ function cropPercentToOffsetCover(
   cropY: number,
   renderedW: number,
   renderedH: number,
-  viewportPx: number
+  viewportW: number,
+  viewportH: number
 ): { x: number; y: number } {
-  const spanX = renderedW - viewportPx;
-  const spanY = renderedH - viewportPx;
+  const spanX = renderedW - viewportW;
+  const spanY = renderedH - viewportH;
   return clampCropOffsetCover(
     {
       x: spanX > 0 ? -(cropX / 100) * spanX : 0,
@@ -762,7 +1322,8 @@ function cropPercentToOffsetCover(
     },
     renderedW,
     renderedH,
-    viewportPx
+    viewportW,
+    viewportH
   );
 }
 
@@ -770,10 +1331,11 @@ function offsetToCropPercentCover(
   offset: { x: number; y: number },
   renderedW: number,
   renderedH: number,
-  viewportPx: number
+  viewportW: number,
+  viewportH: number
 ): { x: number; y: number } {
-  const spanX = Math.max(0, renderedW - viewportPx);
-  const spanY = Math.max(0, renderedH - viewportPx);
+  const spanX = Math.max(0, renderedW - viewportW);
+  const spanY = Math.max(0, renderedH - viewportH);
   return {
     x:
       spanX > 0
@@ -789,9 +1351,15 @@ function offsetToCropPercentCover(
 function TreeNodeAvatarImg({
   primary,
   fallbackUrl,
+  viewportW,
+  viewportH,
+  printFilter,
 }: {
   primary: ClientPrimaryPhotoRow | undefined;
   fallbackUrl: string | null;
+  viewportW: number;
+  viewportH: number;
+  printFilter: string | null;
 }) {
   const src = (primary?.file_url ?? "").trim() || (fallbackUrl ?? "").trim();
   if (!src) return null;
@@ -818,7 +1386,8 @@ function TreeNodeAvatarImg({
     const { w: rw, h: rh } = cropCoverRenderedSize(
       nw,
       nh,
-      TREE_NODE_AVATAR_VP,
+      viewportW,
+      viewportH,
       cropZoom
     );
     const offset = cropPercentToOffsetCover(
@@ -826,7 +1395,8 @@ function TreeNodeAvatarImg({
       cy,
       rw,
       rh,
-      TREE_NODE_AVATAR_VP
+      viewportW,
+      viewportH
     );
     pixelStyle = {
       position: "absolute",
@@ -838,13 +1408,18 @@ function TreeNodeAvatarImg({
     };
   }
 
+  const imgStyle: CSSProperties = {
+    ...(hasPixelCrop && pixelStyle ? pixelStyle : {}),
+    ...(printFilter ? { filter: printFilter } : {}),
+  };
+
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
       alt=""
       className={hasPixelCrop ? undefined : "h-full w-full object-cover"}
-      style={hasPixelCrop ? (pixelStyle ?? undefined) : undefined}
+      style={Object.keys(imgStyle).length ? imgStyle : undefined}
     />
   );
 }
@@ -904,6 +1479,79 @@ export default function TreeCanvas({
 
   const personIds = useMemo(() => mergedPersons.map((p) => p.id), [mergedPersons]);
 
+  const [collapsedAtIds, setCollapsedAtIds] = useState<Set<string>>(
+    () => new Set()
+  );
+
+  const { parentsOfAll, hiddenIds, canBuryIds } = useMemo(() => {
+    const allIds = new Set(mergedPersons.map((p) => p.id));
+    const parentsOfAll = buildParentsOfMap(
+      parentChildEdges(relationships, allIds)
+    );
+
+    const childrenOfAll = new Map<string, Set<string>>();
+    for (const [child, parents] of parentsOfAll) {
+      for (const parent of parents) {
+        if (!childrenOfAll.has(parent)) childrenOfAll.set(parent, new Set());
+        childrenOfAll.get(parent)!.add(child);
+      }
+    }
+
+    const candidates = new Set<string>();
+    for (const id of collapsedAtIds) {
+      const pars = parentsOfAll.get(id);
+      if (!pars) continue;
+      for (const p of pars) {
+        candidates.add(p);
+        const kids = childrenOfAll.get(p);
+        if (!kids) continue;
+        for (const c of kids) {
+          if (c !== id) candidates.add(c);
+        }
+      }
+    }
+
+    let removedInPass = true;
+    while (removedInPass) {
+      removedInPass = false;
+      for (const person of [...candidates]) {
+        if (!candidates.has(person)) continue;
+        const kids = childrenOfAll.get(person) ?? new Set();
+        for (const c of kids) {
+          if (!candidates.has(c) && !collapsedAtIds.has(c)) {
+            candidates.delete(person);
+            removedInPass = true;
+            break;
+          }
+        }
+      }
+    }
+
+    const hiddenIds = new Set<string>();
+    for (const x of candidates) {
+      if (!collapsedAtIds.has(x)) hiddenIds.add(x);
+    }
+
+    const canBuryIds = new Set<string>();
+    for (const p of mergedPersons) {
+      const pars = parentsOfAll.get(p.id);
+      if (!pars || pars.size === 0) continue;
+      for (const par of pars) {
+        if (!hiddenIds.has(par)) {
+          canBuryIds.add(p.id);
+          break;
+        }
+      }
+    }
+
+    return { parentsOfAll, hiddenIds, canBuryIds };
+  }, [mergedPersons, relationships, collapsedAtIds]);
+
+  const visiblePersonIds = useMemo(
+    () => personIds.filter((id) => !hiddenIds.has(id)),
+    [personIds, hiddenIds]
+  );
+
   const parentsOfForRoot = useMemo(() => {
     const set = new Set(personIds);
     return buildParentsOfMap(parentChildEdges(relationships, set));
@@ -914,23 +1562,26 @@ export default function TreeCanvas({
     [personIds, parentsOfForRoot]
   );
 
-  const [layoutRootOverride, setLayoutRootOverride] = useState<string | null>(
-    null
-  );
-  const effectiveRoot =
-    layoutRootOverride &&
-    personIds.includes(layoutRootOverride) &&
-    layoutRootOverride !== ""
-      ? layoutRootOverride
-      : initialRootId;
+  const initialRootIdRef = useRef(initialRootId);
+  initialRootIdRef.current = initialRootId;
 
-  const layout = useMemo(
-    () => computeExplicitTreeLayout(personIds, relationships, effectiveRoot),
-    [personIds, relationships, effectiveRoot]
-  );
-
-  const effectiveRootRef = useRef(effectiveRoot);
-  effectiveRootRef.current = effectiveRoot;
+  const layout = useMemo(() => {
+    const set = new Set(visiblePersonIds);
+    const layoutRootId =
+      initialRootId && set.has(initialRootId)
+        ? initialRootId
+        : pickDeepestRoot(
+            visiblePersonIds,
+            buildParentsOfMap(
+              parentChildEdges(relationships, set)
+            )
+          );
+    return computeExplicitTreeLayout(
+      visiblePersonIds,
+      relationships,
+      layoutRootId
+    );
+  }, [visiblePersonIds, relationships, initialRootId]);
 
   const personById = useMemo(() => {
     const m = new Map<string, TreeCanvasPerson>();
@@ -1112,6 +1763,7 @@ export default function TreeCanvas({
         photoCropNaturalSize.w,
         photoCropNaturalSize.h,
         TREE_PHOTO_CROP_PREVIEW_PX,
+        TREE_PHOTO_CROP_PREVIEW_PX,
         cropZoom
       );
       const startOffset = cropPercentToOffsetCover(
@@ -1119,6 +1771,7 @@ export default function TreeCanvas({
         cropY,
         rw,
         rh,
+        TREE_PHOTO_CROP_PREVIEW_PX,
         TREE_PHOTO_CROP_PREVIEW_PX
       );
       const startX = e.clientX;
@@ -1131,12 +1784,14 @@ export default function TreeCanvas({
           { x: startOffset.x + dx, y: startOffset.y + dy },
           rw,
           rh,
+          TREE_PHOTO_CROP_PREVIEW_PX,
           TREE_PHOTO_CROP_PREVIEW_PX
         );
         const nextPct = offsetToCropPercentCover(
           next,
           rw,
           rh,
+          TREE_PHOTO_CROP_PREVIEW_PX,
           TREE_PHOTO_CROP_PREVIEW_PX
         );
         setCropX(nextPct.x);
@@ -1169,6 +1824,7 @@ export default function TreeCanvas({
         photoCropNaturalSize.w,
         photoCropNaturalSize.h,
         TREE_PHOTO_CROP_PREVIEW_PX,
+        TREE_PHOTO_CROP_PREVIEW_PX,
         cropZoom
       );
       const startOffset = cropPercentToOffsetCover(
@@ -1176,6 +1832,7 @@ export default function TreeCanvas({
         cropY,
         rw,
         rh,
+        TREE_PHOTO_CROP_PREVIEW_PX,
         TREE_PHOTO_CROP_PREVIEW_PX
       );
       const startX = t.clientX;
@@ -1190,12 +1847,14 @@ export default function TreeCanvas({
           { x: startOffset.x + dx, y: startOffset.y + dy },
           rw,
           rh,
+          TREE_PHOTO_CROP_PREVIEW_PX,
           TREE_PHOTO_CROP_PREVIEW_PX
         );
         const nextPct = offsetToCropPercentCover(
           next,
           rw,
           rh,
+          TREE_PHOTO_CROP_PREVIEW_PX,
           TREE_PHOTO_CROP_PREVIEW_PX
         );
         setCropX(nextPct.x);
@@ -1469,11 +2128,11 @@ export default function TreeCanvas({
 
   useEffect(() => {
     centeredRef.current = false;
-  }, [effectiveRoot, layout.contentWidth, layout.contentHeight]);
+  }, [initialRootId, layout.contentWidth, layout.contentHeight]);
 
   useEffect(() => {
     if (centeredRef.current) return;
-    const rootId = effectiveRoot;
+    const rootId = initialRootId;
     if (!rootId) return;
     const t = window.setTimeout(() => {
       if (centeredRef.current) return;
@@ -1481,12 +2140,12 @@ export default function TreeCanvas({
       centeredRef.current = true;
     }, 48);
     return () => window.clearTimeout(t);
-  }, [effectiveRoot, zoomToPerson, layout.positions.length]);
+  }, [initialRootId, zoomToPerson, layout.positions.length]);
 
   const handleTransformInit = useCallback(
     (ctx: ReactZoomPanPinchContentRef) => {
       transformRef.current = ctx;
-      const rootId = effectiveRootRef.current;
+      const rootId = initialRootIdRef.current;
       if (!rootId || centeredRef.current) return;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -1501,17 +2160,15 @@ export default function TreeCanvas({
     []
   );
 
-  /** Pedigree connectors: couple + trunk + branch bar + child drops; single-parent → straight to child top-center. */
-  const parentChildConnectorPaths = useMemo(() => {
+  const pedigreeLayoutData = useMemo(() => {
     const posById = new Map(layout.positions.map((p) => [p.id, p]));
-    const cx = LAYOUT_NODE_W / 2;
 
     const seenEdge = new Set<string>();
-    const edges: { parent: string; child: string }[] = [];
+    const edges: LayoutEdge[] = [];
     for (const r of relationships) {
-      if (normRelType(r.relationship_type) !== "parent") continue;
-      const parent = r.person_a_id;
-      const child = r.person_b_id;
+      const pc = directedGenerationalEdge(r);
+      if (!pc) continue;
+      const { parent, child } = pc;
       const dedupe = `${parent}->${child}`;
       if (seenEdge.has(dedupe)) continue;
       seenEdge.add(dedupe);
@@ -1536,7 +2193,50 @@ export default function TreeCanvas({
     }
 
     const covered = new Set<string>();
-    const out: TreeConnectorPath[] = [];
+    for (const [pk, children] of pairToChildren) {
+      const pipe = pk.indexOf("|");
+      if (pipe < 0) continue;
+      const p1 = pk.slice(0, pipe);
+      const p2 = pk.slice(pipe + 1);
+      for (const cid of children) {
+        covered.add(`${p1}->${cid}`);
+        covered.add(`${p2}->${cid}`);
+      }
+    }
+
+    const soloByParent = new Map<string, string[]>();
+    for (const { parent, child } of edges) {
+      if (covered.has(`${parent}->${child}`)) continue;
+      if (!soloByParent.has(parent)) soloByParent.set(parent, []);
+      soloByParent.get(parent)!.push(child);
+    }
+
+    return {
+      posById,
+      pairToChildren,
+      covered,
+      soloByParent,
+    };
+  }, [layout.positions, relationships]);
+
+  /** Pedigree: threads between top/bottom pins; optional gathering pin for multi-child couples. */
+  const treeThreadBundle = useMemo(() => {
+    const { posById, pairToChildren, covered, soloByParent } =
+      pedigreeLayoutData;
+
+    const segments: TreeThreadSegment[] = [];
+    const gatheringPins: TreeGatheringPin[] = [];
+    const noBottomPinIds = new Set<string>();
+
+    const pushSeg = (
+      key: string,
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number
+    ) => {
+      segments.push({ key, x1, y1, x2, y2 });
+    };
 
     for (const [pk, children] of pairToChildren) {
       const pipe = pk.indexOf("|");
@@ -1552,10 +2252,19 @@ export default function TreeCanvas({
       const posL = posById.get(left)!;
       const posR = posById.get(right)!;
 
-      const xL = posL.x + cx;
-      const xR = posR.x + cx;
-      const coupleY = Math.max(posL.y, posR.y) + PED_COUPLE_LINE_Y;
-      const midX = (xL + xR) / 2;
+      const pinTopL = treeCardPinTopCenter(posL);
+      const pinTopR = treeCardPinTopCenter(posR);
+      const pinBotL = treeCardPinBottomCenter(posL);
+      const pinBotR = treeCardPinBottomCenter(posR);
+
+      const marriageY = Math.min(pinTopL.y, pinTopR.y);
+      pushSeg(
+        `thread:marriage:${pk}`,
+        pinTopL.x,
+        marriageY,
+        pinTopR.x,
+        marriageY
+      );
 
       const childLayouts = children
         .map((cid) => {
@@ -1570,39 +2279,50 @@ export default function TreeCanvas({
             p: { id: string; x: number; y: number; generation: number };
           } => x != null
         );
-      if (childLayouts.length === 0) continue;
 
-      const branchY =
-        Math.min(...childLayouts.map((c) => c.p.y)) - PED_BRANCH_BAR_ABOVE_CHILD;
-      const centers = childLayouts.map((c) => c.p.x + cx).sort((a, b) => a - b);
-      const barLeft = Math.min(centers[0]!, midX);
-      const barRight = Math.max(centers[centers.length - 1]!, midX);
-
-      out.push({
-        key: `ped:couple:${pk}`,
-        d: `M ${xL} ${coupleY} L ${xR} ${coupleY}`,
-        kind: "couple",
-      });
-      out.push({
-        key: `ped:trunk:${pk}`,
-        d: `M ${midX} ${coupleY} L ${midX} ${branchY}`,
-        kind: "default",
-      });
-      out.push({
-        key: `ped:branch:${pk}`,
-        d: `M ${barLeft} ${branchY} L ${barRight} ${branchY}`,
-        kind: "default",
-      });
-
-      for (const { id: cid, p: posC } of childLayouts) {
-        const ccx = posC.x + cx;
-        out.push({
-          key: `ped:cdrop:${pk}:${cid}`,
-          d: `M ${ccx} ${branchY} L ${ccx} ${posC.y}`,
-          kind: "default",
+      if (childLayouts.length === 1) {
+        const { id: cid, p: posC } = childLayouts[0]!;
+        const pinChildTop = treeCardPinTopCenter(posC);
+        pushSeg(
+          `thread:pc:${pk}:${cid}:L`,
+          pinBotL.x,
+          pinBotL.y,
+          pinChildTop.x,
+          pinChildTop.y
+        );
+        pushSeg(
+          `thread:pc:${pk}:${cid}:R`,
+          pinBotR.x,
+          pinBotR.y,
+          pinChildTop.x,
+          pinChildTop.y
+        );
+      } else if (childLayouts.length > 1) {
+        const avgChildPinY =
+          childLayouts.reduce(
+            (s, { p }) => s + treeCardPinTopCenter(p).y,
+            0
+          ) / childLayouts.length;
+        const yStart = (pinBotL.y + pinBotR.y) / 2;
+        const gatherY = yStart + 0.6 * (avgChildPinY - yStart);
+        const gatherX = (pinBotL.x + pinBotR.x) / 2;
+        gatheringPins.push({
+          key: `gather:${pk}`,
+          x: gatherX,
+          y: gatherY,
         });
-        covered.add(`${p1}->${cid}`);
-        covered.add(`${p2}->${cid}`);
+        pushSeg(`thread:pg:${pk}:L`, pinBotL.x, pinBotL.y, gatherX, gatherY);
+        pushSeg(`thread:pg:${pk}:R`, pinBotR.x, pinBotR.y, gatherX, gatherY);
+        for (const { id: cid, p: posC } of childLayouts) {
+          const pinChildTop = treeCardPinTopCenter(posC);
+          pushSeg(
+            `thread:gc:${pk}:${cid}`,
+            gatherX,
+            gatherY,
+            pinChildTop.x,
+            pinChildTop.y
+          );
+        }
       }
     }
 
@@ -1624,35 +2344,57 @@ export default function TreeCanvas({
       const right = left === a ? b : a;
       const posL = posById.get(left)!;
       const posR = posById.get(right)!;
-      const sxL = posL.x + cx;
-      const sxR = posR.x + cx;
-      const spouseCoupleY =
-        Math.max(posL.y, posR.y) + PED_COUPLE_LINE_Y;
-      out.push({
-        key: `ped:spouse:${spk}`,
-        d: `M ${sxL} ${spouseCoupleY} L ${sxR} ${spouseCoupleY}`,
-        kind: "couple",
-      });
+      const pinTopL = treeCardPinTopCenter(posL);
+      const pinTopR = treeCardPinTopCenter(posR);
+      const marriageY = Math.min(pinTopL.y, pinTopR.y);
+      pushSeg(`thread:spouse:${spk}`, pinTopL.x, marriageY, pinTopR.x, marriageY);
+
+      const soloA = (soloByParent.get(a)?.length ?? 0) > 0;
+      const soloB = (soloByParent.get(b)?.length ?? 0) > 0;
+      if (!soloA && !soloB) {
+        noBottomPinIds.add(a);
+        noBottomPinIds.add(b);
+      }
     }
 
-    for (const { parent, child } of edges) {
-      if (covered.has(`${parent}->${child}`)) continue;
-      const posP = posById.get(parent);
-      const posC = posById.get(child);
-      if (!posP || !posC) continue;
-      const sx = posP.x + 80;
-      const sy = posP.y + 90;
-      const ex = posC.x + 80;
-      const ey = posC.y;
-      out.push({
-        key: `ped:fb:${parent}:${child}`,
-        d: `M ${sx} ${sy} L ${ex} ${ey}`,
-        kind: "default",
-      });
+    for (const [parentId, soloKids] of soloByParent) {
+      const posP = posById.get(parentId);
+      if (!posP || soloKids.length === 0) continue;
+      const pinBotP = treeCardPinBottomCenter(posP);
+
+      for (const child of soloKids) {
+        if (covered.has(`${parentId}->${child}`)) continue;
+        const posC = posById.get(child);
+        if (!posC) continue;
+        const pinChildTop = treeCardPinTopCenter(posC);
+        pushSeg(
+          `thread:solo:${parentId}:${child}`,
+          pinBotP.x,
+          pinBotP.y,
+          pinChildTop.x,
+          pinChildTop.y
+        );
+      }
     }
 
-    return out;
-  }, [layout.positions, relationships]);
+    return { segments, gatheringPins, noBottomPinIds };
+  }, [pedigreeLayoutData, relationships]);
+
+  const treeThreadSegments = treeThreadBundle.segments;
+  const treeGatheringPins = treeThreadBundle.gatheringPins;
+  const treeNoBottomPinIds = treeThreadBundle.noBottomPinIds;
+
+  const buryPersonAtId = useCallback((personId: string) => {
+    setCollapsedAtIds((prev) => new Set([...prev, personId]));
+  }, []);
+
+  const unburyPersonAtId = useCallback((personId: string) => {
+    setCollapsedAtIds((prev) => {
+      const next = new Set(prev);
+      next.delete(personId);
+      return next;
+    });
+  }, []);
 
   const heroBtnBase: CSSProperties = {
     fontFamily: sans,
@@ -1733,6 +2475,15 @@ export default function TreeCanvas({
             .dg-tree-zoom-btn:hover {
               background-color: var(--dg-parchment-deep) !important;
               border-color: var(--dg-brown-dark) !important;
+            }
+            .dg-tree-node-card {
+              transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+            }
+            .dg-tree-node-card:hover {
+              transform: translateY(-2px);
+              box-shadow:
+                inset 0 1px 0 var(--dg-inset-highlight),
+                0 8px 22px rgb(var(--dg-shadow-rgb) / 0.14) !important;
             }
           `,
         }}
@@ -1965,24 +2716,117 @@ export default function TreeCanvas({
                   }}
                 >
                 <svg
-                  className="pointer-events-none absolute left-0 top-0 z-0"
+                  className="pointer-events-none absolute left-0 top-0 z-[2]"
                   width={layout.contentWidth}
                   height={layout.contentHeight}
                   aria-hidden
                 >
-                  {parentChildConnectorPaths.map(({ key, d, kind }) => (
-                    <path
-                      key={key}
-                      d={d}
-                      fill="none"
-                      stroke={
-                        kind === "couple"
-                          ? "var(--dg-brown-mid)"
-                          : "var(--dg-brown-border)"
-                      }
-                      strokeWidth={2}
-                      strokeDasharray={kind === "couple" ? "6 4" : undefined}
-                      opacity={0.7}
+                  <defs>
+                    <filter
+                      id="dg-tree-copper-tack-highlight-soft"
+                      x="-40%"
+                      y="-40%"
+                      width="180%"
+                      height="180%"
+                    >
+                      <feGaussianBlur
+                        in="SourceGraphic"
+                        stdDeviation="0.55"
+                        result="hblur"
+                      />
+                      <feMerge>
+                        <feMergeNode in="hblur" />
+                      </feMerge>
+                    </filter>
+                    <symbol
+                      id="dg-tree-copper-brad"
+                      viewBox={`0 0 ${TREE_BRAD_SYMBOL_W} ${TREE_BRAD_SYMBOL_H}`}
+                    >
+                      <ellipse
+                        cx={TREE_BRAD_CX}
+                        cy={TREE_BRAD_CY + 0.12}
+                        rx={5.12}
+                        ry={5.02}
+                        fill="#6d4a2a"
+                        opacity={0.22}
+                      />
+                      <ellipse
+                        cx={TREE_BRAD_CX}
+                        cy={TREE_BRAD_CY}
+                        rx={5.05}
+                        ry={5}
+                        fill="#b87333"
+                        stroke="#8b5e3c"
+                        strokeWidth={0.55}
+                      />
+                      <circle
+                        cx={4.35}
+                        cy={4.25}
+                        r={2.15}
+                        fill="#d4956a"
+                        opacity={0.42}
+                        filter="url(#dg-tree-copper-tack-highlight-soft)"
+                      />
+                      <circle
+                        cx={4.15}
+                        cy={4.05}
+                        r={0.95}
+                        fill="#e8c4a0"
+                        opacity={0.55}
+                      />
+                    </symbol>
+                    <symbol
+                      id="dg-tree-thumbtack"
+                      viewBox={`0 0 ${TREE_PIN_SYMBOL_W} ${TREE_PIN_SYMBOL_H}`}
+                    >
+                      <circle
+                        cx={TREE_PIN_HEAD_CX}
+                        cy={TREE_PIN_HEAD_CY}
+                        r={TREE_PIN_HEAD_R}
+                        fill="#c01c1c"
+                      />
+                      <circle
+                        cx={7.2}
+                        cy={7}
+                        r={2.5}
+                        fill="#f5f1eb"
+                      />
+                      <rect
+                        x={TREE_PIN_HEAD_CX - TREE_PIN_STEM_W / 2}
+                        y={TREE_PIN_HEAD_CY + TREE_PIN_HEAD_R}
+                        width={TREE_PIN_STEM_W}
+                        height={TREE_PIN_STEM_LEN}
+                        rx={0.5}
+                        fill={TREE_PIN_STEM_FILL}
+                      />
+                    </symbol>
+                    <symbol
+                      id="dg-tree-thumbtack-buried"
+                      viewBox={`0 0 ${TREE_PIN_SYMBOL_W} ${TREE_PIN_SYMBOL_H}`}
+                    >
+                      <circle
+                        cx={TREE_PIN_HEAD_CX}
+                        cy={TREE_PIN_HEAD_CY}
+                        r={TREE_PIN_HEAD_R}
+                        fill="#000000"
+                      />
+                      <rect
+                        x={TREE_PIN_HEAD_CX - TREE_PIN_STEM_W / 2}
+                        y={TREE_PIN_HEAD_CY + TREE_PIN_HEAD_R}
+                        width={TREE_PIN_STEM_W}
+                        height={TREE_PIN_STEM_LEN}
+                        rx={0.5}
+                        fill="#000000"
+                      />
+                    </symbol>
+                  </defs>
+                  {treeThreadSegments.map((s) => (
+                    <TreeThreadLine
+                      key={s.key}
+                      x1={s.x1}
+                      y1={s.y1}
+                      x2={s.x2}
+                      y2={s.y2}
                     />
                   ))}
                 </svg>
@@ -2003,105 +2847,183 @@ export default function TreeCanvas({
                   const fallback = p.photo_url?.trim() || null;
                   const hasAvatarSrc =
                     !!(primaryRow?.file_url ?? "").trim() || !!fallback;
-                  const dates = [
-                    p.birth_date ? formatDateString(p.birth_date) : null,
-                    p.death_date ? formatDateString(p.death_date) : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" – ");
+                  const yearLine = treeCardYearRange(p);
+                  const isDarkPolaroid = theme === "dark";
+                  const printFilter = isDarkPolaroid
+                    ? TREE_POLAROID_PRINT_FILTER_DARK
+                    : TREE_POLAROID_PRINT_FILTER_LIGHT;
 
                   return (
                     <div
                       key={pos.id}
                       id={`tree-node-${pos.id}`}
-                      className="group absolute z-[1] rounded-md border shadow-sm"
+                      className="dg-tree-node-card absolute z-[1] overflow-hidden"
                       style={{
                         left: pos.x,
                         top: pos.y,
                         width: LAYOUT_NODE_W,
                         height: LAYOUT_NODE_H,
-                        borderColor: colors.brownBorder,
-                        backgroundColor: colors.cream,
-                        boxShadow: "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.08)",
+                        ...treePolaroidFrameChrome(pos.generation, isDarkPolaroid),
+                        boxSizing: "border-box",
                       }}
                     >
                       <Link
                         href={`/dashboard/${treeId}/person/${pos.id}`}
-                        className="absolute left-0 right-0 top-0 z-0 flex gap-2 rounded-t-md p-2 no-underline"
+                        className="absolute left-0 right-0 top-0 z-0 flex flex-col no-underline"
                         style={{
                           color: colors.brownDark,
-                          bottom: 22,
+                          bottom: TREE_POLAROID_SET_ROOT_H,
+                          paddingLeft: TREE_POLAROID_EDGE,
+                          paddingRight: TREE_POLAROID_EDGE,
+                          paddingTop: TREE_POLAROID_EDGE,
                         }}
                       >
                         <div
-                          className="relative shrink-0 overflow-hidden rounded-full"
+                          className="relative shrink-0 overflow-hidden"
                           style={{
-                            width: 40,
-                            height: 40,
-                            backgroundColor: "var(--dg-avatar-bg)",
-                            border: `1px solid ${colors.brownBorder}`,
+                            width: TREE_POLAROID_IMG_W,
+                            height: TREE_POLAROID_IMG_H,
+                            backgroundColor: hasAvatarSrc
+                              ? "var(--dg-avatar-bg)"
+                              : POLAROID_NO_PHOTO_BG,
+                            borderRadius: 1,
                           }}
                         >
                           {hasAvatarSrc ? (
                             <TreeNodeAvatarImg
                               primary={primaryRow}
                               fallbackUrl={fallback}
+                              viewportW={TREE_POLAROID_IMG_W}
+                              viewportH={TREE_POLAROID_IMG_H}
+                              printFilter={printFilter}
                             />
                           ) : (
                             <div
-                              className="flex h-full w-full items-center justify-center text-xs font-bold"
+                              className="flex h-full w-full items-center justify-center text-sm font-bold"
                               style={{
-                                fontFamily: sans,
-                                color: colors.brownMid,
+                                fontFamily: serif,
+                                color: POLAROID_NO_PHOTO_INITIALS,
                               }}
                             >
                               {initials(p)}
                             </div>
                           )}
                         </div>
-                        <div className="min-w-0 flex-1 overflow-hidden">
+                        <div
+                          className="relative flex min-h-0 flex-1 flex-col items-center justify-start gap-1.5 px-0.5 pb-0.5 pt-0.5 text-center"
+                          style={{
+                            marginTop: TREE_POLAROID_CAPTION_GAP,
+                            minHeight: TREE_POLAROID_CAPTION_MIN_H,
+                          }}
+                        >
                           <p
-                            className="truncate text-sm font-bold leading-tight"
-                            style={{ fontFamily: serif }}
+                            className="line-clamp-2 w-full text-[11px] font-bold"
+                            style={{
+                              fontFamily: serif,
+                              lineHeight: 1.12,
+                              color: isDarkPolaroid
+                                ? "color-mix(in srgb, var(--dg-photo-scrim) 88%, black)"
+                                : `color-mix(in srgb, var(--dg-brown-dark) 90%, var(--dg-brown-outline) 10%)`,
+                            }}
                             title={displayName(p)}
                           >
                             {displayName(p)}
                           </p>
-                          {dates ? (
+                          {yearLine ? (
                             <p
-                              className="mt-0.5 truncate text-[11px] leading-snug"
+                              className="w-full shrink-0 truncate text-[9px] font-semibold leading-tight"
                               style={{
                                 fontFamily: sans,
-                                color: colors.brownMuted,
+                                marginTop: 0,
+                                color: isDarkPolaroid
+                                  ? "color-mix(in srgb, var(--dg-photo-scrim) 72%, var(--dg-brown-border) 28%)"
+                                  : `color-mix(in srgb, var(--dg-brown-dark) 78%, var(--dg-brown-mid) 22%)`,
                               }}
-                              title={dates}
+                              title={yearLine}
                             >
-                              {dates}
+                              {yearLine}
                             </p>
                           ) : null}
                         </div>
                       </Link>
-                      <button
-                        type="button"
-                        className="dg-tree-hero-btn absolute bottom-0 left-0 right-0 z-10 rounded-b-md border-t px-1 py-0.5 text-[10px] font-semibold opacity-0 transition-opacity group-hover:opacity-100"
-                        style={{
-                          fontFamily: sans,
-                          borderColor: colors.brownBorder,
-                          color: colors.brownDark,
-                          backgroundColor: colors.parchment,
-                        }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setLayoutRootOverride(pos.id);
-                          centeredRef.current = false;
-                        }}
-                      >
-                        Set as root
-                      </button>
                     </div>
                   );
                 })}
+                <svg
+                  className="absolute left-0 top-0 z-[3]"
+                  width={layout.contentWidth}
+                  height={layout.contentHeight}
+                  style={{ pointerEvents: "none" }}
+                >
+                  {treeGatheringPins.map((gp) => (
+                    <g
+                      key={gp.key}
+                      transform={treePinTopUseTransform(gp.x, gp.y)}
+                    >
+                      <use
+                        href="#dg-tree-thumbtack"
+                        x={0}
+                        y={0}
+                        width={TREE_PIN_SYMBOL_W}
+                        height={TREE_PIN_SYMBOL_H}
+                      />
+                    </g>
+                  ))}
+                  {layout.positions.map((pos) => {
+                    const p = personById.get(pos.id);
+                    if (!p) return null;
+                    const top = treeCardPinTopCenter(pos);
+                    const bot = treeCardPinBottomCenter(pos);
+                    const hideBottom = treeNoBottomPinIds.has(pos.id);
+                    const isBuried = collapsedAtIds.has(pos.id);
+                    const pinHref = isBuried
+                      ? "#dg-tree-thumbtack-buried"
+                      : "#dg-tree-thumbtack";
+                    const nameLabel = displayName(p);
+                    const buryHere =
+                      !isBuried && canBuryIds.has(pos.id);
+                    const restoreHere = isBuried;
+                    const pinInteractive = buryHere || restoreHere;
+                    const pinAriaLabel = restoreHere
+                      ? `Restore ${nameLabel}`
+                      : buryHere
+                        ? `Bury ${nameLabel}`
+                        : null;
+                    const runPinAction = restoreHere
+                      ? () => unburyPersonAtId(pos.id)
+                      : () => buryPersonAtId(pos.id);
+                    return (
+                      <g key={`tree-card-pins:${pos.id}`}>
+                        <g transform={treePinTopUseTransform(top.x, top.y)}>
+                          <TreePinActionWrap
+                            interactive={pinInteractive}
+                            ariaLabel={pinAriaLabel}
+                            onAction={runPinAction}
+                          >
+                            <use
+                              href={pinHref}
+                              x={0}
+                              y={0}
+                              width={TREE_PIN_SYMBOL_W}
+                              height={TREE_PIN_SYMBOL_H}
+                            />
+                          </TreePinActionWrap>
+                        </g>
+                        {hideBottom ? null : (
+                          <g transform={treeBradUseTransform(bot.x, bot.y)}>
+                            <use
+                              href="#dg-tree-copper-brad"
+                              x={0}
+                              y={0}
+                              width={TREE_BRAD_SYMBOL_W}
+                              height={TREE_BRAD_SYMBOL_H}
+                            />
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
                 </div>
               </TransformComponent>
               <TreeCanvasZoomControls
@@ -2222,6 +3144,7 @@ export default function TreeCanvas({
                           snw,
                           snh,
                           TREE_PHOTO_CROP_PREVIEW_PX,
+                          TREE_PHOTO_CROP_PREVIEW_PX,
                           cropZoom
                         )
                       : {
@@ -2235,6 +3158,7 @@ export default function TreeCanvas({
                           cropY,
                           rw,
                           rh,
+                          TREE_PHOTO_CROP_PREVIEW_PX,
                           TREE_PHOTO_CROP_PREVIEW_PX
                         )
                       : { x: 0, y: 0 };

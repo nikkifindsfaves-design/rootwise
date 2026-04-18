@@ -709,6 +709,14 @@ const HEADER_POLAROID_FRAME_DARK = "#b0a08a" as const;
 const HEADER_POLAROID_DARK_DEPTH_INSET =
   "inset 0 0 8px rgba(0,0,0,0.4)" as const;
 
+/**
+ * Polaroid aperture when there is no photo (matches tree canvas). Warm dark fill;
+ * initials use fixed light ink — `var(--dg-cream)` is dark in `.dark`.
+ */
+const POLAROID_NO_PHOTO_BG =
+  "color-mix(in srgb, var(--dg-brown-mid) 38%, black)" as const;
+const POLAROID_NO_PHOTO_INITIALS = "rgb(255 252 247)" as const;
+
 function headerPolaroidFrameLayerStyle(
   isDark: boolean,
   stackIndex: number,
@@ -763,6 +771,17 @@ function headerPolaroidLayerKey(layer: HeaderPolaroidLayer): string {
     return typeof layer.row.id === "string" ? layer.row.id : "row-unknown";
   }
   return "__legacy_header__";
+}
+
+function polaroidInitialsFromLayer(layer: HeaderPolaroidLayer): string {
+  if (layer.kind === "row") {
+    const row = layer.row as Record<string, unknown>;
+    return initials({
+      first_name: String(row.first_name ?? ""),
+      last_name: String(row.last_name ?? ""),
+    });
+  }
+  return initials(layer.person);
 }
 
 function headerPolaroidLayerVisual(
@@ -5836,10 +5855,10 @@ export default function PersonProfilePage() {
                     style={{
                       width: HEADER_POLAROID_IMG_W,
                       height: HEADER_POLAROID_IMG_H,
-                      backgroundColor: colors.avatarBg,
+                      backgroundColor: POLAROID_NO_PHOTO_BG,
                       borderRadius: 1,
                       fontFamily: serif,
-                      color: colors.avatarInitials,
+                      color: POLAROID_NO_PHOTO_INITIALS,
                     }}
                   >
                     {person ? initials(person) : "?"}
@@ -5894,7 +5913,9 @@ export default function PersonProfilePage() {
                             width: HEADER_POLAROID_IMG_W,
                             height: HEADER_POLAROID_IMG_H,
                             overflow: "hidden",
-                            backgroundColor: colors.avatarBg,
+                            backgroundColor: url
+                              ? colors.avatarBg
+                              : POLAROID_NO_PHOTO_BG,
                             borderRadius: 1,
                           }}
                         >
@@ -5957,7 +5978,17 @@ export default function PersonProfilePage() {
                                 };
                               })()}
                             />
-                          ) : null}
+                          ) : (
+                            <div
+                              className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                              style={{
+                                fontFamily: serif,
+                                color: POLAROID_NO_PHOTO_INITIALS,
+                              }}
+                            >
+                              {polaroidInitialsFromLayer(layer)}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -5969,7 +6000,10 @@ export default function PersonProfilePage() {
           <div className="min-w-0 w-full flex-1 self-start text-left sm:w-auto sm:self-center sm:pl-0">
             <h1
               className="text-3xl font-bold leading-tight sm:text-4xl sm:leading-[1.08]"
-              style={{ fontFamily: serif, color: colors.brownDark }}
+              style={{
+                fontFamily: serif,
+                color: `color-mix(in srgb, var(--dg-brown-dark) 88%, var(--dg-brown-outline) 12%)`,
+              }}
             >
               {personFullName || "—"}
             </h1>
@@ -5979,25 +6013,33 @@ export default function PersonProfilePage() {
             >
               <div
                 className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
-                style={{ color: colors.brownMuted }}
+                style={{
+                  color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
+                }}
               >
                 ENTERED THE CHAT
               </div>
               <div
                 className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
-                style={{ color: colors.brownMuted }}
+                style={{
+                  color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
+                }}
               >
                 CHECKED OUT
               </div>
               <div
-                className="text-base font-medium tabular-nums leading-snug sm:text-lg"
-                style={{ color: colors.brownDark }}
+                className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
+                style={{
+                  color: `color-mix(in srgb, var(--dg-brown-dark) 82%, var(--dg-brown-outline) 18%)`,
+                }}
               >
                 {personProfileYearFromDate(person.birth_date) ?? "—"}
               </div>
               <div
-                className="text-base font-medium tabular-nums leading-snug sm:text-lg"
-                style={{ color: colors.brownDark }}
+                className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
+                style={{
+                  color: `color-mix(in srgb, var(--dg-brown-dark) 82%, var(--dg-brown-outline) 18%)`,
+                }}
               >
                 {personProfileYearFromDate(person.death_date) ?? "—"}
               </div>

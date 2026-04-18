@@ -14,7 +14,7 @@ export default async function DashboardPage() {
 
   const { data: trees, error: treesError } = await supabase
     .from("trees")
-    .select("id, name, created_at, vibe")
+    .select("id, name, created_at, vibe, canvas_theme")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -38,12 +38,14 @@ export default async function DashboardPage() {
       name: string;
       created_at: string;
       vibe?: string | null;
+      canvas_theme?: string | null;
     };
     return {
       id: rec.id,
       name: rec.name,
       created_at: rec.created_at,
       vibe: rec.vibe ?? "classic",
+      canvas_theme: rec.canvas_theme ?? "string",
       ancestorCount: countByTreeId.get(rec.id) ?? 0,
     };
   });

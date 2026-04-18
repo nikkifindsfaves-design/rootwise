@@ -67,7 +67,29 @@ const VIBES = [
   },
 ] as const;
 
+const CANVAS_THEMES = [
+  {
+    id: "string",
+    name: "String",
+    description: "Default canvas theme.",
+    example: "Straightforward layout—names and lines stay easy to scan.",
+  },
+  {
+    id: "dead_gossip",
+    name: "Dead Gossip",
+    description: "Ledger and letterpress tone.",
+    example: "Ink, margins, and quiet drama fit for a family chronicle.",
+  },
+  {
+    id: "roots",
+    name: "Roots",
+    description: "Grounded, organic palette.",
+    example: "Earth tones that feel like soil, bark, and old photographs.",
+  },
+] as const;
+
 type VibeId = (typeof VIBES)[number]["id"];
+type CanvasThemeId = (typeof CANVAS_THEMES)[number]["id"];
 
 function vibeDisplayName(vibeId: string): string {
   const v = VIBES.find((x) => x.id === vibeId);
@@ -79,12 +101,23 @@ function toVibeId(raw: string): VibeId {
   return v ? v.id : "classic";
 }
 
+function toCanvasThemeId(raw: string): CanvasThemeId {
+  const t = CANVAS_THEMES.find((x) => x.id === raw);
+  return t ? t.id : "string";
+}
+
+function canvasThemeDisplayName(themeId: string): string {
+  const t = CANVAS_THEMES.find((x) => x.id === themeId);
+  return t?.name ?? "String";
+}
+
 export type TreeWithCount = {
   id: string;
   name: string;
   created_at: string;
   ancestorCount: number;
   vibe: string;
+  canvas_theme: string;
 };
 
 function formatCreatedAt(iso: string): string {
@@ -122,6 +155,21 @@ export default function MyTreesShell({
   const [hoveredVibe, setHoveredVibe] = useState<VibeId | null>(null);
   const [vibeChanging, setVibeChanging] = useState(false);
   const [vibeChangeError, setVibeChangeError] = useState<string | null>(null);
+
+  /** Set when creating a tree (inside vibe modal) or changing theme (canvas modal). */
+  const [selectedCanvasTheme, setSelectedCanvasTheme] =
+    useState<CanvasThemeId | null>(null);
+  const [hoveredCanvasThemePick, setHoveredCanvasThemePick] =
+    useState<CanvasThemeId | null>(null);
+
+  const [canvasThemeModalOpen, setCanvasThemeModalOpen] = useState(false);
+  const [canvasThemeModalTreeId, setCanvasThemeModalTreeId] = useState<
+    string | null
+  >(null);
+  const [canvasThemeChanging, setCanvasThemeChanging] = useState(false);
+  const [canvasThemeChangeError, setCanvasThemeChangeError] = useState<
+    string | null
+  >(null);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteModalTreeId, setDeleteModalTreeId] = useState<string | null>(
@@ -205,6 +253,17 @@ export default function MyTreesShell({
     setVibeChangeError(null);
     setCreateError(null);
     setVibeModalMode("create");
+    setSelectedCanvasTheme(null);
+    setHoveredCanvasThemePick(null);
+  }
+
+  function closeCanvasThemeModal() {
+    if (canvasThemeChanging) return;
+    setCanvasThemeModalOpen(false);
+    setCanvasThemeModalTreeId(null);
+    setSelectedCanvasTheme(null);
+    setHoveredCanvasThemePick(null);
+    setCanvasThemeChangeError(null);
   }
 
   function handleCreateTree(e: FormEvent) {
@@ -218,6 +277,8 @@ export default function MyTreesShell({
     setPendingTreeName(name);
     setVibeModalMode("create");
     setSelectedVibe(null);
+    setSelectedCanvasTheme("string");
+    setHoveredCanvasThemePick(null);
     setVibeModalOpen(true);
   }
 
@@ -240,6 +301,7 @@ export default function MyTreesShell({
           user_id: user.id,
           name: pendingTreeName,
           vibe: selectedVibe,
+          canvas_theme: selectedCanvasTheme ?? "string",
         })
         .select("id")
         .single();
@@ -253,6 +315,8 @@ export default function MyTreesShell({
       setPendingTreeName("");
       setSelectedVibe(null);
       setHoveredVibe(null);
+      setSelectedCanvasTheme(null);
+      setHoveredCanvasThemePick(null);
       router.push(`/dashboard/${id}`);
       router.refresh();
     } finally {
@@ -266,6 +330,40 @@ export default function MyTreesShell({
     setVibeModalMode("change");
     setVibeModalOpen(true);
     setVibeChangeError(null);
+    setSelectedCanvasTheme(null);
+    setHoveredCanvasThemePick(null);
+  }
+
+  function handleChangeCanvasTheme(treeId: string, currentTheme: CanvasThemeId) {
+    setCanvasThemeModalTreeId(treeId);
+    setSelectedCanvasTheme(currentTheme);
+    setCanvasThemeModalOpen(true);
+    setCanvasThemeChangeError(null);
+    setHoveredCanvasThemePick(null);
+  }
+
+  async function confirmChangeCanvasTheme() {
+    if (!canvasThemeModalTreeId || !selectedCanvasTheme) return;
+    setCanvasThemeChanging(true);
+    setCanvasThemeChangeError(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("trees")
+        .update({ canvas_theme: selectedCanvasTheme })
+        .eq("id", canvasThemeModalTreeId);
+      if (error) {
+        setCanvasThemeChangeError(error.message);
+        return;
+      }
+      setCanvasThemeModalOpen(false);
+      setCanvasThemeModalTreeId(null);
+      setSelectedCanvasTheme(null);
+      setHoveredCanvasThemePick(null);
+      router.refresh();
+    } finally {
+      setCanvasThemeChanging(false);
+    }
   }
 
   async function confirmChangeVibe() {
@@ -680,27 +778,57 @@ export default function MyTreesShell({
                 >
                   Created {formatCreatedAt(tree.created_at)}
                 </p>
-                <span
-                  className="mt-3 inline-flex w-fit rounded-full border px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    fontFamily: sans,
-                    borderColor: colors.brownBorder,
-                    backgroundColor: colors.cream,
-                    color: colors.brownDark,
-                  }}
-                >
-                  {vibeDisplayName(tree.vibe)}
-                </span>
-                <button
-                  type="button"
-                  className="mt-2 w-fit border-none bg-transparent p-0 text-left text-xs underline-offset-2 hover:underline"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                  onClick={() =>
-                    void handleChangeVibe(tree.id, toVibeId(tree.vibe))
-                  }
-                >
-                  Change vibe
-                </button>
+                <div className="mt-3 flex flex-wrap items-start gap-x-8 gap-y-3">
+                  <div className="flex min-w-0 flex-col">
+                    <span
+                      className="inline-flex w-fit rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.cream,
+                        color: colors.brownDark,
+                      }}
+                    >
+                      {vibeDisplayName(tree.vibe)}
+                    </span>
+                    <button
+                      type="button"
+                      className="mt-2 w-fit border-none bg-transparent p-0 text-left text-xs underline-offset-2 hover:underline"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                      onClick={() =>
+                        void handleChangeVibe(tree.id, toVibeId(tree.vibe))
+                      }
+                    >
+                      Change vibe
+                    </button>
+                  </div>
+                  <div className="flex min-w-0 flex-col">
+                    <span
+                      className="inline-flex w-fit rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.cream,
+                        color: colors.brownDark,
+                      }}
+                    >
+                      {canvasThemeDisplayName(tree.canvas_theme)}
+                    </span>
+                    <button
+                      type="button"
+                      className="mt-2 w-fit border-none bg-transparent p-0 text-left text-xs underline-offset-2 hover:underline"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                      onClick={() =>
+                        handleChangeCanvasTheme(
+                          tree.id,
+                          toCanvasThemeId(tree.canvas_theme)
+                        )
+                      }
+                    >
+                      Change theme
+                    </button>
+                  </div>
+                </div>
                 <div
                   className="mt-4 h-px w-full shrink-0"
                   style={{ backgroundColor: `${colors.brownBorder}66` }}
@@ -804,6 +932,69 @@ export default function MyTreesShell({
               })}
             </div>
 
+            {vibeModalMode === "create" ? (
+              <>
+                <h3
+                  className="mt-8 text-2xl font-bold"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Canvas theme
+                </h3>
+                <p
+                  className="mt-2 text-sm"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Choose how your family tree looks on the canvas.
+                </p>
+                <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {CANVAS_THEMES.map((ct) => {
+                    const isSelected = selectedCanvasTheme === ct.id;
+                    const isHovered = hoveredCanvasThemePick === ct.id;
+                    return (
+                      <button
+                        key={ct.id}
+                        type="button"
+                        className="rounded-lg border p-3 text-left transition"
+                        style={{
+                          borderColor: isSelected
+                            ? colors.brownOutline
+                            : colors.brownBorder,
+                          backgroundColor: isSelected
+                            ? "var(--dg-parchment-deep)"
+                            : colors.cream,
+                          cursor: "pointer",
+                        }}
+                        onMouseEnter={() => setHoveredCanvasThemePick(ct.id)}
+                        onMouseLeave={() => setHoveredCanvasThemePick(null)}
+                        onClick={() => setSelectedCanvasTheme(ct.id)}
+                      >
+                        <p
+                          className="font-bold leading-tight"
+                          style={{ fontFamily: serif, color: colors.brownDark }}
+                        >
+                          {ct.name}
+                        </p>
+                        <p
+                          className="mt-1 text-sm leading-snug"
+                          style={{ fontFamily: sans, color: colors.brownMid }}
+                        >
+                          {ct.description}
+                        </p>
+                        {isHovered ? (
+                          <p
+                            className="mt-2 text-xs italic leading-snug"
+                            style={{ fontFamily: sans, color: colors.brownMuted }}
+                          >
+                            {ct.example}
+                          </p>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
+
             <div className="mt-6 flex flex-wrap items-center gap-2">
               {vibeModalMode === "create" ? (
                 <button
@@ -859,6 +1050,130 @@ export default function MyTreesShell({
                 role="alert"
               >
                 {vibeChangeError}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {canvasThemeModalOpen ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="canvas-theme-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !canvasThemeChanging) {
+              closeCanvasThemeModal();
+            }
+          }}
+        >
+          <div
+            className="my-8 w-full max-w-2xl rounded-lg border p-6 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="canvas-theme-modal-title"
+              className="text-2xl font-bold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Choose canvas theme
+            </h2>
+            <p
+              className="mt-2 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              This controls the look of the family tree canvas for this tree.
+            </p>
+
+            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {CANVAS_THEMES.map((ct) => {
+                const isSelected = selectedCanvasTheme === ct.id;
+                const isHovered = hoveredCanvasThemePick === ct.id;
+                return (
+                  <button
+                    key={ct.id}
+                    type="button"
+                    className="rounded-lg border p-3 text-left transition"
+                    style={{
+                      borderColor: isSelected
+                        ? colors.brownOutline
+                        : colors.brownBorder,
+                      backgroundColor: isSelected
+                        ? "var(--dg-parchment-deep)"
+                        : colors.cream,
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={() => setHoveredCanvasThemePick(ct.id)}
+                    onMouseLeave={() => setHoveredCanvasThemePick(null)}
+                    onClick={() => setSelectedCanvasTheme(ct.id)}
+                  >
+                    <p
+                      className="font-bold leading-tight"
+                      style={{ fontFamily: serif, color: colors.brownDark }}
+                    >
+                      {ct.name}
+                    </p>
+                    <p
+                      className="mt-1 text-sm leading-snug"
+                      style={{ fontFamily: sans, color: colors.brownMid }}
+                    >
+                      {ct.description}
+                    </p>
+                    {isHovered ? (
+                      <p
+                        className="mt-2 text-xs italic leading-snug"
+                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      >
+                        {ct.example}
+                      </p>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedCanvasTheme === null || canvasThemeChanging}
+                style={{
+                  ...btnPrimaryModal,
+                  opacity:
+                    selectedCanvasTheme === null || canvasThemeChanging
+                      ? 0.65
+                      : 1,
+                  cursor:
+                    selectedCanvasTheme === null || canvasThemeChanging
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+                onClick={() => void confirmChangeCanvasTheme()}
+              >
+                {canvasThemeChanging ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                style={btnOutline}
+                disabled={canvasThemeChanging}
+                onClick={closeCanvasThemeModal}
+              >
+                Cancel
+              </button>
+            </div>
+            {canvasThemeChangeError ? (
+              <p
+                className="mt-3 text-sm"
+                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                role="alert"
+              >
+                {canvasThemeChangeError}
               </p>
             ) : null}
           </div>
