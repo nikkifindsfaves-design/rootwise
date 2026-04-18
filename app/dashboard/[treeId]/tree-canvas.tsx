@@ -6,6 +6,7 @@ import { formatDateString } from "@/lib/utils/dates";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -39,6 +40,62 @@ const colors = {
 /** Default zoom for initial view, search focus, and reset alignment with zoomToElement. */
 const CANVAS_INITIAL_SCALE = 1.2;
 
+/**
+ * Bulletin corkboard: repeating cork photo under stacked translucent gradients (no SVG filters).
+ */
+function treeCanvasCorkboardSurfaceStyle(isDark: boolean): CSSProperties {
+  const fiberA = isDark ? 0.075 : 0.055;
+  const fiberB = isDark ? 0.065 : 0.048;
+  const fibers: string[] = [
+    `repeating-linear-gradient(46deg, transparent 0, transparent 9px, rgba(45, 28, 14, ${fiberA}) 9px, rgba(45, 28, 14, ${fiberA}) 10px)`,
+    `repeating-linear-gradient(-39deg, transparent 0, transparent 12px, rgba(38, 22, 12, ${fiberB}) 12px, rgba(38, 22, 12, ${fiberB}) 13px)`,
+  ];
+  const vignette = isDark
+    ? "radial-gradient(ellipse 130% 92% at 50% 40%, transparent 38%, rgba(0,0,0,0.42) 100%)"
+    : "radial-gradient(ellipse 125% 90% at 50% 42%, transparent 45%, rgba(48, 30, 18, 0.16) 100%)";
+
+  const specksLight = [
+    "radial-gradient(circle at 9% 14%, rgba(255,250,242,0.58) 0, transparent 0.42%)",
+    "radial-gradient(circle at 24% 71%, rgba(72,42,22,0.22) 0, transparent 0.38%)",
+    "radial-gradient(circle at 43% 28%, rgba(255,255,255,0.42) 0, transparent 0.28%)",
+    "radial-gradient(circle at 58% 82%, rgba(90,52,28,0.18) 0, transparent 0.4%)",
+    "radial-gradient(circle at 73% 19%, rgba(255,248,236,0.38) 0, transparent 0.32%)",
+    "radial-gradient(circle at 88% 64%, rgba(62,36,20,0.2) 0, transparent 0.36%)",
+    "radial-gradient(circle at 31% 48%, rgba(255,255,255,0.28) 0, transparent 0.22%)",
+    "radial-gradient(circle at 67% 51%, rgba(80,48,26,0.15) 0, transparent 0.45%)",
+    "radial-gradient(circle at 15% 88%, rgba(255,252,246,0.32) 0, transparent 0.3%)",
+    "radial-gradient(circle at 92% 38%, rgba(70,40,22,0.16) 0, transparent 0.35%)",
+  ];
+  const specksDark = [
+    "radial-gradient(circle at 10% 16%, rgba(200,168,130,0.16) 0, transparent 0.5%)",
+    "radial-gradient(circle at 26% 74%, rgba(0,0,0,0.22) 0, transparent 0.42%)",
+    "radial-gradient(circle at 44% 30%, rgba(220,190,150,0.12) 0, transparent 0.32%)",
+    "radial-gradient(circle at 61% 85%, rgba(0,0,0,0.18) 0, transparent 0.38%)",
+    "radial-gradient(circle at 76% 21%, rgba(190,155,120,0.14) 0, transparent 0.35%)",
+    "radial-gradient(circle at 89% 58%, rgba(0,0,0,0.2) 0, transparent 0.4%)",
+    "radial-gradient(circle at 33% 50%, rgba(210,175,138,0.1) 0, transparent 0.28%)",
+    "radial-gradient(circle at 69% 48%, rgba(0,0,0,0.14) 0, transparent 0.48%)",
+    "radial-gradient(circle at 17% 90%, rgba(185,150,115,0.12) 0, transparent 0.34%)",
+    "radial-gradient(circle at 94% 36%, rgba(0,0,0,0.16) 0, transparent 0.36%)",
+  ];
+
+  const overlayLayers: string[] = [
+    ...fibers,
+    vignette,
+    ...(isDark ? specksDark : specksLight),
+  ];
+  /** Last in list = back-most layer (under overlays). Public file: `public/small cork.jpg`. */
+  const corkTile = "url(/small%20cork.jpg)";
+
+  return {
+    backgroundColor: isDark ? "#4f3829" : "#b9855c",
+    backgroundImage: [...overlayLayers, corkTile].join(", "),
+    boxShadow: isDark
+      ? "inset 0 0 120px rgba(0,0,0,0.4)"
+      : "inset 0 0 140px rgba(42, 26, 14, 0.11)",
+  };
+}
+
 /** Explicit pedigree layout (fixed canvas geometry). */
 const LAYOUT_CANVAS_W = 2400;
 
@@ -65,6 +122,29 @@ const LAYOUT_BASE_Y = 1200;
 const LAYOUT_GEN_DY = 300;
 const LAYOUT_V_PAD = 80;
 const LAYOUT_MIN_NODE_GAP = 80;
+
+/** Hand-tilted polaroid rotation (-3°..3°), deterministic from id chars 0–3 with per-index weights. */
+function treeCardTiltDegreesFromPersonId(id: string): number {
+  let acc = 0;
+  for (let i = 0; i < 4; i++) {
+    const ch = i < id.length ? id.charCodeAt(i) : 47 + i;
+    acc += ch * (5 + i * 13);
+  }
+  const bucket = acc % 601;
+  return -3 + (bucket / 600) * 6;
+}
+
+/** Small vertical offset (-25px..25px), deterministic from id chars 4–7 (independent of tilt chars). */
+function treeCardVerticalNudgePxFromPersonId(id: string): number {
+  let acc = 0;
+  for (let i = 0; i < 4; i++) {
+    const idx = 4 + i;
+    const ch = idx < id.length ? id.charCodeAt(idx) : 31 + i * 3;
+    acc += ch * (11 + i * 17);
+  }
+  const bucket = acc % 1001;
+  return -25 + (bucket / 1000) * 50;
+}
 
 /**
  * Head center offset from card edge; stem overlaps the card (pins SVG above string lines above cards).
@@ -93,35 +173,93 @@ const TREE_COPPER_TACK_CENTER_Y_FROM_TOP =
   TREE_POLAROID_CAPTION_MIN_H +
   8;
 
-const TREE_THREAD_DARK = "#7a0000";
-const TREE_THREAD_BRIGHT = "#dc2626";
+/** Parent–child, gather, and solo threads (not marriage / spouse-only). */
+const TREE_THREAD_LINEAGE = "#8b2e2e";
+/** Marriage / spouse-only horizontal threads between top pins. */
+const TREE_THREAD_MARRIAGE = "#a3470f";
 const TREE_THREAD_STROKE_DARK = 3.5;
 const TREE_THREAD_STROKE_BRIGHT = 1.8;
 
+/** Multi-child branch gather point: small hub, smaller than thumbtack head (r≈9 at 22px pin width). */
+const TREE_GATHER_JUNCTION_R = 5.25;
+
+function treeThreadSegmentIsMarriage(key: string): boolean {
+  return key.startsWith("thread:marriage:") || key.startsWith("thread:spouse:");
+}
+
+/** Distinct top-pin cap hues; repeats after this many generations (not black — buried state uses black). */
+const TREE_TOP_PIN_COLOR_CYCLE = 25;
+
+function treeTopPinGenerationMod(generation: number): number {
+  const g = generation === -999 ? 0 : generation;
+  const m = g % TREE_TOP_PIN_COLOR_CYCLE;
+  return m < 0 ? m + TREE_TOP_PIN_COLOR_CYCLE : m;
+}
+
+/** Radial dome stops for a generation cap: warm highlight center → saturated mid → dark rim (L≥14%). */
+function treeTopPinDomeStopColors(
+  genMod: number
+): readonly [string, string, string, string, string] {
+  const hue = (genMod * (360 / TREE_TOP_PIN_COLOR_CYCLE)) % 360;
+  return [
+    `hsl(${hue} 82% 94%)`,
+    `hsl(${hue} 78% 74%)`,
+    `hsl(${hue} 72% 54%)`,
+    `hsl(${hue} 65% 34%)`,
+    `hsl(${hue} 58% 18%)`,
+  ] as const;
+}
+
 type LayoutEdge = { parent: string; child: string };
 
+/**
+ * Pin attachment in canvas coords after the same nudge + rotate applied to the card
+ * (`top: pos.y + nudge`, `transform-origin: center`, `rotate(tilt)`).
+ */
+function treeCardPinPointAfterVisualTransform(
+  pos: { x: number; y: number; id: string },
+  localXFromCardLeft: number,
+  localYFromCardTop: number
+): { x: number; y: number } {
+  const nudgeY = treeCardVerticalNudgePxFromPersonId(pos.id);
+  const tiltDeg = treeCardTiltDegreesFromPersonId(pos.id);
+  const cx = pos.x + LAYOUT_NODE_W / 2;
+  const cy = pos.y + nudgeY + LAYOUT_NODE_H / 2;
+  const dx = localXFromCardLeft - LAYOUT_NODE_W / 2;
+  const dy = localYFromCardTop - LAYOUT_NODE_H / 2;
+  const rad = (tiltDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: cx + cos * dx - sin * dy,
+    y: cy + sin * dx + cos * dy,
+  };
+}
+
 /** Top-center pin (marriage + strings into children’s top pin). */
-function treeCardPinTopCenter(pos: { x: number; y: number }): {
+function treeCardPinTopCenter(pos: { x: number; y: number; id: string }): {
   x: number;
   y: number;
 } {
-  return {
-    x: pos.x + LAYOUT_NODE_W / 2,
-    y: pos.y - TREE_PIN_HEAD_OFFSET_Y,
-  };
+  return treeCardPinPointAfterVisualTransform(
+    pos,
+    LAYOUT_NODE_W / 2,
+    -TREE_PIN_HEAD_OFFSET_Y
+  );
 }
 
 /**
  * Copper tack on front of card (below dates); strings attach to tack center.
  */
-function treeCardPinBottomCenter(pos: { x: number; y: number }): {
+function treeCardPinBottomCenter(pos: { x: number; y: number; id: string }): {
   x: number;
   y: number;
 } {
-  return {
-    x: pos.x + LAYOUT_NODE_W / 2,
-    y: pos.y + TREE_COPPER_TACK_CENTER_Y_FROM_TOP,
-  };
+  return treeCardPinPointAfterVisualTransform(
+    pos,
+    LAYOUT_NODE_W / 2,
+    TREE_COPPER_TACK_CENTER_Y_FROM_TOP
+  );
 }
 
 type TreeThreadSegment = {
@@ -130,6 +268,7 @@ type TreeThreadSegment = {
   y1: number;
   x2: number;
   y2: number;
+  isMarriage: boolean;
 };
 
 type TreeGatheringPin = {
@@ -151,12 +290,16 @@ function TreeThreadLine({
   y1,
   x2,
   y2,
+  isMarriage,
 }: {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
+  isMarriage: boolean;
 }) {
+  const strokeDark = isMarriage ? TREE_THREAD_MARRIAGE : TREE_THREAD_LINEAGE;
+  const strokeBright = isMarriage ? TREE_THREAD_MARRIAGE : TREE_THREAD_LINEAGE;
   return (
     <g>
       <line
@@ -164,7 +307,7 @@ function TreeThreadLine({
         y1={y1}
         x2={x2}
         y2={y2}
-        stroke={TREE_THREAD_DARK}
+        stroke={strokeDark}
         strokeWidth={TREE_THREAD_STROKE_DARK}
         strokeLinecap="round"
       />
@@ -173,7 +316,7 @@ function TreeThreadLine({
         y1={y1}
         x2={x2}
         y2={y2}
-        stroke={TREE_THREAD_BRIGHT}
+        stroke={strokeBright}
         strokeWidth={TREE_THREAD_STROKE_BRIGHT}
         strokeLinecap="round"
       />
@@ -1133,36 +1276,6 @@ function treeCardYearRange(p: TreeCanvasPerson): string {
   return `– ${d}`;
 }
 
-function treePolaroidFrameChrome(
-  generation: number,
-  isDark: boolean
-): CSSProperties {
-  const gen = treeNodeGenerationSurfaceStyle(generation);
-  if (isDark) {
-    return {
-      backgroundColor: TREE_POLAROID_FRAME_DARK,
-      borderRadius: 3,
-      border: `1px solid ${TREE_POLAROID_FRAME_DARK}`,
-      boxShadow: [
-        "0 4px 14px rgb(var(--dg-shadow-rgb) / 0.42)",
-        "0 1px 3px rgb(0 0 0 / 0.45)",
-        "inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent)",
-        TREE_POLAROID_DARK_DEPTH_INSET,
-      ].join(", "),
-    };
-  }
-  return {
-    background: gen.background as string,
-    borderRadius: 3,
-    border: `1px solid ${colors.brownBorder}`,
-    boxShadow: [
-      "0 3px 12px rgb(var(--dg-shadow-rgb) / 0.2)",
-      "0 1px 3px rgb(0 0 0 / 0.08)",
-      "0 0 0 1px rgb(0 0 0 / 0.04)",
-    ].join(", "),
-  };
-}
-
 function extFromImageFile(file: File): string {
   const t = (file.type || "").toLowerCase();
   if (t === "image/jpeg" || t === "image/jpg") return "jpg";
@@ -1235,7 +1348,70 @@ const TREE_POLAROID_PRINT_FILTER_DARK =
 /** Same mat color as profile polaroids in dark mode (`HEADER_POLAROID_FRAME_DARK` on person page). */
 const TREE_POLAROID_FRAME_DARK = "#b0a08a" as const;
 const TREE_POLAROID_DARK_DEPTH_INSET =
-  "inset 0 0 8px rgba(0, 0, 0, 0.4)" as const;
+  "inset 0 0 9px rgba(20, 10, 6, 0.38)" as const;
+
+/** Subtle print grain (top layer) over mat fill — not a second solid. */
+const TREE_POLAROID_MAT_GRAIN = `repeating-linear-gradient(
+  48deg,
+  transparent,
+  transparent 5px,
+  rgba(58, 36, 24, 0.03) 5.5px,
+  transparent 6.5px,
+  transparent 8px
+)`;
+/** Warm cork-toned lift; no harsh black/gray. */
+const TREE_POLAROID_SHADOW_LIFT_LIGHT = [
+  "0 1.5px 0 rgba(110, 72, 50, 0.06)",
+  "0 3px 6px rgba(70, 44, 32, 0.1)",
+  "0 8px 20px rgba(55, 36, 24, 0.12)",
+] as const;
+const TREE_POLAROID_SHADOW_LIFT_DARK = [
+  "0 1.5px 0 rgba(35, 20, 12, 0.4)",
+  "0 4px 10px rgba(28, 16, 10, 0.5)",
+  "0 9px 22px rgba(42, 26, 16, 0.42)",
+] as const;
+const TREE_POLAROID_FRAME_INSET_LIGHT = [
+  "inset 0 0.5px 0 rgba(255, 252, 245, 0.65)",
+  "inset 0 0 0 1px color-mix(in srgb, var(--dg-brown-dark) 10%, transparent)",
+  "inset 0 1px 0 rgba(255, 255, 255, 0.2)",
+  "inset 0 2px 2px color-mix(in srgb, black 4.5%, transparent)",
+  "inset 0 -1px 0 color-mix(in srgb, white 22%, transparent)",
+] as const;
+const TREE_POLAROID_FRAME_INSET_DARK = [
+  "inset 0 0.5px 0 rgba(255, 255, 255, 0.1)",
+  "inset 0 0 0 1px rgba(45, 32, 20, 0.35)",
+  "inset 0 1px 0 rgba(255, 255, 255, 0.06)",
+  "inset 0 2px 3px rgba(0, 0, 0, 0.2)",
+] as const;
+
+function treePolaroidFrameChrome(
+  generation: number,
+  isDark: boolean
+): CSSProperties {
+  const gen = treeNodeGenerationSurfaceStyle(generation);
+  if (isDark) {
+    return {
+      background: `${TREE_POLAROID_MAT_GRAIN}, ${TREE_POLAROID_FRAME_DARK}`,
+      borderRadius: 3,
+      border: "1px solid color-mix(in srgb, #1a0f0a 35%, #6b5344)",
+      boxShadow: [
+        ...TREE_POLAROID_SHADOW_LIFT_DARK,
+        ...TREE_POLAROID_FRAME_INSET_DARK,
+        TREE_POLAROID_DARK_DEPTH_INSET,
+      ].join(", "),
+    };
+  }
+  const matFill = gen.background as string;
+  return {
+    background: `${TREE_POLAROID_MAT_GRAIN}, ${matFill}`,
+    borderRadius: 3,
+    border: `1px solid color-mix(in srgb, ${colors.brownBorder} 80%, var(--dg-parchment) 20%)`,
+    boxShadow: [
+      ...TREE_POLAROID_SHADOW_LIFT_LIGHT,
+      ...TREE_POLAROID_FRAME_INSET_LIGHT,
+    ].join(", "),
+  };
+}
 
 /**
  * Polaroid aperture when there is no photo. Warm dark brown (not pure black) so
@@ -1439,6 +1615,10 @@ export default function TreeCanvas({
 }: TreeCanvasProps) {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const corkboardSurfaceStyle = useMemo(
+    () => treeCanvasCorkboardSurfaceStyle(theme === "dark"),
+    [theme]
+  );
   const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
   const centeredRef = useRef(false);
 
@@ -2235,8 +2415,34 @@ export default function TreeCanvas({
       x2: number,
       y2: number
     ) => {
-      segments.push({ key, x1, y1, x2, y2 });
+      segments.push({
+        key,
+        x1,
+        y1,
+        x2,
+        y2,
+        isMarriage: treeThreadSegmentIsMarriage(key),
+      });
     };
+
+    /** One straight segment between two pin anchors (angles from layout only). */
+    const pushStraightPinThread = (
+      key: string,
+      from: { x: number; y: number },
+      to: { x: number; y: number }
+    ) => {
+      pushSeg(key, from.x, from.y, to.x, to.y);
+    };
+
+    const spousePairKeys = new Set<string>();
+    for (const r of relationships) {
+      const t = normRelType(r.relationship_type);
+      if (t !== "spouse" && t !== "married") continue;
+      const a = r.person_a_id;
+      const b = r.person_b_id;
+      if (!posById.has(a) || !posById.has(b)) continue;
+      spousePairKeys.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+    }
 
     for (const [pk, children] of pairToChildren) {
       const pipe = pk.indexOf("|");
@@ -2257,14 +2463,9 @@ export default function TreeCanvas({
       const pinBotL = treeCardPinBottomCenter(posL);
       const pinBotR = treeCardPinBottomCenter(posR);
 
-      const marriageY = Math.min(pinTopL.y, pinTopR.y);
-      pushSeg(
-        `thread:marriage:${pk}`,
-        pinTopL.x,
-        marriageY,
-        pinTopR.x,
-        marriageY
-      );
+      if (spousePairKeys.has(pk)) {
+        pushStraightPinThread(`thread:marriage:${pk}`, pinTopL, pinTopR);
+      }
 
       const childLayouts = children
         .map((cid) => {
@@ -2283,20 +2484,8 @@ export default function TreeCanvas({
       if (childLayouts.length === 1) {
         const { id: cid, p: posC } = childLayouts[0]!;
         const pinChildTop = treeCardPinTopCenter(posC);
-        pushSeg(
-          `thread:pc:${pk}:${cid}:L`,
-          pinBotL.x,
-          pinBotL.y,
-          pinChildTop.x,
-          pinChildTop.y
-        );
-        pushSeg(
-          `thread:pc:${pk}:${cid}:R`,
-          pinBotR.x,
-          pinBotR.y,
-          pinChildTop.x,
-          pinChildTop.y
-        );
+        pushStraightPinThread(`thread:pc:${pk}:${cid}:L`, pinBotL, pinChildTop);
+        pushStraightPinThread(`thread:pc:${pk}:${cid}:R`, pinBotR, pinChildTop);
       } else if (childLayouts.length > 1) {
         const avgChildPinY =
           childLayouts.reduce(
@@ -2311,17 +2500,12 @@ export default function TreeCanvas({
           x: gatherX,
           y: gatherY,
         });
-        pushSeg(`thread:pg:${pk}:L`, pinBotL.x, pinBotL.y, gatherX, gatherY);
-        pushSeg(`thread:pg:${pk}:R`, pinBotR.x, pinBotR.y, gatherX, gatherY);
+        const gatherPt = { x: gatherX, y: gatherY };
+        pushStraightPinThread(`thread:pg:${pk}:L`, pinBotL, gatherPt);
+        pushStraightPinThread(`thread:pg:${pk}:R`, pinBotR, gatherPt);
         for (const { id: cid, p: posC } of childLayouts) {
           const pinChildTop = treeCardPinTopCenter(posC);
-          pushSeg(
-            `thread:gc:${pk}:${cid}`,
-            gatherX,
-            gatherY,
-            pinChildTop.x,
-            pinChildTop.y
-          );
+          pushStraightPinThread(`thread:gc:${pk}:${cid}`, gatherPt, pinChildTop);
         }
       }
     }
@@ -2346,8 +2530,7 @@ export default function TreeCanvas({
       const posR = posById.get(right)!;
       const pinTopL = treeCardPinTopCenter(posL);
       const pinTopR = treeCardPinTopCenter(posR);
-      const marriageY = Math.min(pinTopL.y, pinTopR.y);
-      pushSeg(`thread:spouse:${spk}`, pinTopL.x, marriageY, pinTopR.x, marriageY);
+      pushStraightPinThread(`thread:spouse:${spk}`, pinTopL, pinTopR);
 
       const soloA = (soloByParent.get(a)?.length ?? 0) > 0;
       const soloB = (soloByParent.get(b)?.length ?? 0) > 0;
@@ -2367,12 +2550,10 @@ export default function TreeCanvas({
         const posC = posById.get(child);
         if (!posC) continue;
         const pinChildTop = treeCardPinTopCenter(posC);
-        pushSeg(
+        pushStraightPinThread(
           `thread:solo:${parentId}:${child}`,
-          pinBotP.x,
-          pinBotP.y,
-          pinChildTop.x,
-          pinChildTop.y
+          pinBotP,
+          pinChildTop
         );
       }
     }
@@ -2479,11 +2660,29 @@ export default function TreeCanvas({
             .dg-tree-node-card {
               transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
             }
-            .dg-tree-node-card:hover {
+            .dg-tree-polaroid-light.dg-tree-node-card:hover {
               transform: translateY(-2px);
               box-shadow:
-                inset 0 1px 0 var(--dg-inset-highlight),
-                0 8px 22px rgb(var(--dg-shadow-rgb) / 0.14) !important;
+                0 1.5px 0 rgba(100, 65, 45, 0.07),
+                0 4px 10px rgba(68, 42, 30, 0.12),
+                0 12px 28px rgba(52, 34, 24, 0.15),
+                inset 0 0.5px 0 rgba(255, 252, 245, 0.7),
+                inset 0 0 0 1px color-mix(in srgb, var(--dg-brown-dark) 10%, transparent),
+                inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                inset 0 2px 2px color-mix(in srgb, black 4.5%, transparent),
+                inset 0 -1px 0 color-mix(in srgb, white 24%, transparent) !important;
+            }
+            .dg-tree-polaroid-dark.dg-tree-node-card:hover {
+              transform: translateY(-2px);
+              box-shadow:
+                0 1.5px 0 rgba(32, 18, 10, 0.45),
+                0 5px 12px rgba(28, 16, 10, 0.52),
+                0 11px 28px rgba(40, 24, 16, 0.48),
+                inset 0 0.5px 0 rgba(255, 255, 255, 0.12),
+                inset 0 0 0 1px rgba(45, 32, 20, 0.42),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08),
+                inset 0 2px 3px rgba(0, 0, 0, 0.24),
+                inset 0 0 9px rgba(18, 8, 5, 0.4) !important;
             }
           `,
         }}
@@ -2678,7 +2877,7 @@ export default function TreeCanvas({
 
         <div
           className="relative min-h-0 flex-1"
-          style={{ backgroundColor: "var(--dg-parchment)" }}
+          style={corkboardSurfaceStyle}
         >
           <TransformWrapper
             ref={transformRef}
@@ -2704,7 +2903,6 @@ export default function TreeCanvas({
                   width: layout.contentWidth,
                   height: layout.contentHeight,
                   position: "relative",
-                  backgroundColor: "var(--dg-parchment)",
                 }}
               >
                 <div
@@ -2712,7 +2910,6 @@ export default function TreeCanvas({
                   style={{
                     width: layout.contentWidth,
                     height: layout.contentHeight,
-                    backgroundColor: "var(--dg-parchment)",
                   }}
                 >
                 <svg
@@ -2722,84 +2919,143 @@ export default function TreeCanvas({
                   aria-hidden
                 >
                   <defs>
-                    <filter
-                      id="dg-tree-copper-tack-highlight-soft"
-                      x="-40%"
-                      y="-40%"
-                      width="180%"
-                      height="180%"
+                    <radialGradient
+                      id="dg-tree-brad-cap-dome"
+                      cx="40%"
+                      cy="36%"
+                      r="70%"
+                      fx="38%"
+                      fy="30%"
+                      gradientUnits="objectBoundingBox"
                     >
-                      <feGaussianBlur
-                        in="SourceGraphic"
+                      <stop offset="0%" stopColor="#fff6e4" />
+                      <stop offset="16%" stopColor="#f2d18a" />
+                      <stop offset="42%" stopColor="#d4a04a" />
+                      <stop offset="72%" stopColor="#7a4a18" />
+                      <stop offset="100%" stopColor="#281208" />
+                    </radialGradient>
+                    <filter
+                      id="dg-tree-brad-cap-shadow"
+                      x="-65%"
+                      y="-65%"
+                      width="230%"
+                      height="230%"
+                    >
+                      <feDropShadow
+                        dx="0.1"
+                        dy="0.5"
                         stdDeviation="0.55"
-                        result="hblur"
+                        floodColor="#120a04"
+                        floodOpacity="0.5"
                       />
-                      <feMerge>
-                        <feMergeNode in="hblur" />
-                      </feMerge>
+                    </filter>
+                    <filter
+                      id="dg-tree-thumb-head-shadow"
+                      x="-55%"
+                      y="-55%"
+                      width="210%"
+                      height="210%"
+                    >
+                      <feDropShadow
+                        dx="0.2"
+                        dy="0.85"
+                        stdDeviation="0.9"
+                        floodColor="#140505"
+                        floodOpacity="0.55"
+                      />
                     </filter>
                     <symbol
                       id="dg-tree-copper-brad"
                       viewBox={`0 0 ${TREE_BRAD_SYMBOL_W} ${TREE_BRAD_SYMBOL_H}`}
                     >
-                      <ellipse
-                        cx={TREE_BRAD_CX}
-                        cy={TREE_BRAD_CY + 0.12}
-                        rx={5.12}
-                        ry={5.02}
-                        fill="#6d4a2a"
-                        opacity={0.22}
-                      />
-                      <ellipse
-                        cx={TREE_BRAD_CX}
-                        cy={TREE_BRAD_CY}
-                        rx={5.05}
-                        ry={5}
-                        fill="#b87333"
-                        stroke="#8b5e3c"
-                        strokeWidth={0.55}
-                      />
-                      <circle
-                        cx={4.35}
-                        cy={4.25}
-                        r={2.15}
-                        fill="#d4956a"
-                        opacity={0.42}
-                        filter="url(#dg-tree-copper-tack-highlight-soft)"
-                      />
-                      <circle
-                        cx={4.15}
-                        cy={4.05}
-                        r={0.95}
-                        fill="#e8c4a0"
-                        opacity={0.55}
-                      />
+                      <g filter="url(#dg-tree-brad-cap-shadow)">
+                        <ellipse
+                          cx={TREE_BRAD_CX}
+                          cy={TREE_BRAD_CY}
+                          rx={5.08}
+                          ry={5.02}
+                          fill="url(#dg-tree-brad-cap-dome)"
+                        />
+                        <ellipse
+                          cx={TREE_BRAD_CX - 1.55}
+                          cy={TREE_BRAD_CY - 1.65}
+                          rx={2.25}
+                          ry={1.85}
+                          fill="#fff9ee"
+                          opacity={0.58}
+                        />
+                        <ellipse
+                          cx={TREE_BRAD_CX + 1.85}
+                          cy={TREE_BRAD_CY + 1.75}
+                          rx={1.65}
+                          ry={1.25}
+                          fill="#1a0d04"
+                          opacity={0.2}
+                        />
+                      </g>
                     </symbol>
-                    <symbol
-                      id="dg-tree-thumbtack"
-                      viewBox={`0 0 ${TREE_PIN_SYMBOL_W} ${TREE_PIN_SYMBOL_H}`}
-                    >
-                      <circle
-                        cx={TREE_PIN_HEAD_CX}
-                        cy={TREE_PIN_HEAD_CY}
-                        r={TREE_PIN_HEAD_R}
-                        fill="#c01c1c"
-                      />
-                      <circle
-                        cx={7.2}
-                        cy={7}
-                        r={2.5}
-                        fill="#f5f1eb"
-                      />
-                      <rect
-                        x={TREE_PIN_HEAD_CX - TREE_PIN_STEM_W / 2}
-                        y={TREE_PIN_HEAD_CY + TREE_PIN_HEAD_R}
-                        width={TREE_PIN_STEM_W}
-                        height={TREE_PIN_STEM_LEN}
-                        rx={0.5}
-                        fill={TREE_PIN_STEM_FILL}
-                      />
-                    </symbol>
+                    {Array.from({ length: TREE_TOP_PIN_COLOR_CYCLE }, (_, genMod) => {
+                      const [c0, c14, c38, c68, c100] =
+                        treeTopPinDomeStopColors(genMod);
+                      const gid = `dg-tree-thumb-cap-gen-${genMod}`;
+                      const sid = `dg-tree-thumbtack-g${genMod}`;
+                      return (
+                        <Fragment key={sid}>
+                          <radialGradient
+                            id={gid}
+                            cx="38%"
+                            cy="34%"
+                            r="71%"
+                            fx="36%"
+                            fy="28%"
+                            gradientUnits="objectBoundingBox"
+                          >
+                            <stop offset="0%" stopColor={c0} />
+                            <stop offset="14%" stopColor={c14} />
+                            <stop offset="38%" stopColor={c38} />
+                            <stop offset="68%" stopColor={c68} />
+                            <stop offset="100%" stopColor={c100} />
+                          </radialGradient>
+                          <symbol
+                            id={sid}
+                            viewBox={`0 0 ${TREE_PIN_SYMBOL_W} ${TREE_PIN_SYMBOL_H}`}
+                          >
+                            <rect
+                              x={TREE_PIN_HEAD_CX - TREE_PIN_STEM_W / 2}
+                              y={TREE_PIN_HEAD_CY + TREE_PIN_HEAD_R}
+                              width={TREE_PIN_STEM_W}
+                              height={TREE_PIN_STEM_LEN}
+                              rx={0.5}
+                              fill={TREE_PIN_STEM_FILL}
+                            />
+                            <g filter="url(#dg-tree-thumb-head-shadow)">
+                              <circle
+                                cx={TREE_PIN_HEAD_CX}
+                                cy={TREE_PIN_HEAD_CY}
+                                r={TREE_PIN_HEAD_R}
+                                fill={`url(#${gid})`}
+                              />
+                              <ellipse
+                                cx={TREE_PIN_HEAD_CX - 2.6}
+                                cy={TREE_PIN_HEAD_CY - 2.5}
+                                rx={3.1}
+                                ry={2.45}
+                                fill="#ffffff"
+                                opacity={0.48}
+                              />
+                              <ellipse
+                                cx={TREE_PIN_HEAD_CX + 1.2}
+                                cy={TREE_PIN_HEAD_CY + 2.2}
+                                rx={1.85}
+                                ry={1.35}
+                                fill="#1a0c08"
+                                opacity={0.22}
+                              />
+                            </g>
+                          </symbol>
+                        </Fragment>
+                      );
+                    })}
                     <symbol
                       id="dg-tree-thumbtack-buried"
                       viewBox={`0 0 ${TREE_PIN_SYMBOL_W} ${TREE_PIN_SYMBOL_H}`}
@@ -2827,6 +3083,7 @@ export default function TreeCanvas({
                       y1={s.y1}
                       x2={s.x2}
                       y2={s.y2}
+                      isMarriage={s.isMarriage}
                     />
                   ))}
                 </svg>
@@ -2853,18 +3110,29 @@ export default function TreeCanvas({
                     ? TREE_POLAROID_PRINT_FILTER_DARK
                     : TREE_POLAROID_PRINT_FILTER_LIGHT;
 
+                  const cardTiltDeg = treeCardTiltDegreesFromPersonId(pos.id);
+                  const cardNudgeY =
+                    treeCardVerticalNudgePxFromPersonId(pos.id);
+
                   return (
                     <div
                       key={pos.id}
                       id={`tree-node-${pos.id}`}
-                      className="dg-tree-node-card absolute z-[1] overflow-hidden"
+                      className={
+                        (isDarkPolaroid
+                          ? "dg-tree-polaroid-dark"
+                          : "dg-tree-polaroid-light") +
+                        " dg-tree-node-card absolute z-[1] overflow-hidden"
+                      }
                       style={{
                         left: pos.x,
-                        top: pos.y,
+                        top: pos.y + cardNudgeY,
                         width: LAYOUT_NODE_W,
                         height: LAYOUT_NODE_H,
                         ...treePolaroidFrameChrome(pos.generation, isDarkPolaroid),
                         boxSizing: "border-box",
+                        transform: `rotate(${cardTiltDeg}deg)`,
+                        transformOrigin: "center center",
                       }}
                     >
                       <Link
@@ -2955,19 +3223,32 @@ export default function TreeCanvas({
                   height={layout.contentHeight}
                   style={{ pointerEvents: "none" }}
                 >
-                  {treeGatheringPins.map((gp) => (
-                    <g
-                      key={gp.key}
-                      transform={treePinTopUseTransform(gp.x, gp.y)}
+                  <defs>
+                    <filter
+                      id="dg-tree-gather-junction-shadow"
+                      x="-80%"
+                      y="-80%"
+                      width="260%"
+                      height="260%"
                     >
-                      <use
-                        href="#dg-tree-thumbtack"
-                        x={0}
-                        y={0}
-                        width={TREE_PIN_SYMBOL_W}
-                        height={TREE_PIN_SYMBOL_H}
+                      <feDropShadow
+                        dx="0"
+                        dy="1.15"
+                        stdDeviation="1.25"
+                        floodColor="#1a0806"
+                        floodOpacity="0.5"
                       />
-                    </g>
+                    </filter>
+                  </defs>
+                  {treeGatheringPins.map((gp) => (
+                    <circle
+                      key={gp.key}
+                      cx={gp.x}
+                      cy={gp.y}
+                      r={TREE_GATHER_JUNCTION_R}
+                      fill={TREE_THREAD_LINEAGE}
+                      filter="url(#dg-tree-gather-junction-shadow)"
+                    />
                   ))}
                   {layout.positions.map((pos) => {
                     const p = personById.get(pos.id);
@@ -2976,9 +3257,10 @@ export default function TreeCanvas({
                     const bot = treeCardPinBottomCenter(pos);
                     const hideBottom = treeNoBottomPinIds.has(pos.id);
                     const isBuried = collapsedAtIds.has(pos.id);
+                    const genMod = treeTopPinGenerationMod(pos.generation);
                     const pinHref = isBuried
                       ? "#dg-tree-thumbtack-buried"
-                      : "#dg-tree-thumbtack";
+                      : `#dg-tree-thumbtack-g${genMod}`;
                     const nameLabel = displayName(p);
                     const buryHere =
                       !isBuried && canBuryIds.has(pos.id);
