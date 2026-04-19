@@ -12,6 +12,13 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
+import { RootsFramePortrait } from "@/components/profile/roots-frame-portrait";
+import {
+  clampCropOffsetCover,
+  cropCoverRenderedSize,
+  cropPercentToOffsetCover,
+  getProfileHeaderCroppedPhotoImgStyle,
+} from "@/lib/profile/photo-crop-cover";
 import DocumentUploadSection from "../../dashboard/document-upload";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -697,6 +704,14 @@ const HEADER_SCRAPBOOK_IMG_INNER_H =
 const HEADER_POLAROID_BTN_W = 186;
 const HEADER_POLAROID_BTN_H = 236;
 
+/**
+ * Header layout: shift entire Roots oval mount (SVG frame + circular hole + mat + photo)
+ * as one unit. Negative x = left, negative y = up.
+ */
+const HEADER_ROOTS_OVAL_LAYOUT_OFFSET_STYLE: CSSProperties = {
+  transform: "translate(-10px, -20px)",
+};
+
 /** Top and side mat; bottom “chin” is 2.5× the edge (polaroid proportions). */
 const HEADER_POLAROID_FRAME_EDGE_PX = 8;
 const HEADER_POLAROID_FRAME_CHIN_PX = HEADER_POLAROID_FRAME_EDGE_PX * 2.5;
@@ -941,7 +956,19 @@ function HeaderScrapbookCornerTabs() {
   );
 }
 
-/** Header profile photo mat; scrapbook = tilted print + corner mounts (no under-plate); oval = polaroid. */
+/** Roots — `public/Roots Frame.svg` only (no polaroid mat behind it). */
+function headerRootsPortraitMountStyle(): CSSProperties {
+  return {
+    position: "relative",
+    backgroundColor: "transparent",
+    padding: 0,
+    border: "none",
+    borderRadius: 0,
+    boxShadow: "none",
+  };
+}
+
+/** Header profile photo mat; scrapbook = tilted print + corner mounts (no under-plate); Roots = SVG frame. */
 function profileHeaderPhotoFrameLayerStyle(
   photoFrameStyle: PhotoFrameStyle,
   isDark: boolean,
@@ -951,8 +978,9 @@ function profileHeaderPhotoFrameLayerStyle(
   switch (photoFrameStyle) {
     case "scrapbook":
       return headerScrapbookAlbumPageStyle(isDark);
-    case "polaroid":
     case "oval":
+      return headerRootsPortraitMountStyle();
+    case "polaroid":
       return headerPolaroidFrameLayerStyle(isDark, stackIndex, totalLayers);
   }
 }
@@ -1016,36 +1044,6 @@ function headerPolaroidLayerVisual(
   };
 }
 
-/** Cover-fit rendered size inside a rectangular viewport; zoom scales both axes. */
-function cropCoverRenderedSize(
-  naturalW: number,
-  naturalH: number,
-  viewportW: number,
-  viewportH: number,
-  zoom: number
-): { w: number; h: number } {
-  const scale = Math.max(viewportW / naturalW, viewportH / naturalH) * zoom;
-  return {
-    w: naturalW * scale,
-    h: naturalH * scale,
-  };
-}
-
-function clampCropOffsetCover(
-  offset: { x: number; y: number },
-  renderedW: number,
-  renderedH: number,
-  viewportW: number,
-  viewportH: number
-): { x: number; y: number } {
-  const spanX = renderedW - viewportW;
-  const spanY = renderedH - viewportH;
-  return {
-    x: spanX > 0 ? Math.min(0, Math.max(-spanX, offset.x)) : 0,
-    y: spanY > 0 ? Math.min(0, Math.max(-spanY, offset.y)) : 0,
-  };
-}
-
 /** Persisted crop_x / crop_y (0–100) from pixel offset (cover-fit rendered image). */
 function offsetToCropPercentCover(
   offset: { x: number; y: number },
@@ -1066,28 +1064,6 @@ function offsetToCropPercentCover(
         ? Math.min(100, Math.max(0, (-offset.y / spanY) * 100))
         : 50,
   };
-}
-
-function cropPercentToOffsetCover(
-  cropX: number,
-  cropY: number,
-  renderedW: number,
-  renderedH: number,
-  viewportW: number,
-  viewportH: number
-): { x: number; y: number } {
-  const spanX = renderedW - viewportW;
-  const spanY = renderedH - viewportH;
-  return clampCropOffsetCover(
-    {
-      x: spanX > 0 ? -(cropX / 100) * spanX : 0,
-      y: spanY > 0 ? -(cropY / 100) * spanY : 0,
-    },
-    renderedW,
-    renderedH,
-    viewportW,
-    viewportH
-  );
 }
 
 function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
@@ -3560,9 +3536,13 @@ export default function PersonProfilePage() {
     return [];
   }, [photoRows, person, headerPhotoUrl]);
 
-  /** Dead Gossip (scrapbook): one primary print in the header; other themes keep the polaroid stack. */
+  /**
+   * Dead Gossip (scrapbook) and Roots (oval): primary photo only in the header.
+   * String theme keeps the polaroid stack.
+   */
   const headerProfilePhotoStackLayers = useMemo(() => {
-    if (profileCanvasTheme.photoFrameStyle === "scrapbook") {
+    const style = profileCanvasTheme.photoFrameStyle;
+    if (style === "scrapbook" || style === "oval") {
       return headerPolaroidLayers.slice(0, 1);
     }
     return headerPolaroidLayers;
@@ -6086,7 +6066,8 @@ export default function PersonProfilePage() {
                 height: HEADER_POLAROID_BTN_H,
                 cursor: "pointer",
                 overflow:
-                  profileCanvasTheme.photoFrameStyle === "scrapbook"
+                  profileCanvasTheme.photoFrameStyle === "scrapbook" ||
+                  profileCanvasTheme.photoFrameStyle === "oval"
                     ? "visible"
                     : undefined,
               }}
@@ -6100,7 +6081,8 @@ export default function PersonProfilePage() {
                   transform: "translate(-50%, -50%)",
                   transformOrigin: "center center",
                   overflow:
-                    profileCanvasTheme.photoFrameStyle === "scrapbook"
+                    profileCanvasTheme.photoFrameStyle === "scrapbook" ||
+                    profileCanvasTheme.photoFrameStyle === "oval"
                       ? "visible"
                       : undefined,
                 }}
@@ -6173,6 +6155,24 @@ export default function PersonProfilePage() {
                         <HeaderScrapbookCornerTabs />
                       </div>
                     </div>
+                  ) : profileCanvasTheme.photoFrameStyle === "oval" ? (
+                    <div style={HEADER_ROOTS_OVAL_LAYOUT_OFFSET_STYLE}>
+                      <RootsFramePortrait isDark={theme === "dark"}>
+                        <div
+                          className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                          style={{
+                            width: HEADER_POLAROID_IMG_W,
+                            height: HEADER_POLAROID_IMG_H,
+                            backgroundColor: POLAROID_NO_PHOTO_BG,
+                            borderRadius: 1,
+                            fontFamily: serif,
+                            color: POLAROID_NO_PHOTO_INITIALS,
+                          }}
+                        >
+                          {person ? initials(person) : "?"}
+                        </div>
+                      </RootsFramePortrait>
+                    </div>
                   ) : (
                     <div
                       className="flex items-center justify-center text-4xl font-bold"
@@ -6209,7 +6209,8 @@ export default function PersonProfilePage() {
                       ? naturalH
                       : 0);
                   const stackStyle =
-                    profileCanvasTheme.photoFrameStyle === "scrapbook"
+                    profileCanvasTheme.photoFrameStyle === "scrapbook" ||
+                    profileCanvasTheme.photoFrameStyle === "oval"
                       ? { rot: 0, x: 0, y: 0 }
                       : HEADER_POLAROID_STACK_LAYERS[stackIndex] ??
                         HEADER_POLAROID_STACK_LAYERS[0];
@@ -6227,7 +6228,8 @@ export default function PersonProfilePage() {
                         transform: `translate(calc(-50% + ${stackStyle.x}px), calc(-50% + ${stackStyle.y}px)) rotate(${stackStyle.rot}deg)`,
                         transformOrigin: "center center",
                         overflow:
-                          profileCanvasTheme.photoFrameStyle === "scrapbook"
+                          profileCanvasTheme.photoFrameStyle === "scrapbook" ||
+                          profileCanvasTheme.photoFrameStyle === "oval"
                             ? "visible"
                             : undefined,
                       }}
@@ -6311,49 +6313,21 @@ export default function PersonProfilePage() {
                                             },
                                           }));
                                         }}
-                                        style={(() => {
-                                          if (nw <= 0 || nh <= 0) {
-                                            return {
-                                              position: "absolute" as const,
-                                              left: 0,
-                                              top: 0,
-                                              width: "100%",
-                                              height: "100%",
-                                              opacity: 0,
-                                            };
-                                          }
-                                          const { w: rw, h: rh } =
-                                            cropCoverRenderedSize(
-                                              nw,
-                                              nh,
+                                        style={getProfileHeaderCroppedPhotoImgStyle(
+                                          {
+                                            naturalW: nw,
+                                            naturalH: nh,
+                                            crop,
+                                            apertureW:
                                               HEADER_SCRAPBOOK_IMG_INNER_W,
+                                            apertureH:
                                               HEADER_SCRAPBOOK_IMG_INNER_H,
-                                              crop.zoom
-                                            );
-                                          const off = cropPercentToOffsetCover(
-                                            crop.x,
-                                            crop.y,
-                                            rw,
-                                            rh,
-                                            HEADER_SCRAPBOOK_IMG_INNER_W,
-                                            HEADER_SCRAPBOOK_IMG_INNER_H
-                                          );
-                                          const print =
-                                            theme === "dark"
-                                              ? HEADER_POLAROID_PRINT_FILTER_DARK
-                                              : HEADER_POLAROID_PRINT_FILTER_LIGHT;
-                                          return {
-                                            position: "absolute" as const,
-                                            left: off.x,
-                                            top: off.y,
-                                            width: rw,
-                                            height: rh,
-                                            opacity: 1,
-                                            pointerEvents: "none" as const,
-                                            maxWidth: "none",
-                                            filter: print,
-                                          };
-                                        })()}
+                                            printFilter:
+                                              theme === "dark"
+                                                ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                                : HEADER_POLAROID_PRINT_FILTER_LIGHT,
+                                          }
+                                        )}
                                       />
                                     ) : (
                                       <div
@@ -6371,6 +6345,65 @@ export default function PersonProfilePage() {
                               </div>
                               <HeaderScrapbookCornerTabs />
                             </div>
+                          </div>
+                        ) : profileCanvasTheme.photoFrameStyle === "oval" ? (
+                          <div style={HEADER_ROOTS_OVAL_LAYOUT_OFFSET_STYLE}>
+                            <RootsFramePortrait isDark={theme === "dark"}>
+                              <div
+                                style={{
+                                  position: "relative",
+                                  width: HEADER_POLAROID_IMG_W,
+                                  height: HEADER_POLAROID_IMG_H,
+                                  overflow: "hidden",
+                                  backgroundColor: url
+                                    ? colors.avatarBg
+                                    : POLAROID_NO_PHOTO_BG,
+                                  borderRadius: 1,
+                                }}
+                              >
+                                {url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={url}
+                                    alt=""
+                                    draggable={false}
+                                    onLoad={(e) => {
+                                      const el = e.currentTarget;
+                                      setPolaroidNaturalByKey((prev) => ({
+                                        ...prev,
+                                        [key]: {
+                                          w: el.naturalWidth,
+                                          h: el.naturalHeight,
+                                        },
+                                      }));
+                                    }}
+                                    style={getProfileHeaderCroppedPhotoImgStyle(
+                                      {
+                                        naturalW: nw,
+                                        naturalH: nh,
+                                        crop,
+                                        apertureW: HEADER_POLAROID_IMG_W,
+                                        apertureH: HEADER_POLAROID_IMG_H,
+                                        printFilter:
+                                          theme === "dark"
+                                            ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                            : HEADER_POLAROID_PRINT_FILTER_LIGHT,
+                                      }
+                                    )}
+                                  />
+                                ) : (
+                                  <div
+                                    className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                                    style={{
+                                      fontFamily: serif,
+                                      color: POLAROID_NO_PHOTO_INITIALS,
+                                    }}
+                                  >
+                                    {polaroidInitialsFromLayer(layer)}
+                                  </div>
+                                )}
+                              </div>
+                            </RootsFramePortrait>
                           </div>
                         ) : (
                           <div
@@ -6401,48 +6434,17 @@ export default function PersonProfilePage() {
                                     },
                                   }));
                                 }}
-                                style={(() => {
-                                  if (nw <= 0 || nh <= 0) {
-                                    return {
-                                      position: "absolute" as const,
-                                      left: 0,
-                                      top: 0,
-                                      width: "100%",
-                                      height: "100%",
-                                      opacity: 0,
-                                    };
-                                  }
-                                  const { w: rw, h: rh } =
-                                    cropCoverRenderedSize(
-                                      nw,
-                                      nh,
-                                      HEADER_POLAROID_IMG_W,
-                                      HEADER_POLAROID_IMG_H,
-                                      crop.zoom
-                                    );
-                                  const off = cropPercentToOffsetCover(
-                                    crop.x,
-                                    crop.y,
-                                    rw,
-                                    rh,
-                                    HEADER_POLAROID_IMG_W,
-                                    HEADER_POLAROID_IMG_H
-                                  );
-                                  return {
-                                    position: "absolute" as const,
-                                    left: off.x,
-                                    top: off.y,
-                                    width: rw,
-                                    height: rh,
-                                    opacity: 1,
-                                    pointerEvents: "none" as const,
-                                    maxWidth: "none",
-                                    filter:
-                                      theme === "dark"
-                                        ? HEADER_POLAROID_PRINT_FILTER_DARK
-                                        : HEADER_POLAROID_PRINT_FILTER_LIGHT,
-                                  };
-                                })()}
+                                style={getProfileHeaderCroppedPhotoImgStyle({
+                                  naturalW: nw,
+                                  naturalH: nh,
+                                  crop,
+                                  apertureW: HEADER_POLAROID_IMG_W,
+                                  apertureH: HEADER_POLAROID_IMG_H,
+                                  printFilter:
+                                    theme === "dark"
+                                      ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                      : HEADER_POLAROID_PRINT_FILTER_LIGHT,
+                                })}
                               />
                             ) : (
                               <div
