@@ -43,10 +43,16 @@ const ROOTS_OVAL_HOLE_VERTICAL_OFFSET_PX = 7;
 const ROOTS_OVAL_PRINT_VERTICAL_BIAS_PX = 0;
 
 /**
+ * Uniform scale for the profile-header oval vs the nominal 200px hole target.
+ * Base 200px hole matches polaroid image height at 1; 0.85 = 15% smaller than that.
+ */
+export const ROOTS_PROFILE_HEADER_MOUNT_SCALE = 0.85;
+
+/**
  * Scale the SVG so the **inscribed photo hole** matches the polaroid image height
  * (same apparent window as Dead Gossip’s 128×160 print). `2*CIRCLE_R` is hole diameter in vb.
  */
-const HOLE_DIAMETER_TARGET_PX = 200;
+const HOLE_DIAMETER_TARGET_PX = 200 * ROOTS_PROFILE_HEADER_MOUNT_SCALE;
 const ROOTS_FRAME_TARGET_DISPLAY_H =
   (HOLE_DIAMETER_TARGET_PX * VB_H) / (2 * CIRCLE_R);
 const ROOTS_FRAME_TARGET_DISPLAY_W =
@@ -90,13 +96,10 @@ export function RootsFramePortrait({ isDark, children }: RootsFramePortraitProps
     width: displayW,
     height: displayH,
     flexShrink: 0,
+    /** Let clicks reach page chrome (nav links) outside the circular photo aperture. */
+    pointerEvents: "none",
   };
 
-  /**
-   * Circular mat behind the photo. Light: warm paper. Dark: `--dg-parchment` /
-   * `--dg-bg-main` mix so the ring reads against `--dg-bg-main` (`app/globals.css` `.dark`).
-   * Depth uses `holeStyle` inset only (symmetric top/bottom) — avoids a hard “lined” rim.
-   */
   const holeMatStyle: CSSProperties = {
     position: "absolute",
     inset: 0,
@@ -126,6 +129,8 @@ export function RootsFramePortrait({ isDark, children }: RootsFramePortraitProps
     overflow: "hidden",
     clipPath: "circle(50% at 50% 50%)",
     transform: "translateZ(0)",
+    /** Mat / empty ring must not steal clicks from the portrait button or the nav. */
+    pointerEvents: "none",
     boxShadow: isDark
       ? "inset 0 11px 28px rgb(0 0 0 / 0.3), inset 0 -11px 28px rgb(0 0 0 / 0.3)"
       : "inset 0 0 10px rgba(0,0,0,0.1)",
@@ -148,6 +153,7 @@ export function RootsFramePortrait({ isDark, children }: RootsFramePortraitProps
     overflow: "hidden",
     flexShrink: 0,
     position: "relative",
+    pointerEvents: "auto",
   };
 
   const photoInnerStyle: CSSProperties = {

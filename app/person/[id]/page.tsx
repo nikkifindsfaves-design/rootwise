@@ -12,7 +12,10 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { formatPlace } from "@/lib/utils/places";
-import { RootsFramePortrait } from "@/components/profile/roots-frame-portrait";
+import {
+  RootsFramePortrait,
+  ROOTS_PROFILE_HEADER_MOUNT_SCALE,
+} from "@/components/profile/roots-frame-portrait";
 import {
   clampCropOffsetCover,
   cropCoverRenderedSize,
@@ -23,6 +26,7 @@ import DocumentUploadSection from "../../dashboard/document-upload";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
+  createElement,
   useCallback,
   useEffect,
   useId,
@@ -705,11 +709,19 @@ const HEADER_POLAROID_BTN_W = 186;
 const HEADER_POLAROID_BTN_H = 236;
 
 /**
+ * Roots / oval only: extra height on the outer shell (below the polaroid-sized slot) so the
+ * SVG frame + drop-shadow are not clipped. This is intentionally obvious to tune — if you
+ * change nothing else, change this number.
+ */
+const HEADER_ROOTS_OVAL_SHELL_EXTRA_HEIGHT_PX = 48;
+
+/**
  * Header layout: shift entire Roots oval mount (SVG frame + circular hole + mat + photo)
- * as one unit. Negative x = left, negative y = up.
+ * as one unit. Negative x = left, negative y = up. This is the main lever for “frame cut
+ * off at the bottom” when clipping comes from below the header row.
  */
 const HEADER_ROOTS_OVAL_LAYOUT_OFFSET_STYLE: CSSProperties = {
-  transform: "translate(-10px, -20px)",
+  transform: "translate(-10px, -56px)",
 };
 
 /** Top and side mat; bottom “chin” is 2.5× the edge (polaroid proportions). */
@@ -2666,12 +2678,19 @@ export default function PersonProfilePage() {
       surviving_spouse: raw.surviving_spouse ?? null,
     };
 
+    /**
+     * Theme must follow the tree you opened the profile from (`/dashboard/{treeId}/person/...`),
+     * not only `person.tree_id` (can be missing or a different tree). That mismatch made Roots
+     * oval header/CSS look like it “never changed” while polaroid rules still applied.
+     */
+    const themeTreeId = treeId !== "" ? treeId : personTreeId;
+
     let resolvedCanvasTheme = "string";
-    if (personTreeId !== "") {
+    if (themeTreeId !== "") {
       const { data: treeThemeRow, error: treeThemeErr } = await supabase
         .from("trees")
         .select("canvas_theme")
-        .eq("id", personTreeId)
+        .eq("id", themeTreeId)
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -2679,7 +2698,10 @@ export default function PersonProfilePage() {
         const ct = (treeThemeRow as { canvas_theme?: string | null })
           .canvas_theme;
         if (typeof ct === "string" && ct.trim() !== "") {
-          resolvedCanvasTheme = ct.trim();
+          const normalized = ct.trim().toLowerCase();
+          resolvedCanvasTheme = isCanvasThemeId(normalized)
+            ? normalized
+            : "string";
         }
       }
     }
@@ -5983,6 +6005,11 @@ export default function PersonProfilePage() {
     return recordTypeLabel(a.record).localeCompare(recordTypeLabel(b.record));
   });
 
+  const isOvalProfileHeader = profileCanvasTheme.photoFrameStyle === "oval";
+  const headerPolaroidOverflowVisible =
+    profileCanvasTheme.photoFrameStyle === "scrapbook" || isOvalProfileHeader;
+  const openHeaderPortraitsGallery = () => setPortraitsGalleryOpen(true);
+
   return (
     <PersonProfilePageBody canvasTheme={canvasTheme}>
       <div className="pb-16">
@@ -6054,27 +6081,51 @@ export default function PersonProfilePage() {
         className="pb-3 pt-5 lg:pb-4 lg:pt-6"
         style={{
           backgroundColor: "transparent",
+          ...(isOvalProfileHeader
+            ? { overflow: "visible" as const }
+            : {}),
         }}
       >
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6 lg:px-8">
+        <div
+          className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6 lg:px-8"
+          style={isOvalProfileHeader ? { overflow: "visible" } : undefined}
+        >
           <div className="shrink-0 self-start">
-            <button
-              type="button"
-              className="relative shrink-0 border-none bg-transparent p-0"
-              style={{
-                width: HEADER_POLAROID_BTN_W,
-                height: HEADER_POLAROID_BTN_H,
-                cursor: "pointer",
-                overflow:
-                  profileCanvasTheme.photoFrameStyle === "scrapbook" ||
-                  profileCanvasTheme.photoFrameStyle === "oval"
-                    ? "visible"
-                    : undefined,
-              }}
-              aria-label="Open photo gallery — manage photos, crop, tags, and primary"
-              onClick={() => setPortraitsGalleryOpen(true)}
-            >
-            {headerPolaroidLayers.length === 0 ? (
+            {createElement(
+              isOvalProfileHeader ? "div" : "button",
+              isOvalProfileHeader
+                ? {
+                    role: "presentation",
+                    className: "relative shrink-0 border-none bg-transparent p-0",
+                    style: {
+                      width:
+                        HEADER_POLAROID_BTN_W * ROOTS_PROFILE_HEADER_MOUNT_SCALE,
+                      height:
+                        HEADER_POLAROID_BTN_H * ROOTS_PROFILE_HEADER_MOUNT_SCALE +
+                        HEADER_ROOTS_OVAL_SHELL_EXTRA_HEIGHT_PX,
+                      cursor: "default",
+                      overflow: headerPolaroidOverflowVisible
+                        ? "visible"
+                        : undefined,
+                      pointerEvents: "none",
+                    },
+                  }
+                : {
+                    type: "button",
+                    className: "relative shrink-0 border-none bg-transparent p-0",
+                    style: {
+                      width: HEADER_POLAROID_BTN_W,
+                      height: HEADER_POLAROID_BTN_H,
+                      cursor: "pointer",
+                      overflow: headerPolaroidOverflowVisible
+                        ? "visible"
+                        : undefined,
+                    },
+                    "aria-label":
+                      "Open photo gallery — manage photos, crop, tags, and primary",
+                    onClick: openHeaderPortraitsGallery,
+                  },
+              headerPolaroidLayers.length === 0 ? (
               <div
                 className="absolute left-1/2 top-1/2"
                 style={{
@@ -6158,19 +6209,27 @@ export default function PersonProfilePage() {
                   ) : profileCanvasTheme.photoFrameStyle === "oval" ? (
                     <div style={HEADER_ROOTS_OVAL_LAYOUT_OFFSET_STYLE}>
                       <RootsFramePortrait isDark={theme === "dark"}>
-                        <div
-                          className="flex h-full w-full items-center justify-center text-4xl font-bold"
-                          style={{
-                            width: HEADER_POLAROID_IMG_W,
-                            height: HEADER_POLAROID_IMG_H,
-                            backgroundColor: POLAROID_NO_PHOTO_BG,
-                            borderRadius: 1,
-                            fontFamily: serif,
-                            color: POLAROID_NO_PHOTO_INITIALS,
-                          }}
+                        <button
+                          type="button"
+                          className="box-border block h-full w-full border-none bg-transparent p-0"
+                          style={{ cursor: "pointer", font: "inherit" }}
+                          aria-label="Open photo gallery — manage photos, crop, tags, and primary"
+                          onClick={openHeaderPortraitsGallery}
                         >
-                          {person ? initials(person) : "?"}
-                        </div>
+                          <div
+                            className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                            style={{
+                              width: HEADER_POLAROID_IMG_W,
+                              height: HEADER_POLAROID_IMG_H,
+                              backgroundColor: POLAROID_NO_PHOTO_BG,
+                              borderRadius: 1,
+                              fontFamily: serif,
+                              color: POLAROID_NO_PHOTO_INITIALS,
+                            }}
+                          >
+                            {person ? initials(person) : "?"}
+                          </div>
+                        </button>
                       </RootsFramePortrait>
                     </div>
                   ) : (
@@ -6349,60 +6408,68 @@ export default function PersonProfilePage() {
                         ) : profileCanvasTheme.photoFrameStyle === "oval" ? (
                           <div style={HEADER_ROOTS_OVAL_LAYOUT_OFFSET_STYLE}>
                             <RootsFramePortrait isDark={theme === "dark"}>
-                              <div
-                                style={{
-                                  position: "relative",
-                                  width: HEADER_POLAROID_IMG_W,
-                                  height: HEADER_POLAROID_IMG_H,
-                                  overflow: "hidden",
-                                  backgroundColor: url
-                                    ? colors.avatarBg
-                                    : POLAROID_NO_PHOTO_BG,
-                                  borderRadius: 1,
-                                }}
+                              <button
+                                type="button"
+                                className="box-border block h-full w-full border-none bg-transparent p-0"
+                                style={{ cursor: "pointer", font: "inherit" }}
+                                aria-label="Open photo gallery — manage photos, crop, tags, and primary"
+                                onClick={openHeaderPortraitsGallery}
                               >
-                                {url ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={url}
-                                    alt=""
-                                    draggable={false}
-                                    onLoad={(e) => {
-                                      const el = e.currentTarget;
-                                      setPolaroidNaturalByKey((prev) => ({
-                                        ...prev,
-                                        [key]: {
-                                          w: el.naturalWidth,
-                                          h: el.naturalHeight,
-                                        },
-                                      }));
-                                    }}
-                                    style={getProfileHeaderCroppedPhotoImgStyle(
-                                      {
-                                        naturalW: nw,
-                                        naturalH: nh,
-                                        crop,
-                                        apertureW: HEADER_POLAROID_IMG_W,
-                                        apertureH: HEADER_POLAROID_IMG_H,
-                                        printFilter:
-                                          theme === "dark"
-                                            ? HEADER_POLAROID_PRINT_FILTER_DARK
-                                            : HEADER_POLAROID_PRINT_FILTER_LIGHT,
-                                      }
-                                    )}
-                                  />
-                                ) : (
-                                  <div
-                                    className="flex h-full w-full items-center justify-center text-4xl font-bold"
-                                    style={{
-                                      fontFamily: serif,
-                                      color: POLAROID_NO_PHOTO_INITIALS,
-                                    }}
-                                  >
-                                    {polaroidInitialsFromLayer(layer)}
-                                  </div>
-                                )}
-                              </div>
+                                <div
+                                  style={{
+                                    position: "relative",
+                                    width: HEADER_POLAROID_IMG_W,
+                                    height: HEADER_POLAROID_IMG_H,
+                                    overflow: "hidden",
+                                    backgroundColor: url
+                                      ? colors.avatarBg
+                                      : POLAROID_NO_PHOTO_BG,
+                                    borderRadius: 1,
+                                  }}
+                                >
+                                  {url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={url}
+                                      alt=""
+                                      draggable={false}
+                                      onLoad={(e) => {
+                                        const el = e.currentTarget;
+                                        setPolaroidNaturalByKey((prev) => ({
+                                          ...prev,
+                                          [key]: {
+                                            w: el.naturalWidth,
+                                            h: el.naturalHeight,
+                                          },
+                                        }));
+                                      }}
+                                      style={getProfileHeaderCroppedPhotoImgStyle(
+                                        {
+                                          naturalW: nw,
+                                          naturalH: nh,
+                                          crop,
+                                          apertureW: HEADER_POLAROID_IMG_W,
+                                          apertureH: HEADER_POLAROID_IMG_H,
+                                          printFilter:
+                                            theme === "dark"
+                                              ? HEADER_POLAROID_PRINT_FILTER_DARK
+                                              : HEADER_POLAROID_PRINT_FILTER_LIGHT,
+                                        }
+                                      )}
+                                    />
+                                  ) : (
+                                    <div
+                                      className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                                      style={{
+                                        fontFamily: serif,
+                                        color: POLAROID_NO_PHOTO_INITIALS,
+                                      }}
+                                    >
+                                      {polaroidInitialsFromLayer(layer)}
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
                             </RootsFramePortrait>
                           </div>
                         ) : (
@@ -6463,8 +6530,8 @@ export default function PersonProfilePage() {
                     </div>
                   );
                 })
+            )
             )}
-            </button>
           </div>
           <div className="min-w-0 w-full flex-1 self-start text-left sm:w-auto sm:self-center sm:pl-0">
             <h1

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTheme } from "@/lib/theme/theme-context";
+import type { CanvasThemeId } from "@/lib/themes/canvas-themes";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import Link from "next/link";
@@ -96,6 +97,24 @@ function treeCanvasCorkboardSurfaceStyle(isDark: boolean): CSSProperties {
   };
 }
 
+/** Roots theme: full-bleed art from `public/Roots Tree BG.jpg` (light/dark read via gradient only). */
+function treeCanvasRootsSurfaceStyle(isDark: boolean): CSSProperties {
+  const bg = "url(/Roots%20Tree%20BG.jpg)";
+  const wash = isDark
+    ? "linear-gradient(180deg, rgba(0,0,0,0.38) 0%, rgba(0,0,0,0.52) 100%)"
+    : "linear-gradient(180deg, rgba(255,252,248,0.12) 0%, rgba(42,26,14,0.14) 100%)";
+  return {
+    backgroundColor: isDark ? "#1e1812" : "#c4b4a2",
+    backgroundImage: `${wash}, ${bg}`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+    boxShadow: isDark
+      ? "inset 0 0 120px rgba(0,0,0,0.45)"
+      : "inset 0 0 140px rgba(42, 26, 14, 0.1)",
+  };
+}
+
 /** Explicit pedigree layout (fixed canvas geometry). */
 const LAYOUT_CANVAS_W = 2400;
 
@@ -105,6 +124,9 @@ const TREE_POLAROID_IMG_W = 88;
 const TREE_POLAROID_IMG_H = Math.round(
   (TREE_POLAROID_IMG_W * 160) / 128
 );
+/** Roots leaf cards only: photo viewport 30% smaller than polaroid tree print. */
+const TREE_ROOTS_LEAF_IMG_W = Math.round(TREE_POLAROID_IMG_W * 0.7);
+const TREE_ROOTS_LEAF_IMG_H = Math.round(TREE_POLAROID_IMG_H * 0.7);
 /** Room for two 11px lines at tight leading + gap before dates (avoids line-clamp clip). */
 const TREE_POLAROID_CAPTION_MIN_H = 46;
 const TREE_POLAROID_SET_ROOT_H = 22;
@@ -117,6 +139,21 @@ const LAYOUT_NODE_H =
   TREE_POLAROID_CAPTION_GAP +
   TREE_POLAROID_CAPTION_MIN_H +
   TREE_POLAROID_SET_ROOT_H;
+
+/**
+ * Leaf art is ~square; `cover` inside the tall narrow polaroid rect clips the sides flat.
+ * Roots uses a wider (and slightly taller) surface centered on the same layout slot so the
+ * SVG can scale up without losing the curved silhouette. Layout math still uses LAYOUT_NODE_*.
+ * Width stays wide for side curves; height ≥ ~width so ~square `leaf.svg` + `cover` does not clip the tip.
+ */
+const TREE_LEAF_SURFACE_W = Math.round(LAYOUT_NODE_H * 1.464);
+const TREE_LEAF_SURFACE_H = Math.round(
+  Math.max(LAYOUT_NODE_H * 1.35, TREE_LEAF_SURFACE_W * 1.04)
+);
+/** Roots tree cards: move photo + caption block down by 30% of leaf height (see `items-center` on Link). */
+const TREE_LEAF_ROOTS_CONTENT_SHIFT_Y = Math.round(TREE_LEAF_SURFACE_H * 0.3);
+/** Caption pill text: literal dark brown so it stays readable in app dark mode (`--dg-*` browns often invert). */
+const TREE_ROOTS_CAPTION_INK = "#2a1810";
 
 const LAYOUT_BASE_Y = 1200;
 const LAYOUT_GEN_DY = 300;
@@ -180,6 +217,13 @@ const TREE_THREAD_MARRIAGE = "#a3470f";
 const TREE_THREAD_STROKE_DARK = 3.5;
 const TREE_THREAD_STROKE_BRIGHT = 1.8;
 
+/** Roots tree canvas only: branch strokes + hub fill (same dark brown; dual width for slight edge). */
+const TREE_ROOTS_BRANCH_BROWN = "#3a2416";
+const TREE_ROOTS_BRANCH_STROKE_BACK = 7;
+const TREE_ROOTS_BRANCH_STROKE_FRONT = 2.35;
+/** Symbol-space Y of Roots stem bullet / path start (`TreeRootsTopPinGraphic`; thread endpoints use with `TREE_PIN_HEAD_CY`). */
+const TREE_ROOTS_BULLET_SYMBOL_CY = -1.5;
+
 /** Multi-child branch gather point: small hub, smaller than thumbtack head (r≈9 at 22px pin width). */
 const TREE_GATHER_JUNCTION_R = 5.25;
 
@@ -194,6 +238,70 @@ function treeTopPinGenerationMod(generation: number): number {
   const g = generation === -999 ? 0 : generation;
   const m = g % TREE_TOP_PIN_COLOR_CYCLE;
   return m < 0 ? m + TREE_TOP_PIN_COLOR_CYCLE : m;
+}
+
+/** Roots: dual-stroke browns for top “pin” (varies by generation; buried = muted dead twig). */
+function treeRootsPinBranchStrokes(
+  genMod: number,
+  isBuried: boolean
+): { back: string; front: string } {
+  if (isBuried) {
+    return { back: "#12100c", front: "#241c14" };
+  }
+  const t = genMod / TREE_TOP_PIN_COLOR_CYCLE;
+  const hue = 20 + (genMod % 9) * 2.1;
+  const lBack = 17 + t * 15;
+  const lFront = Math.min(46, lBack + 9);
+  return {
+    back: `hsl(${hue.toFixed(1)} 40% ${lBack.toFixed(1)}%)`,
+    front: `hsl(${hue.toFixed(1)} 32% ${lFront.toFixed(1)}%)`,
+  };
+}
+
+/** Roots theme only: small curved branch + top bullet (thumbtack symbol space; bullet triggers bury/restore). */
+function TreeRootsTopPinGraphic({
+  genMod,
+  isBuried,
+  pinInteractive,
+}: {
+  genMod: number;
+  isBuried: boolean;
+  pinInteractive: boolean;
+}) {
+  const { back, front } = treeRootsPinBranchStrokes(genMod, isBuried);
+  /** +3px upward vs prior start so the twig meets the connector line. */
+  const d = `M 11 ${TREE_ROOTS_BULLET_SYMBOL_CY} C 8.2 9.5 13.8 15.5 11 27`;
+  const bulletCy = TREE_ROOTS_BULLET_SYMBOL_CY;
+  return (
+    <g aria-hidden>
+      <g style={{ pointerEvents: "none" }}>
+        <path
+          d={d}
+          fill="none"
+          stroke={back}
+          strokeWidth={3.18}
+          strokeLinecap="round"
+        />
+        <path
+          d={d}
+          fill="none"
+          stroke={front}
+          strokeWidth={1.26}
+          strokeLinecap="round"
+        />
+      </g>
+      <circle
+        cx={11}
+        cy={bulletCy}
+        r={4.235}
+        fill={isBuried ? "#0a0806" : TREE_ROOTS_BRANCH_BROWN}
+        style={{
+          pointerEvents: pinInteractive ? "all" : "none",
+          cursor: pinInteractive ? "pointer" : "default",
+        }}
+      />
+    </g>
+  );
 }
 
 /** Radial dome stops for a generation cap: warm highlight center → saturated mid → dark rim (L≥14%). */
@@ -236,16 +344,59 @@ function treeCardPinPointAfterVisualTransform(
   };
 }
 
-/** Top-center pin (marriage + strings into children’s top pin). */
-function treeCardPinTopCenter(pos: { x: number; y: number; id: string }): {
-  x: number;
-  y: number;
-} {
+/** Local Y for thread endpoints (Roots: aligned to leaf apex; stem uses extra nudge separately). */
+function treeCardPinTopLocalYForThreads(canvasTheme: CanvasThemeId): number {
+  if (canvasTheme !== "roots") return -TREE_PIN_HEAD_OFFSET_Y;
+  return (LAYOUT_NODE_H - TREE_LEAF_SURFACE_H) / 2 - TREE_PIN_HEAD_OFFSET_Y;
+}
+
+/** Roots only: stem graphic sits lower than connector anchor so lines meet the original junction. */
+const TREE_ROOTS_STEM_EXTRA_LOCAL_Y = 20;
+
+function treeCardPinTopLocalYForStemVisual(canvasTheme: CanvasThemeId): number {
+  if (canvasTheme !== "roots") return treeCardPinTopLocalYForThreads(canvasTheme);
+  return (
+    treeCardPinTopLocalYForThreads(canvasTheme) + TREE_ROOTS_STEM_EXTRA_LOCAL_Y
+  );
+}
+
+/** Top anchor for connector geometry (threads, gathering math). */
+function treeCardPinTopCenterForThreads(
+  pos: { x: number; y: number; id: string },
+  canvasTheme: CanvasThemeId
+): { x: number; y: number } {
   return treeCardPinPointAfterVisualTransform(
     pos,
     LAYOUT_NODE_W / 2,
-    -TREE_PIN_HEAD_OFFSET_Y
+    treeCardPinTopLocalYForThreads(canvasTheme)
   );
+}
+
+/** Roots stem / thumbtack visual only (lower than `ForThreads`). */
+function treeCardPinTopCenterForStemVisual(
+  pos: { x: number; y: number; id: string },
+  canvasTheme: CanvasThemeId
+): { x: number; y: number } {
+  return treeCardPinPointAfterVisualTransform(
+    pos,
+    LAYOUT_NODE_W / 2,
+    treeCardPinTopLocalYForStemVisual(canvasTheme)
+  );
+}
+
+/** Thread segment endpoint at top of card: Roots = stem bullet center; others = pin/leaf apex. */
+function treeCardPinTopForThreadSegments(
+  pos: { x: number; y: number; id: string },
+  canvasTheme: CanvasThemeId
+): { x: number; y: number } {
+  if (canvasTheme !== "roots") {
+    return treeCardPinTopCenterForThreads(pos, canvasTheme);
+  }
+  const stem = treeCardPinTopCenterForStemVisual(pos, canvasTheme);
+  return {
+    x: stem.x,
+    y: stem.y + (TREE_ROOTS_BULLET_SYMBOL_CY - TREE_PIN_HEAD_CY),
+  };
 }
 
 /**
@@ -291,15 +442,31 @@ function TreeThreadLine({
   x2,
   y2,
   isMarriage,
+  rootsBranchVisual,
 }: {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
   isMarriage: boolean;
+  rootsBranchVisual: boolean;
 }) {
-  const strokeDark = isMarriage ? TREE_THREAD_MARRIAGE : TREE_THREAD_LINEAGE;
-  const strokeBright = isMarriage ? TREE_THREAD_MARRIAGE : TREE_THREAD_LINEAGE;
+  const strokeDark = rootsBranchVisual
+    ? TREE_ROOTS_BRANCH_BROWN
+    : isMarriage
+      ? TREE_THREAD_MARRIAGE
+      : TREE_THREAD_LINEAGE;
+  const strokeBright = rootsBranchVisual
+    ? TREE_ROOTS_BRANCH_BROWN
+    : isMarriage
+      ? TREE_THREAD_MARRIAGE
+      : TREE_THREAD_LINEAGE;
+  const wBack = rootsBranchVisual
+    ? TREE_ROOTS_BRANCH_STROKE_BACK
+    : TREE_THREAD_STROKE_DARK;
+  const wFront = rootsBranchVisual
+    ? TREE_ROOTS_BRANCH_STROKE_FRONT
+    : TREE_THREAD_STROKE_BRIGHT;
   return (
     <g>
       <line
@@ -308,7 +475,7 @@ function TreeThreadLine({
         x2={x2}
         y2={y2}
         stroke={strokeDark}
-        strokeWidth={TREE_THREAD_STROKE_DARK}
+        strokeWidth={wBack}
         strokeLinecap="round"
       />
       <line
@@ -317,7 +484,7 @@ function TreeThreadLine({
         x2={x2}
         y2={y2}
         stroke={strokeBright}
-        strokeWidth={TREE_THREAD_STROKE_BRIGHT}
+        strokeWidth={wFront}
         strokeLinecap="round"
       />
     </g>
@@ -1413,6 +1580,27 @@ function treePolaroidFrameChrome(
   };
 }
 
+/** Roots theme: `public/leaf.svg` scaled to cover the node box (same footprint as polaroid); mask matches. */
+function treeLeafInnerSurfaceStyle(isDark: boolean): CSSProperties {
+  const leaf = "url(/leaf.svg)";
+  return {
+    boxSizing: "border-box",
+    backgroundColor: isDark ? "#1a2418" : "#f0f6ec",
+    backgroundImage: leaf,
+    backgroundSize: "cover",
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "center",
+    WebkitMaskImage: leaf,
+    maskImage: leaf,
+    WebkitMaskSize: "cover",
+    maskSize: "cover",
+    WebkitMaskRepeat: "no-repeat",
+    maskRepeat: "no-repeat",
+    WebkitMaskPosition: "center",
+    maskPosition: "center",
+  };
+}
+
 /**
  * Polaroid aperture when there is no photo. Warm dark brown (not pure black) so
  * light initials read clearly. Initials use fixed light ink — `var(--dg-cream)` is
@@ -1603,6 +1791,7 @@ function TreeNodeAvatarImg({
 type TreeCanvasProps = {
   treeId: string;
   treeName: string;
+  canvasTheme: CanvasThemeId;
   persons: TreeCanvasPerson[];
   relationships: TreeCanvasRelationship[];
 };
@@ -1610,15 +1799,18 @@ type TreeCanvasProps = {
 export default function TreeCanvas({
   treeId,
   treeName,
+  canvasTheme,
   persons,
   relationships,
 }: TreeCanvasProps) {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-  const corkboardSurfaceStyle = useMemo(
-    () => treeCanvasCorkboardSurfaceStyle(theme === "dark"),
-    [theme]
-  );
+  const treeSurfaceStyle = useMemo(() => {
+    const isDark = theme === "dark";
+    return canvasTheme === "roots"
+      ? treeCanvasRootsSurfaceStyle(isDark)
+      : treeCanvasCorkboardSurfaceStyle(isDark);
+  }, [canvasTheme, theme]);
   const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
   const centeredRef = useRef(false);
 
@@ -2458,8 +2650,8 @@ export default function TreeCanvas({
       const posL = posById.get(left)!;
       const posR = posById.get(right)!;
 
-      const pinTopL = treeCardPinTopCenter(posL);
-      const pinTopR = treeCardPinTopCenter(posR);
+      const pinTopL = treeCardPinTopForThreadSegments(posL, canvasTheme);
+      const pinTopR = treeCardPinTopForThreadSegments(posR, canvasTheme);
       const pinBotL = treeCardPinBottomCenter(posL);
       const pinBotR = treeCardPinBottomCenter(posR);
 
@@ -2483,13 +2675,13 @@ export default function TreeCanvas({
 
       if (childLayouts.length === 1) {
         const { id: cid, p: posC } = childLayouts[0]!;
-        const pinChildTop = treeCardPinTopCenter(posC);
+        const pinChildTop = treeCardPinTopForThreadSegments(posC, canvasTheme);
         pushStraightPinThread(`thread:pc:${pk}:${cid}:L`, pinBotL, pinChildTop);
         pushStraightPinThread(`thread:pc:${pk}:${cid}:R`, pinBotR, pinChildTop);
       } else if (childLayouts.length > 1) {
         const avgChildPinY =
           childLayouts.reduce(
-            (s, { p }) => s + treeCardPinTopCenter(p).y,
+            (s, { p }) => s + treeCardPinTopForThreadSegments(p, canvasTheme).y,
             0
           ) / childLayouts.length;
         const yStart = (pinBotL.y + pinBotR.y) / 2;
@@ -2504,7 +2696,7 @@ export default function TreeCanvas({
         pushStraightPinThread(`thread:pg:${pk}:L`, pinBotL, gatherPt);
         pushStraightPinThread(`thread:pg:${pk}:R`, pinBotR, gatherPt);
         for (const { id: cid, p: posC } of childLayouts) {
-          const pinChildTop = treeCardPinTopCenter(posC);
+          const pinChildTop = treeCardPinTopForThreadSegments(posC, canvasTheme);
           pushStraightPinThread(`thread:gc:${pk}:${cid}`, gatherPt, pinChildTop);
         }
       }
@@ -2528,8 +2720,8 @@ export default function TreeCanvas({
       const right = left === a ? b : a;
       const posL = posById.get(left)!;
       const posR = posById.get(right)!;
-      const pinTopL = treeCardPinTopCenter(posL);
-      const pinTopR = treeCardPinTopCenter(posR);
+      const pinTopL = treeCardPinTopForThreadSegments(posL, canvasTheme);
+      const pinTopR = treeCardPinTopForThreadSegments(posR, canvasTheme);
       pushStraightPinThread(`thread:spouse:${spk}`, pinTopL, pinTopR);
 
       const soloA = (soloByParent.get(a)?.length ?? 0) > 0;
@@ -2549,7 +2741,7 @@ export default function TreeCanvas({
         if (covered.has(`${parentId}->${child}`)) continue;
         const posC = posById.get(child);
         if (!posC) continue;
-        const pinChildTop = treeCardPinTopCenter(posC);
+        const pinChildTop = treeCardPinTopForThreadSegments(posC, canvasTheme);
         pushStraightPinThread(
           `thread:solo:${parentId}:${child}`,
           pinBotP,
@@ -2559,7 +2751,7 @@ export default function TreeCanvas({
     }
 
     return { segments, gatheringPins, noBottomPinIds };
-  }, [pedigreeLayoutData, relationships]);
+  }, [pedigreeLayoutData, relationships, canvasTheme]);
 
   const treeThreadSegments = treeThreadBundle.segments;
   const treeGatheringPins = treeThreadBundle.gatheringPins;
@@ -2658,7 +2850,7 @@ export default function TreeCanvas({
               border-color: var(--dg-brown-dark) !important;
             }
             .dg-tree-node-card {
-              transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+              transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, filter 0.2s ease-out;
             }
             .dg-tree-polaroid-light.dg-tree-node-card:hover {
               transform: translateY(-2px);
@@ -2683,6 +2875,14 @@ export default function TreeCanvas({
                 inset 0 1px 0 rgba(255, 255, 255, 0.08),
                 inset 0 2px 3px rgba(0, 0, 0, 0.24),
                 inset 0 0 9px rgba(18, 8, 5, 0.4) !important;
+            }
+            .dg-tree-leaf-light.dg-tree-node-card:hover {
+              filter:
+                drop-shadow(0 7px 20px rgba(42, 26, 16, 0.4))
+                drop-shadow(0 2px 8px rgba(42, 26, 16, 0.28)) !important;
+            }
+            .dg-tree-leaf-dark.dg-tree-node-card:hover {
+              filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.58)) !important;
             }
           `,
         }}
@@ -2877,7 +3077,7 @@ export default function TreeCanvas({
 
         <div
           className="relative min-h-0 flex-1"
-          style={corkboardSurfaceStyle}
+          style={treeSurfaceStyle}
         >
           <TransformWrapper
             ref={transformRef}
@@ -2913,7 +3113,12 @@ export default function TreeCanvas({
                   }}
                 >
                 <svg
-                  className="pointer-events-none absolute left-0 top-0 z-[2]"
+                  className={
+                    "absolute left-0 top-0 " +
+                    (canvasTheme === "roots"
+                      ? "z-[1]"
+                      : "pointer-events-none z-[2]")
+                  }
                   width={layout.contentWidth}
                   height={layout.contentHeight}
                   aria-hidden
@@ -3075,17 +3280,141 @@ export default function TreeCanvas({
                         fill="#000000"
                       />
                     </symbol>
+                    {canvasTheme === "roots" ? (
+                      <filter
+                        id="dg-tree-roots-branch-displace"
+                        filterUnits="userSpaceOnUse"
+                        x={0}
+                        y={0}
+                        width={layout.contentWidth}
+                        height={layout.contentHeight}
+                        colorInterpolationFilters="sRGB"
+                      >
+                        <feTurbulence
+                          type="fractalNoise"
+                          baseFrequency="0.014"
+                          numOctaves="2"
+                          stitchTiles="stitch"
+                          seed="428"
+                          result="branchNoise"
+                        />
+                        <feGaussianBlur
+                          in="branchNoise"
+                          stdDeviation="0.85"
+                          result="branchNoiseSmooth"
+                        />
+                        <feDisplacementMap
+                          in="SourceGraphic"
+                          in2="branchNoiseSmooth"
+                          scale="6"
+                          xChannelSelector="R"
+                          yChannelSelector="G"
+                        />
+                      </filter>
+                    ) : null}
+                    <filter
+                      id="dg-tree-gather-junction-shadow"
+                      x="-80%"
+                      y="-80%"
+                      width="260%"
+                      height="260%"
+                    >
+                      <feDropShadow
+                        dx="0"
+                        dy="1.15"
+                        stdDeviation="1.25"
+                        floodColor="#1a0806"
+                        floodOpacity="0.5"
+                      />
+                    </filter>
                   </defs>
-                  {treeThreadSegments.map((s) => (
-                    <TreeThreadLine
-                      key={s.key}
-                      x1={s.x1}
-                      y1={s.y1}
-                      x2={s.x2}
-                      y2={s.y2}
-                      isMarriage={s.isMarriage}
-                    />
-                  ))}
+                  {canvasTheme === "roots" ? (
+                    <>
+                      <g
+                        filter="url(#dg-tree-roots-branch-displace)"
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {treeThreadSegments.map((s) => (
+                          <TreeThreadLine
+                            key={s.key}
+                            x1={s.x1}
+                            y1={s.y1}
+                            x2={s.x2}
+                            y2={s.y2}
+                            isMarriage={s.isMarriage}
+                            rootsBranchVisual
+                          />
+                        ))}
+                      </g>
+                      {treeGatheringPins.map((gp) => (
+                        <circle
+                          key={gp.key}
+                          cx={gp.x}
+                          cy={gp.y}
+                          r={TREE_GATHER_JUNCTION_R}
+                          fill={TREE_ROOTS_BRANCH_BROWN}
+                          filter="url(#dg-tree-gather-junction-shadow)"
+                          style={{ pointerEvents: "none" }}
+                        />
+                      ))}
+                      {layout.positions.map((pos) => {
+                        const p = personById.get(pos.id);
+                        if (!p) return null;
+                        const topStem = treeCardPinTopCenterForStemVisual(
+                          pos,
+                          canvasTheme
+                        );
+                        const isBuried = collapsedAtIds.has(pos.id);
+                        const genMod = treeTopPinGenerationMod(pos.generation);
+                        const nameLabel = displayName(p);
+                        const buryHere =
+                          !isBuried && canBuryIds.has(pos.id);
+                        const restoreHere = isBuried;
+                        const pinInteractive = buryHere || restoreHere;
+                        const pinAriaLabel = restoreHere
+                          ? `Restore ${nameLabel}`
+                          : buryHere
+                            ? `Bury ${nameLabel}`
+                            : null;
+                        const runPinAction = restoreHere
+                          ? () => unburyPersonAtId(pos.id)
+                          : () => buryPersonAtId(pos.id);
+                        return (
+                          <g
+                            key={`tree-card-stem:${pos.id}`}
+                            transform={treePinTopUseTransform(
+                              topStem.x,
+                              topStem.y
+                            )}
+                          >
+                            <TreePinActionWrap
+                              interactive={pinInteractive}
+                              ariaLabel={pinAriaLabel}
+                              onAction={runPinAction}
+                            >
+                              <TreeRootsTopPinGraphic
+                                genMod={genMod}
+                                isBuried={isBuried}
+                                pinInteractive={pinInteractive}
+                              />
+                            </TreePinActionWrap>
+                          </g>
+                        );
+                      })}
+                    </>
+                  ) : (
+                    treeThreadSegments.map((s) => (
+                      <TreeThreadLine
+                        key={s.key}
+                        x1={s.x1}
+                        y1={s.y1}
+                        x2={s.x2}
+                        y2={s.y2}
+                        isMarriage={s.isMarriage}
+                        rootsBranchVisual={false}
+                      />
+                    ))
+                  )}
                 </svg>
                 {mergedPersons.length === 0 ? (
                   <p
@@ -3113,6 +3442,208 @@ export default function TreeCanvas({
                   const cardTiltDeg = treeCardTiltDegreesFromPersonId(pos.id);
                   const cardNudgeY =
                     treeCardVerticalNudgePxFromPersonId(pos.id);
+                  const isRootsLeaf = canvasTheme === "roots";
+
+                  const cardPositionStyle: CSSProperties = {
+                    left: pos.x,
+                    top: pos.y + cardNudgeY,
+                    width: LAYOUT_NODE_W,
+                    height: LAYOUT_NODE_H,
+                    boxSizing: "border-box",
+                    transform: `rotate(${cardTiltDeg}deg)`,
+                    transformOrigin: "center center",
+                  };
+
+                  const treeCardPhotoW = isRootsLeaf
+                    ? TREE_ROOTS_LEAF_IMG_W
+                    : TREE_POLAROID_IMG_W;
+                  const treeCardPhotoH = isRootsLeaf
+                    ? TREE_ROOTS_LEAF_IMG_H
+                    : TREE_POLAROID_IMG_H;
+                  /** Roots profile uses a circular print; square viewport + circle clip matches that crop. */
+                  const treeRootsPhotoDiameter = isRootsLeaf
+                    ? Math.min(treeCardPhotoW, treeCardPhotoH)
+                    : 0;
+
+                  const cardFace = (
+                    <Link
+                      href={`/dashboard/${treeId}/person/${pos.id}`}
+                      className={
+                        "absolute left-0 right-0 top-0 z-0 flex flex-col no-underline" +
+                        (isRootsLeaf ? " items-center" : "")
+                      }
+                      style={{
+                        color: colors.brownDark,
+                        bottom: TREE_POLAROID_SET_ROOT_H,
+                        paddingLeft: TREE_POLAROID_EDGE,
+                        paddingRight: TREE_POLAROID_EDGE,
+                        paddingTop:
+                          TREE_POLAROID_EDGE +
+                          (isRootsLeaf ? TREE_LEAF_ROOTS_CONTENT_SHIFT_Y : 0),
+                      }}
+                    >
+                      <div
+                        className="relative shrink-0 overflow-hidden"
+                        style={{
+                          width: isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoW,
+                          height: isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoH,
+                          backgroundColor: hasAvatarSrc
+                            ? "var(--dg-avatar-bg)"
+                            : POLAROID_NO_PHOTO_BG,
+                          borderRadius: isRootsLeaf ? "50%" : 1,
+                          ...(isRootsLeaf
+                            ? {
+                                clipPath: "circle(50% at 50% 50%)",
+                                isolation: "isolate",
+                              }
+                            : {}),
+                        }}
+                      >
+                        {hasAvatarSrc ? (
+                          <TreeNodeAvatarImg
+                            primary={primaryRow}
+                            fallbackUrl={fallback}
+                            viewportW={
+                              isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoW
+                            }
+                            viewportH={
+                              isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoH
+                            }
+                            printFilter={printFilter}
+                          />
+                        ) : (
+                          <div
+                            className="flex h-full w-full items-center justify-center text-sm font-bold"
+                            style={{
+                              fontFamily: serif,
+                              color: POLAROID_NO_PHOTO_INITIALS,
+                            }}
+                          >
+                            {initials(p)}
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        className={
+                          "relative flex flex-col items-center justify-start gap-1.5 px-0.5 pb-0.5 pt-0.5 text-center" +
+                          (isRootsLeaf ? "" : " min-h-0 flex-1")
+                        }
+                        style={{
+                          marginTop: TREE_POLAROID_CAPTION_GAP,
+                          ...(!isRootsLeaf
+                            ? { minHeight: TREE_POLAROID_CAPTION_MIN_H }
+                            : {}),
+                        }}
+                      >
+                        {isRootsLeaf ? (
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              gap: 3,
+                              maxWidth: "100%",
+                              padding: "2px 7px",
+                              borderRadius: 5,
+                              backgroundColor: "rgba(255, 253, 248, 0.3)",
+                              boxShadow:
+                                "0 0 0 1px rgba(62, 42, 28, 0.05), 0 1px 2px rgba(42, 26, 14, 0.05)",
+                            }}
+                          >
+                            <p
+                              className="line-clamp-2 max-w-full text-center text-[11px] font-bold"
+                              style={{
+                                fontFamily: serif,
+                                lineHeight: 1.12,
+                                color: TREE_ROOTS_CAPTION_INK,
+                              }}
+                              title={displayName(p)}
+                            >
+                              {displayName(p)}
+                            </p>
+                            {yearLine ? (
+                              <p
+                                className="max-w-full shrink-0 truncate text-center text-[9px] font-semibold leading-tight"
+                                style={{
+                                  fontFamily: sans,
+                                  marginTop: 0,
+                                  color: TREE_ROOTS_CAPTION_INK,
+                                }}
+                                title={yearLine}
+                              >
+                                {yearLine}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <>
+                            <p
+                              className="line-clamp-2 w-full text-[11px] font-bold"
+                              style={{
+                                fontFamily: serif,
+                                lineHeight: 1.12,
+                                color: isDarkPolaroid
+                                  ? "color-mix(in srgb, var(--dg-photo-scrim) 88%, black)"
+                                  : `color-mix(in srgb, var(--dg-brown-dark) 90%, var(--dg-brown-outline) 10%)`,
+                              }}
+                              title={displayName(p)}
+                            >
+                              {displayName(p)}
+                            </p>
+                            {yearLine ? (
+                              <p
+                                className="w-full shrink-0 truncate text-[9px] font-semibold leading-tight"
+                                style={{
+                                  fontFamily: sans,
+                                  marginTop: 0,
+                                  color: isDarkPolaroid
+                                    ? "color-mix(in srgb, var(--dg-photo-scrim) 72%, var(--dg-brown-border) 28%)"
+                                    : `color-mix(in srgb, var(--dg-brown-dark) 78%, var(--dg-brown-mid) 22%)`,
+                                }}
+                                title={yearLine}
+                              >
+                                {yearLine}
+                              </p>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    </Link>
+                  );
+
+                  if (isRootsLeaf) {
+                    return (
+                      <div
+                        key={pos.id}
+                        id={`tree-node-${pos.id}`}
+                        className={
+                          (isDarkPolaroid
+                            ? "dg-tree-leaf-dark"
+                            : "dg-tree-leaf-light") +
+                          " dg-tree-node-card absolute z-[2]"
+                        }
+                        style={{
+                          ...cardPositionStyle,
+                          overflow: "visible",
+                          filter: isDarkPolaroid
+                            ? "drop-shadow(0 4px 10px rgba(0,0,0,0.48))"
+                            : "drop-shadow(0 3px 9px rgba(42, 28, 18, 0.26))",
+                        }}
+                      >
+                        <div
+                          className="absolute left-1/2 top-1/2 z-0"
+                          style={{
+                            width: TREE_LEAF_SURFACE_W,
+                            height: TREE_LEAF_SURFACE_H,
+                            transform: "translate(-50%, -50%)",
+                            ...treeLeafInnerSurfaceStyle(isDarkPolaroid),
+                          }}
+                        >
+                          {cardFace}
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
@@ -3125,187 +3656,94 @@ export default function TreeCanvas({
                         " dg-tree-node-card absolute z-[1] overflow-hidden"
                       }
                       style={{
-                        left: pos.x,
-                        top: pos.y + cardNudgeY,
-                        width: LAYOUT_NODE_W,
-                        height: LAYOUT_NODE_H,
-                        ...treePolaroidFrameChrome(pos.generation, isDarkPolaroid),
-                        boxSizing: "border-box",
-                        transform: `rotate(${cardTiltDeg}deg)`,
-                        transformOrigin: "center center",
+                        ...cardPositionStyle,
+                        ...treePolaroidFrameChrome(
+                          pos.generation,
+                          isDarkPolaroid
+                        ),
                       }}
                     >
-                      <Link
-                        href={`/dashboard/${treeId}/person/${pos.id}`}
-                        className="absolute left-0 right-0 top-0 z-0 flex flex-col no-underline"
-                        style={{
-                          color: colors.brownDark,
-                          bottom: TREE_POLAROID_SET_ROOT_H,
-                          paddingLeft: TREE_POLAROID_EDGE,
-                          paddingRight: TREE_POLAROID_EDGE,
-                          paddingTop: TREE_POLAROID_EDGE,
-                        }}
-                      >
-                        <div
-                          className="relative shrink-0 overflow-hidden"
-                          style={{
-                            width: TREE_POLAROID_IMG_W,
-                            height: TREE_POLAROID_IMG_H,
-                            backgroundColor: hasAvatarSrc
-                              ? "var(--dg-avatar-bg)"
-                              : POLAROID_NO_PHOTO_BG,
-                            borderRadius: 1,
-                          }}
-                        >
-                          {hasAvatarSrc ? (
-                            <TreeNodeAvatarImg
-                              primary={primaryRow}
-                              fallbackUrl={fallback}
-                              viewportW={TREE_POLAROID_IMG_W}
-                              viewportH={TREE_POLAROID_IMG_H}
-                              printFilter={printFilter}
-                            />
-                          ) : (
-                            <div
-                              className="flex h-full w-full items-center justify-center text-sm font-bold"
-                              style={{
-                                fontFamily: serif,
-                                color: POLAROID_NO_PHOTO_INITIALS,
-                              }}
-                            >
-                              {initials(p)}
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          className="relative flex min-h-0 flex-1 flex-col items-center justify-start gap-1.5 px-0.5 pb-0.5 pt-0.5 text-center"
-                          style={{
-                            marginTop: TREE_POLAROID_CAPTION_GAP,
-                            minHeight: TREE_POLAROID_CAPTION_MIN_H,
-                          }}
-                        >
-                          <p
-                            className="line-clamp-2 w-full text-[11px] font-bold"
-                            style={{
-                              fontFamily: serif,
-                              lineHeight: 1.12,
-                              color: isDarkPolaroid
-                                ? "color-mix(in srgb, var(--dg-photo-scrim) 88%, black)"
-                                : `color-mix(in srgb, var(--dg-brown-dark) 90%, var(--dg-brown-outline) 10%)`,
-                            }}
-                            title={displayName(p)}
-                          >
-                            {displayName(p)}
-                          </p>
-                          {yearLine ? (
-                            <p
-                              className="w-full shrink-0 truncate text-[9px] font-semibold leading-tight"
-                              style={{
-                                fontFamily: sans,
-                                marginTop: 0,
-                                color: isDarkPolaroid
-                                  ? "color-mix(in srgb, var(--dg-photo-scrim) 72%, var(--dg-brown-border) 28%)"
-                                  : `color-mix(in srgb, var(--dg-brown-dark) 78%, var(--dg-brown-mid) 22%)`,
-                              }}
-                              title={yearLine}
-                            >
-                              {yearLine}
-                            </p>
-                          ) : null}
-                        </div>
-                      </Link>
+                      {cardFace}
                     </div>
                   );
                 })}
-                <svg
-                  className="absolute left-0 top-0 z-[3]"
-                  width={layout.contentWidth}
-                  height={layout.contentHeight}
-                  style={{ pointerEvents: "none" }}
-                >
-                  <defs>
-                    <filter
-                      id="dg-tree-gather-junction-shadow"
-                      x="-80%"
-                      y="-80%"
-                      width="260%"
-                      height="260%"
-                    >
-                      <feDropShadow
-                        dx="0"
-                        dy="1.15"
-                        stdDeviation="1.25"
-                        floodColor="#1a0806"
-                        floodOpacity="0.5"
+                {canvasTheme !== "roots" ? (
+                  <svg
+                    className="absolute left-0 top-0 z-[3]"
+                    width={layout.contentWidth}
+                    height={layout.contentHeight}
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {treeGatheringPins.map((gp) => (
+                      <circle
+                        key={gp.key}
+                        cx={gp.x}
+                        cy={gp.y}
+                        r={TREE_GATHER_JUNCTION_R}
+                        fill={TREE_THREAD_LINEAGE}
+                        filter="url(#dg-tree-gather-junction-shadow)"
                       />
-                    </filter>
-                  </defs>
-                  {treeGatheringPins.map((gp) => (
-                    <circle
-                      key={gp.key}
-                      cx={gp.x}
-                      cy={gp.y}
-                      r={TREE_GATHER_JUNCTION_R}
-                      fill={TREE_THREAD_LINEAGE}
-                      filter="url(#dg-tree-gather-junction-shadow)"
-                    />
-                  ))}
-                  {layout.positions.map((pos) => {
-                    const p = personById.get(pos.id);
-                    if (!p) return null;
-                    const top = treeCardPinTopCenter(pos);
-                    const bot = treeCardPinBottomCenter(pos);
-                    const hideBottom = treeNoBottomPinIds.has(pos.id);
-                    const isBuried = collapsedAtIds.has(pos.id);
-                    const genMod = treeTopPinGenerationMod(pos.generation);
-                    const pinHref = isBuried
-                      ? "#dg-tree-thumbtack-buried"
-                      : `#dg-tree-thumbtack-g${genMod}`;
-                    const nameLabel = displayName(p);
-                    const buryHere =
-                      !isBuried && canBuryIds.has(pos.id);
-                    const restoreHere = isBuried;
-                    const pinInteractive = buryHere || restoreHere;
-                    const pinAriaLabel = restoreHere
-                      ? `Restore ${nameLabel}`
-                      : buryHere
-                        ? `Bury ${nameLabel}`
-                        : null;
-                    const runPinAction = restoreHere
-                      ? () => unburyPersonAtId(pos.id)
-                      : () => buryPersonAtId(pos.id);
-                    return (
-                      <g key={`tree-card-pins:${pos.id}`}>
-                        <g transform={treePinTopUseTransform(top.x, top.y)}>
-                          <TreePinActionWrap
-                            interactive={pinInteractive}
-                            ariaLabel={pinAriaLabel}
-                            onAction={runPinAction}
-                          >
-                            <use
-                              href={pinHref}
-                              x={0}
-                              y={0}
-                              width={TREE_PIN_SYMBOL_W}
-                              height={TREE_PIN_SYMBOL_H}
-                            />
-                          </TreePinActionWrap>
-                        </g>
-                        {hideBottom ? null : (
-                          <g transform={treeBradUseTransform(bot.x, bot.y)}>
-                            <use
-                              href="#dg-tree-copper-brad"
-                              x={0}
-                              y={0}
-                              width={TREE_BRAD_SYMBOL_W}
-                              height={TREE_BRAD_SYMBOL_H}
-                            />
+                    ))}
+                    {layout.positions.map((pos) => {
+                      const p = personById.get(pos.id);
+                      if (!p) return null;
+                      const top = treeCardPinTopCenterForThreads(
+                        pos,
+                        canvasTheme
+                      );
+                      const bot = treeCardPinBottomCenter(pos);
+                      const hideBottom = treeNoBottomPinIds.has(pos.id);
+                      const isBuried = collapsedAtIds.has(pos.id);
+                      const genMod = treeTopPinGenerationMod(pos.generation);
+                      const pinHref = isBuried
+                        ? "#dg-tree-thumbtack-buried"
+                        : `#dg-tree-thumbtack-g${genMod}`;
+                      const nameLabel = displayName(p);
+                      const buryHere =
+                        !isBuried && canBuryIds.has(pos.id);
+                      const restoreHere = isBuried;
+                      const pinInteractive = buryHere || restoreHere;
+                      const pinAriaLabel = restoreHere
+                        ? `Restore ${nameLabel}`
+                        : buryHere
+                          ? `Bury ${nameLabel}`
+                          : null;
+                      const runPinAction = restoreHere
+                        ? () => unburyPersonAtId(pos.id)
+                        : () => buryPersonAtId(pos.id);
+                      return (
+                        <g key={`tree-card-pins:${pos.id}`}>
+                          <g transform={treePinTopUseTransform(top.x, top.y)}>
+                            <TreePinActionWrap
+                              interactive={pinInteractive}
+                              ariaLabel={pinAriaLabel}
+                              onAction={runPinAction}
+                            >
+                              <use
+                                href={pinHref}
+                                x={0}
+                                y={0}
+                                width={TREE_PIN_SYMBOL_W}
+                                height={TREE_PIN_SYMBOL_H}
+                              />
+                            </TreePinActionWrap>
                           </g>
-                        )}
-                      </g>
-                    );
-                  })}
-                </svg>
+                          {hideBottom ? null : (
+                            <g transform={treeBradUseTransform(bot.x, bot.y)}>
+                              <use
+                                href="#dg-tree-copper-brad"
+                                x={0}
+                                y={0}
+                                width={TREE_BRAD_SYMBOL_W}
+                                height={TREE_BRAD_SYMBOL_H}
+                              />
+                            </g>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                ) : null}
                 </div>
               </TransformComponent>
               <TreeCanvasZoomControls
