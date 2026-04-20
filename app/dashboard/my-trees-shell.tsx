@@ -304,9 +304,13 @@ export default function MyTreesShell({
           canvas_theme: selectedCanvasTheme ?? "string",
         })
         .select("id")
-        .single();
+        .maybeSingle();
       if (error) {
         setCreateError(error.message);
+        return;
+      }
+      if (!data) {
+        console.warn("Tree creation returned no record.");
         return;
       }
       const id = (data as { id: string }).id;

@@ -687,11 +687,17 @@ export async function POST(request: NextRequest) {
         document_subtype: "Manual entry",
       })
       .select("id")
-      .single();
+      .maybeSingle();
 
-    if (recordError || !record) {
+    if (recordError) {
       return NextResponse.json(
-        { error: `Failed to save record: ${recordError?.message ?? "unknown"}` },
+        { error: `Failed to save record: ${recordError.message}` },
+        { status: 500 }
+      );
+    }
+    if (!record) {
+      return NextResponse.json(
+        { error: "Failed to save record: unknown" },
         { status: 500 }
       );
     }
@@ -811,11 +817,17 @@ export async function POST(request: NextRequest) {
       ...(resolvedTreeId != null ? { tree_id: resolvedTreeId } : {}),
     })
     .select("id")
-    .single();
+    .maybeSingle();
 
-  if (recordError || !record) {
+  if (recordError) {
     return NextResponse.json(
-      { error: `Failed to save record: ${recordError?.message ?? "unknown"}` },
+      { error: `Failed to save record: ${recordError.message}` },
+      { status: 500 }
+    );
+  }
+  if (!record) {
+    return NextResponse.json(
+      { error: "Failed to save record: unknown" },
       { status: 500 }
     );
   }

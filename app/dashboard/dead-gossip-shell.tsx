@@ -275,7 +275,7 @@ export default function DeadGossipShell({
             : {}),
         })
         .select("id")
-        .single();
+        .maybeSingle();
       if (insErr || !newPhoto) {
         setPhotoUploadError(insErr?.message ?? "Could not save photo.");
         return;

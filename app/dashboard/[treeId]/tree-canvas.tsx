@@ -2336,11 +2336,16 @@ export default function TreeCanvas({
             : {}),
         })
         .select("id")
-        .single();
+        .maybeSingle();
 
-      if (insErr || !insertedPhoto) {
+      if (insErr) {
         await supabase.storage.from("photos").remove([path]);
-        setPhotoUploadError(insErr?.message ?? "Could not save photo.");
+        setPhotoUploadError(insErr.message);
+        return;
+      }
+      if (!insertedPhoto) {
+        await supabase.storage.from("photos").remove([path]);
+        setPhotoUploadError("Could not save photo.");
         return;
       }
       for (const selectedPerson of photoSelectedPersons) {
@@ -2429,7 +2434,7 @@ export default function TreeCanvas({
         .select(
           "id, first_name, middle_name, last_name, birth_date, death_date, photo_url"
         )
-        .single();
+        .maybeSingle();
 
       if (error) {
         setAddPersonError(error.message);

@@ -234,10 +234,13 @@ export async function insertPersonReturningId(
       notes: input.notes?.trim() || null,
     })
     .select("id")
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    return { ok: false, error: error?.message ?? "Insert failed." };
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!data) {
+    return { ok: false, error: "Insert failed." };
   }
 
   return { ok: true, id: data.id as string };
@@ -573,10 +576,13 @@ export async function acceptPersonCard(params: {
         ...personPayload,
       })
       .select("id")
-      .single();
+      .maybeSingle();
 
-    if (insErr || !inserted) {
-      return { ok: false, error: insErr?.message ?? "Failed to create person." };
+    if (insErr) {
+      return { ok: false, error: insErr.message };
+    }
+    if (!inserted) {
+      return { ok: false, error: "Failed to create person." };
     }
     personId = inserted.id as string;
   }

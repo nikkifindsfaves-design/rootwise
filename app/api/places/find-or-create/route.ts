@@ -153,10 +153,16 @@ export async function POST(request: NextRequest) {
         country: fields.country,
       })
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (insErr) {
       return NextResponse.json({ error: insErr.message }, { status: 500 });
+    }
+    if (!inserted) {
+      return NextResponse.json(
+        { error: "Failed to create place" },
+        { status: 500 }
+      );
     }
 
     const newId = (inserted as { id?: string } | null)?.id;
