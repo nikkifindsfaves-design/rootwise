@@ -99,6 +99,34 @@ function parsePlaceFields(raw: unknown): PlaceFields | null {
   };
 }
 
+function parsePlaceDisplayToFields(display: string): PlaceFields | null {
+  const parts = display
+    .trim()
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) {
+    return { township: null, county: null, state: null, country: parts[0]! };
+  }
+  if (parts.length === 2) {
+    return { township: null, county: null, state: parts[0]!, country: parts[1]! };
+  }
+  if (parts.length === 3) {
+    return {
+      township: null,
+      county: parts[0]!,
+      state: parts[1]!,
+      country: parts[2]!,
+    };
+  }
+  const country = parts[parts.length - 1]!;
+  const state = parts[parts.length - 2]!;
+  const county = parts[parts.length - 3]!;
+  const township = parts.slice(0, -3).join(", ");
+  return { township, county, state, country };
+}
+
 async function resolveBirthPlaceIdFromBody(
   supabase: SupabaseClient,
   p: PendingPersonBody
@@ -107,7 +135,13 @@ async function resolveBirthPlaceIdFromBody(
   if (typeof rawId === "string" && rawId.trim() !== "") {
     return { id: rawId.trim(), error: null };
   }
-  const fields = parsePlaceFields(p.birth_place_fields);
+  let fields = parsePlaceFields(p.birth_place_fields);
+  if (fields === null && typeof p.birth_place_fields === "string") {
+    const display = p.birth_place_fields.trim();
+    if (display !== "") {
+      fields = parsePlaceDisplayToFields(display);
+    }
+  }
   if (fields === null) {
     return { id: null, error: null };
   }

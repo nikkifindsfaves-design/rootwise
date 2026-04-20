@@ -36,6 +36,7 @@ type PlaceInputProps = {
   placeholder?: string;
   className?: string;
   style?: CSSProperties;
+  locked?: boolean;
 };
 
 /** PostgREST-safe `ilike` value for `...contains term...` (no user-supplied `%` / `_`). */
@@ -58,6 +59,7 @@ export function PlaceInput({
   placeholder,
   className,
   style: styleProp,
+  locked = false,
 }: PlaceInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const blurCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,6 +77,11 @@ export function PlaceInput({
   }
 
   useEffect(() => {
+    if (locked) {
+      setSuggestions([]);
+      setListOpen(false);
+      return;
+    }
     const term = value.trim();
     const gen = ++fetchGenRef.current;
 
@@ -110,13 +117,15 @@ export function PlaceInput({
     }, 200);
 
     return () => clearTimeout(debounce);
-  }, [value]);
+  }, [locked, value]);
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (locked) return;
     onChange(e.target.value);
   }
 
   function handleInputFocus() {
+    if (locked) return;
     clearBlurCloseTimer();
     if (value.trim().length >= 2 && suggestions.length > 0) {
       setListOpen(true);
@@ -124,6 +133,7 @@ export function PlaceInput({
   }
 
   function handleInputBlur() {
+    if (locked) return;
     clearBlurCloseTimer();
     blurCloseTimerRef.current = setTimeout(() => {
       blurCloseTimerRef.current = null;
@@ -134,6 +144,7 @@ export function PlaceInput({
   }
 
   function pick(row: PlaceRow) {
+    if (locked) return;
     clearBlurCloseTimer();
     const display = formatPlace(row);
     onPlaceSelect({
@@ -170,14 +181,15 @@ export function PlaceInput({
         onFocus={handleInputFocus}
         onBlur={handleInputBlur}
         placeholder={placeholder}
+        readOnly={locked}
         autoComplete="off"
         className={inputClass}
         style={{ ...inputStyle, ...styleProp }}
         aria-autocomplete="list"
         aria-controls={listboxId}
-        aria-expanded={listOpen}
+        aria-expanded={locked ? false : listOpen}
       />
-      {listOpen && suggestions.length > 0 ? (
+      {!locked && listOpen && suggestions.length > 0 ? (
         <ul
           id={listboxId}
           role="listbox"

@@ -272,6 +272,12 @@ type EventRow = {
   event_type: string;
   event_date: string | null;
   event_place_id: string | null;
+  event_place?: {
+    township: string | null;
+    county: string | null;
+    state: string | null;
+    country: string;
+  } | null;
   description: string | null;
   record_id: string | null;
   notes: string | null;
@@ -2117,6 +2123,7 @@ export default function PersonProfilePage() {
     event_type: string;
     event_date: string;
     event_place_id: string | null;
+    event_place_display: string;
     story_short: string;
     story_full: string;
     notes: string;
@@ -2709,7 +2716,7 @@ export default function PersonProfilePage() {
     const { data: eventData, error: eventErr } = await supabase
       .from("events")
       .select(
-        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at"
+        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at, event_place:places!event_place_id(township, county, state, country)"
       )
       .eq("person_id", personId)
       .eq("user_id", user.id)
@@ -2722,9 +2729,29 @@ export default function PersonProfilePage() {
     }
 
     const evs: EventRow[] = (eventData ?? []).map((row) => {
-      const e = row as EventRow & { created_at?: string | null };
+      const e = row as EventRow & {
+        created_at?: string | null;
+        event_place?:
+          | {
+              township: string | null;
+              county: string | null;
+              state: string | null;
+              country: string;
+            }
+          | {
+              township: string | null;
+              county: string | null;
+              state: string | null;
+              country: string;
+            }[]
+          | null;
+      };
+      const ep = e.event_place;
+      const normalizedEventPlace =
+        ep == null ? null : Array.isArray(ep) ? (ep[0] ?? null) : ep;
       return {
         ...e,
+        event_place: normalizedEventPlace,
         created_at: e.created_at ?? null,
       };
     });
@@ -5308,6 +5335,7 @@ export default function PersonProfilePage() {
       event_type: ev.event_type?.trim() || "other",
       event_date: normalizeDateToMMDDYYYY(ev.event_date),
       event_place_id: ev.event_place_id ?? null,
+      event_place_display: ev.event_place ? formatPlace(ev.event_place) : "",
       story_short: ev.story_short?.trim() ?? "",
       story_full: ev.story_full?.trim() ?? "",
       notes: ev.notes?.trim() ?? "",
@@ -5332,13 +5360,29 @@ export default function PersonProfilePage() {
     setEventEditSaving(true);
     setEventEditError(null);
     const d = eventEditDraft;
+    let resolvedEventPlaceId: string | null = d.event_place_id ?? null;
+    if (!resolvedEventPlaceId && d.event_place_display.trim() !== "") {
+      try {
+        const res = await fetch("/api/places/find-or-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display: d.event_place_display.trim() }),
+        });
+        if (res.ok) {
+          const placeData = (await res.json()) as { id?: string };
+          resolvedEventPlaceId = placeData.id ?? null;
+        }
+      } catch {
+        // If place resolution fails, keep existing null behavior.
+      }
+    }
     // Existing row only — never insert/upsert here.
     const { data, error } = await supabase
       .from("events")
       .update({
         event_type: d.event_type.trim() || "other",
         event_date: d.event_date.trim() || null,
-        event_place_id: d.event_place_id ?? null,
+        event_place_id: resolvedEventPlaceId,
         story_short: d.story_short.trim() || null,
         story_full: d.story_full.trim() || null,
         notes: d.notes.trim() || null,
@@ -6974,11 +7018,30 @@ export default function PersonProfilePage() {
                                     >
                                       Event place
                                     </label>
-                                    <input
-                                      id={`ev-place-${ev.id}`}
-                                      type="text"
-                                      value=""
-                                      readOnly
+                                    <PlaceInput
+                                      value={eventEditDraft.event_place_display}
+                                      onChange={(v) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                event_place_display: v,
+                                                event_place_id: null,
+                                              }
+                                            : null
+                                        )
+                                      }
+                                      onPlaceSelect={(place) =>
+                                        setEventEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                event_place_display: place.display,
+                                                event_place_id: place.id,
+                                              }
+                                            : null
+                                        )
+                                      }
                                       style={modalInputStyle}
                                     />
                                   </div>

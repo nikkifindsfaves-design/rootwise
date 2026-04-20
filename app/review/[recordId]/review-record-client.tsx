@@ -285,6 +285,34 @@ function placeFieldsFromAi(
   };
 }
 
+function placeFieldsFromDisplay(display: string): PlaceFields | null {
+  const parts = display
+    .trim()
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) {
+    return { township: null, county: null, state: null, country: parts[0]! };
+  }
+  if (parts.length === 2) {
+    return { township: null, county: null, state: parts[0]!, country: parts[1]! };
+  }
+  if (parts.length === 3) {
+    return {
+      township: null,
+      county: parts[0]!,
+      state: parts[1]!,
+      country: parts[2]!,
+    };
+  }
+  const country = parts[parts.length - 1]!;
+  const state = parts[parts.length - 2]!;
+  const county = parts[parts.length - 3]!;
+  const township = parts.slice(0, -3).join(", ");
+  return { township, county, state, country };
+}
+
 function normalizeGenderForPendingReview(
   raw: string | null | undefined
 ): "Male" | "Female" | "Unknown" {
@@ -308,13 +336,20 @@ function normalizeGenderForPendingReview(
 
 function birthPlaceDisplayForPendingPayload(form: PersonForm): string | null {
   const raw = form.birth_place_fields as PlaceFields | string | null;
-  if (raw == null) return null;
+  if (raw == null) {
+    const fallback = form.birth_place_display.trim();
+    return fallback.length > 0 ? fallback : null;
+  }
   if (typeof raw === "string") {
     const t = raw.trim();
-    return t.length > 0 ? t : null;
+    if (t.length > 0) return t;
+    const fallback = form.birth_place_display.trim();
+    return fallback.length > 0 ? fallback : null;
   }
   const s = formatPlace(raw).trim();
-  return s.length > 0 ? s : null;
+  if (s.length > 0) return s;
+  const fallback = form.birth_place_display.trim();
+  return fallback.length > 0 ? fallback : null;
 }
 
 function toForm(p: AiPerson): PersonForm {
@@ -870,6 +905,7 @@ export default function ReviewRecordClient({
 
   const ft = (fileType ?? "").toLowerCase();
   const isImage = ft.startsWith("image/");
+  const isBirthRecord = getIsBirthRecord(recordTypeLabel);
 
   function updateCard(key: string, next: PersonCardState) {
     setCards((prev) => prev.map((c) => (c.key === key ? next : c)));
@@ -1255,20 +1291,7 @@ export default function ReviewRecordClient({
                     share this fact.
                   </>
                 ) : (
-                  <>
-                    After extraction, edit shared{" "}
-                    <span className="font-medium text-[var(--dg-brown-dark)]">
-                      date
-                    </span>{" "}
-                    and{" "}
-                    <span className="font-medium text-[var(--dg-brown-dark)]">
-                      place
-                    </span>{" "}
-                    once for every linked event. Event type can still differ per
-                    person. Text the model put on each row (roles, etc.) is kept
-                    for saving and story generation but is not edited in this
-                    panel.
-                  </>
+                  <></>
                 )}
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1278,7 +1301,18 @@ export default function ReviewRecordClient({
                   </label>
                   <SmartDateInput
                     className={inputFieldClass}
-                    style={inputFieldStyle}
+                    style={
+                      isBirthRecord
+                        ? {
+                            ...inputFieldStyle,
+                            backgroundColor: "var(--dg-parchment)",
+                            color: "var(--dg-brown-muted)",
+                            borderColor: "var(--dg-brown-border)",
+                            opacity: 0.75,
+                          }
+                        : inputFieldStyle
+                    }
+                    disabled={isBirthRecord}
                     value={sharedEventDetails.eventDate}
                     onChange={(nextDate) =>
                       setSharedEventDetails((s) => ({
@@ -1287,6 +1321,14 @@ export default function ReviewRecordClient({
                       }))
                     }
                   />
+                  {isBirthRecord ? (
+                    <p
+                      className="mt-1 text-xs"
+                      style={{ color: "var(--dg-brown-muted)" }}
+                    >
+                      Derived from birth record below.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="sm:col-span-2">
                   <label className={labelFieldClass} style={labelFieldStyle}>
@@ -1294,13 +1336,25 @@ export default function ReviewRecordClient({
                   </label>
                   <PlaceInput
                     className={inputFieldClass}
-                    style={inputFieldStyle}
+                    style={
+                      isBirthRecord
+                        ? {
+                            ...inputFieldStyle,
+                            backgroundColor: "var(--dg-parchment)",
+                            color: "var(--dg-brown-muted)",
+                            borderColor: "var(--dg-brown-border)",
+                            opacity: 0.75,
+                          }
+                        : inputFieldStyle
+                    }
+                    locked={isBirthRecord}
                     value={sharedEventDetails.event_place_display}
                     onChange={(v) =>
                       setSharedEventDetails((s) => ({
                         ...s,
                         event_place_display: v,
                         event_place_id: null,
+                        event_place_fields: placeFieldsFromDisplay(v),
                       }))
                     }
                     onPlaceSelect={(place) =>
@@ -1312,6 +1366,14 @@ export default function ReviewRecordClient({
                       }))
                     }
                   />
+                  {isBirthRecord ? (
+                    <p
+                      className="mt-1 text-xs"
+                      style={{ color: "var(--dg-brown-muted)" }}
+                    >
+                      Derived from birth record below.
+                    </p>
+                  ) : null}
                 </div>
                 {manualEntryReview ? (
                   <div className="sm:col-span-2">
@@ -1563,6 +1625,12 @@ export default function ReviewRecordClient({
                                   })),
                                 }))
                               );
+                              if (isBirthRecord && isBirthRecordChild) {
+                                setSharedEventDetails((s) => ({
+                                  ...s,
+                                  eventDate: nextDate,
+                                }));
+                              }
                             }}
                           />
                         </div>
@@ -1604,15 +1672,25 @@ export default function ReviewRecordClient({
                                           ...c.form,
                                           birth_place_display: v,
                                           birth_place_id: null,
+                                          birth_place_fields: placeFieldsFromDisplay(v),
                                         }
                                       : c.form,
                                   events: c.events.map((ev) => ({
                                     ...ev,
                                     event_place_display: v,
                                     event_place_id: null,
+                                    event_place_fields: placeFieldsFromDisplay(v),
                                   })),
                                 }))
                               );
+                              if (isBirthRecord && isBirthRecordChild) {
+                                setSharedEventDetails((s) => ({
+                                  ...s,
+                                  event_place_display: v,
+                                  event_place_id: null,
+                                  event_place_fields: placeFieldsFromDisplay(v),
+                                }));
+                              }
                             }}
                             onPlaceSelect={(place) => {
                               setCards((prev) =>
@@ -1633,6 +1711,14 @@ export default function ReviewRecordClient({
                                   })),
                                 }))
                               );
+                              if (isBirthRecord && isBirthRecordChild) {
+                                setSharedEventDetails((s) => ({
+                                  ...s,
+                                  event_place_display: place.display,
+                                  event_place_id: place.id,
+                                  event_place_fields: null,
+                                }));
+                              }
                             }}
                           />
                         </div>
