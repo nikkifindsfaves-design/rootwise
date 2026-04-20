@@ -301,10 +301,6 @@ const TREE_THREAD_STROKE_BRIGHT = 1.8;
 
 /** Roots tree canvas only: branch strokes + hub fill (same dark brown; dual width for slight edge). */
 const TREE_ROOTS_BRANCH_BROWN = "#3a2416";
-const TREE_ROOTS_BRANCH_STROKE_BACK = 7;
-const TREE_ROOTS_BRANCH_STROKE_FRONT = 2.35;
-/** Symbol-space Y of Roots stem bullet / path start (`TreeRootsTopPinGraphic`; thread endpoints use with `TREE_PIN_HEAD_CY`). */
-const TREE_ROOTS_BULLET_SYMBOL_CY = -1.5;
 
 /** Multi-child branch gather point: small hub, smaller than thumbtack head (r≈9 at 22px pin width). */
 const TREE_GATHER_JUNCTION_R = 5.25;
@@ -320,70 +316,6 @@ function treeTopPinGenerationMod(generation: number): number {
   const g = generation === -999 ? 0 : generation;
   const m = g % TREE_TOP_PIN_COLOR_CYCLE;
   return m < 0 ? m + TREE_TOP_PIN_COLOR_CYCLE : m;
-}
-
-/** Roots: dual-stroke browns for top “pin” (varies by generation; buried = muted dead twig). */
-function treeRootsPinBranchStrokes(
-  genMod: number,
-  isBuried: boolean
-): { back: string; front: string } {
-  if (isBuried) {
-    return { back: "#12100c", front: "#241c14" };
-  }
-  const t = genMod / TREE_TOP_PIN_COLOR_CYCLE;
-  const hue = 20 + (genMod % 9) * 2.1;
-  const lBack = 17 + t * 15;
-  const lFront = Math.min(46, lBack + 9);
-  return {
-    back: `hsl(${hue.toFixed(1)} 40% ${lBack.toFixed(1)}%)`,
-    front: `hsl(${hue.toFixed(1)} 32% ${lFront.toFixed(1)}%)`,
-  };
-}
-
-/** Roots theme only: small curved branch + top bullet (thumbtack symbol space; bullet triggers bury/restore). */
-function TreeRootsTopPinGraphic({
-  genMod,
-  isBuried,
-  pinInteractive,
-}: {
-  genMod: number;
-  isBuried: boolean;
-  pinInteractive: boolean;
-}) {
-  const { back, front } = treeRootsPinBranchStrokes(genMod, isBuried);
-  /** +3px upward vs prior start so the twig meets the connector line. */
-  const d = `M 11 ${TREE_ROOTS_BULLET_SYMBOL_CY} C 8.2 9.5 13.8 15.5 11 27`;
-  const bulletCy = TREE_ROOTS_BULLET_SYMBOL_CY;
-  return (
-    <g aria-hidden>
-      <g style={{ pointerEvents: "none" }}>
-        <path
-          d={d}
-          fill="none"
-          stroke={back}
-          strokeWidth={3.18}
-          strokeLinecap="round"
-        />
-        <path
-          d={d}
-          fill="none"
-          stroke={front}
-          strokeWidth={1.26}
-          strokeLinecap="round"
-        />
-      </g>
-      <circle
-        cx={11}
-        cy={bulletCy}
-        r={4.235}
-        fill={isBuried ? "#0a0806" : TREE_ROOTS_BRANCH_BROWN}
-        style={{
-          pointerEvents: pinInteractive ? "all" : "none",
-          cursor: pinInteractive ? "pointer" : "default",
-        }}
-      />
-    </g>
-  );
 }
 
 /** Radial dome stops for a generation cap: warm highlight center → saturated mid → dark rim (L≥14%). */
@@ -846,15 +778,6 @@ function TreePinActionWrap({
   );
 }
 
-function buildParentToChildren(edges: LayoutEdge[]): Map<string, string[]> {
-  const m = new Map<string, string[]>();
-  for (const { parent, child } of edges) {
-    if (!m.has(parent)) m.set(parent, []);
-    m.get(parent)!.push(child);
-  }
-  return m;
-}
-
 function normRelType(t: string): string {
   return t.trim().toLowerCase();
 }
@@ -912,25 +835,6 @@ function buildParentsOfMap(
     parentsOf.get(child)!.add(parent);
   }
   return parentsOf;
-}
-
-/** All strict ancestors of `personId` (not including `personId`), walking upward iteratively. */
-function getAncestors(
-  personId: string,
-  parentsOf: Map<string, Set<string>>
-): Set<string> {
-  const out = new Set<string>();
-  const stack: string[] = [];
-  const roots = parentsOf.get(personId);
-  if (roots) for (const p of roots) stack.push(p);
-  while (stack.length) {
-    const id = stack.pop()!;
-    if (out.has(id)) continue;
-    out.add(id);
-    const pars = parentsOf.get(id);
-    if (pars) for (const p of pars) stack.push(p);
-  }
-  return out;
 }
 
 function buildChildrenOfMap(
@@ -2170,7 +2074,7 @@ export default function TreeCanvas({
     () => new Set()
   );
 
-  const { parentsOfAll, hiddenIds, canBuryIds } = useMemo(() => {
+  const { hiddenIds, canBuryIds } = useMemo(() => {
     const allIds = new Set(mergedPersons.map((p) => p.id));
     const parentsOfAll = buildParentsOfMap(
       parentChildEdges(relationships, allIds)

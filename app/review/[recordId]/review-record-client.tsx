@@ -2,7 +2,7 @@
 
 import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
-import { ALL_EVENT_TYPES, EVENT_TYPES, type EventType } from "@/lib/events/event-types";
+import { ALL_EVENT_TYPES } from "@/lib/events/event-types";
 import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
 import {
   emptySharedEventDetails,
@@ -621,8 +621,7 @@ function parsedShapeFromAiResponse(aiResponse: unknown): AiResponseShape {
 }
 
 function createInitialCardsAndShared(
-  aiResponse: unknown,
-  _recordTypeLabel: string
+  aiResponse: unknown
 ): { cards: PersonCardState[]; shared: SharedEventDetailsState } {
   const parsed = parsedShapeFromAiResponse(aiResponse);
   const cards = buildInitialCards(parsed);
@@ -820,7 +819,7 @@ export default function ReviewRecordClient({
   );
 
   const [cards, setCards] = useState<PersonCardState[]>(() => {
-    const init = createInitialCardsAndShared(aiResponse, recordTypeLabel);
+    const init = createInitialCardsAndShared(aiResponse);
     const p = parsedShapeFromAiResponse(aiResponse);
     console.log("[review] buildInitialCards input", {
       parsed: p,
@@ -832,7 +831,7 @@ export default function ReviewRecordClient({
   });
   const [sharedEventDetails, setSharedEventDetails] =
     useState<SharedEventDetailsState>(() =>
-      createInitialCardsAndShared(aiResponse, recordTypeLabel).shared
+      createInitialCardsAndShared(aiResponse).shared
     );
   const [isRegeneratingStories, setIsRegeneratingStories] = useState(false);
   const [treePersonNameSuggestions, setTreePersonNameSuggestions] = useState<string[]>([]);
@@ -1086,7 +1085,10 @@ export default function ReviewRecordClient({
               }
               return true;
             })
-            .map(({ relatedPeerIndex: _rp, ...rest }) => rest),
+            .map((r) => ({
+              related_name: r.related_name,
+              relationship_type: r.relationship_type,
+            })),
           events: c.events.map((e) => {
             const r = resolveEventDatePlaceNotes(
               e,

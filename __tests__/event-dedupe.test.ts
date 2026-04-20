@@ -49,7 +49,7 @@ function createSupabaseMock(seed?: {
     };
 
     const builder = {
-      select(_columns: string) {
+      select() {
         return builder;
       },
       eq(field: string, value: unknown) {
@@ -82,7 +82,7 @@ function createSupabaseMock(seed?: {
           db.events.push(inserted);
 
           return {
-            select(_columns: string) {
+            select() {
               return {
                 maybeSingle: async () => ({ data: { id: inserted.id }, error: null }),
               };

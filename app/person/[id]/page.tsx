@@ -814,7 +814,7 @@ function headerPolaroidFrameLayerStyle(
  * Dead Gossip — no plate behind the print: only the profile header / page background shows through.
  * Corner mounts and tilt provide the album look.
  */
-function headerScrapbookAlbumPageStyle(_isDark: boolean): CSSProperties {
+function headerScrapbookAlbumPageStyle(): CSSProperties {
   return {
     position: "relative",
     backgroundColor: "transparent",
@@ -1075,7 +1075,7 @@ function profileHeaderPhotoFrameLayerStyle(
 ): CSSProperties {
   switch (photoFrameStyle) {
     case "scrapbook":
-      return headerScrapbookAlbumPageStyle(isDark);
+      return headerScrapbookAlbumPageStyle();
     case "oval":
       return headerRootsPortraitMountStyle();
     case "polaroid":
@@ -1238,27 +1238,6 @@ function IconStar({ className }: { className?: string }) {
   );
 }
 
-function IconTag({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      xmlns="http://www.w3.org/2000/svg"
-      width={16}
-      height={16}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-      <line x1="7" y1="7" x2="7.01" y2="7" />
-    </svg>
-  );
-}
-
 function IconPhoto({ className }: { className?: string }) {
   return (
     <svg
@@ -1279,21 +1258,6 @@ function IconPhoto({ className }: { className?: string }) {
       <path d="M21 16l-5-5L5 19" />
     </svg>
   );
-}
-
-function formatUploadedAt(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return iso;
-  }
 }
 
 function photoYearLabel(photoDateRaw: unknown): string {
@@ -1395,7 +1359,7 @@ function eventsSharingTimelineDedupeKey(rep: EventRow, all: EventRow[]): EventRo
   return all.filter((e) => timelineDedupeKey(e) === k);
 }
 
-function clusterPlacesLine(_cluster: EventCluster): string {
+function clusterPlacesLine(): string {
   return "";
 }
 
@@ -1846,11 +1810,6 @@ function SpouseWithChildrenCollapsible({
 
   const childCountLabel = kids.length === 1 ? "1 child" : `${kids.length} children`;
   const spouseRelMeta = relationshipMetaByPersonId[spouse.id];
-  const spouseName = [spouse.first_name, spouse.middle_name ?? "", spouse.last_name]
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join(" ");
-
   return (
     <div
       className="mb-3 rounded-md border p-2.5"
@@ -2189,9 +2148,7 @@ export default function PersonProfilePage() {
   >(() => new Set());
   const [researchNoteId, setResearchNoteId] = useState<string | null>(null);
   const [researchNoteText, setResearchNoteText] = useState("");
-  const [researchNoteUpdatedAt, setResearchNoteUpdatedAt] = useState<
-    string | null
-  >(null);
+  const [, setResearchNoteUpdatedAt] = useState<string | null>(null);
   const [researchNoteSaving, setResearchNoteSaving] = useState(false);
   const [researchNoteSavedFlash, setResearchNoteSavedFlash] = useState(false);
   const [researchNoteSaveError, setResearchNoteSaveError] = useState<
@@ -4474,62 +4431,6 @@ export default function PersonProfilePage() {
     }, 300);
     return () => window.clearTimeout(h);
   }, [tagModalSearch, tagModalPhoto, searchTagPersons]);
-
-  async function openTagModal(photoRow: Record<string, unknown>) {
-    setTagModalError(null);
-    tagModalSearchSeqRef.current += 1;
-    const photoId = typeof photoRow.id === "string" ? photoRow.id : null;
-    if (!photoId) return;
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setTagModalError("Not signed in.");
-      return;
-    }
-    const { data: tagRows, error: tagErr } = await supabase
-      .from("photo_tags")
-      .select("person_id")
-      .eq("photo_id", photoId)
-      .eq("user_id", user.id);
-    if (tagErr) {
-      setTagModalError(tagErr.message);
-      return;
-    }
-    const personIds = [
-      ...new Set(
-        (tagRows ?? [])
-          .map((r) => (r as { person_id?: string }).person_id)
-          .filter((id): id is string => typeof id === "string" && id !== "")
-      ),
-    ];
-    let tags: PhotoSetupTagPerson[] = [];
-    if (personIds.length > 0) {
-      const { data: people, error: pErr } = await supabase
-        .from("persons")
-        .select("id, first_name, middle_name, last_name")
-        .eq("user_id", user.id)
-        .in("id", personIds);
-      if (pErr) {
-        setTagModalError(pErr.message);
-        return;
-      }
-      tags = (people ?? []).map((row) => {
-        const r = row as PhotoSetupTagPerson;
-        return {
-          id: r.id,
-          first_name: r.first_name,
-          last_name: r.last_name,
-          middle_name: r.middle_name ?? null,
-        };
-      });
-    }
-    setTagModalTags(tags);
-    setTagModalPhoto(photoRow);
-    setTagModalSearch("");
-    setTagModalResults([]);
-  }
 
   async function saveTagModal() {
     if (!tagModalPhoto) return;
@@ -6910,7 +6811,7 @@ export default function PersonProfilePage() {
                       const typ = (ev.event_type || "Event").trim();
                       const mergeClusterStoryFull =
                         firstStoryFullInCluster(mergeCluster);
-                      const placesLine = clusterPlacesLine(mergeCluster);
+                      const placesLine = clusterPlacesLine();
                       const notesOpen = expandedTimelineNotesKeys.has(ev.id);
                       const linkedSources = clusterLinkedSources(
                         mergeCluster,
