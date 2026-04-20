@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { findOrCreatePlace } from "@/lib/utils/places";
 import { NextResponse, type NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -56,11 +57,6 @@ function parseDisplayToFields(display: string): ParsedPlaceFields | null {
   return { township, county, state, country };
 }
 
-/** Escape `%`, `_`, and `\` so `ilike` treats them as literals (exact match). */
-function escapeIlikeLiteral(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
 export async function POST(request: NextRequest) {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -111,69 +107,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let findQuery = supabase.from("places").select("id").limit(1);
-
-    findQuery = findQuery.ilike("country", escapeIlikeLiteral(fields.country));
-
-    if (fields.state != null && fields.state !== "") {
-      findQuery = findQuery.ilike("state", escapeIlikeLiteral(fields.state));
-    } else {
-      findQuery = findQuery.is("state", null);
+    const placeResult = await findOrCreatePlace(supabase, fields);
+    if (!placeResult.ok) {
+      return NextResponse.json({ error: placeResult.message }, { status: 500 });
     }
 
-    if (fields.county != null && fields.county !== "") {
-      findQuery = findQuery.ilike("county", escapeIlikeLiteral(fields.county));
-    } else {
-      findQuery = findQuery.is("county", null);
-    }
-
-    if (fields.township != null && fields.township !== "") {
-      findQuery = findQuery.ilike("township", escapeIlikeLiteral(fields.township));
-    } else {
-      findQuery = findQuery.is("township", null);
-    }
-
-    const { data: found, error: findErr } = await findQuery.maybeSingle();
-
-    if (findErr) {
-      return NextResponse.json({ error: findErr.message }, { status: 500 });
-    }
-
-    const existingId = (found as { id?: string } | null)?.id;
-    if (typeof existingId === "string" && existingId !== "") {
-      return NextResponse.json({ id: existingId }, { status: 200 });
-    }
-
-    const { data: inserted, error: insErr } = await supabase
-      .from("places")
-      .insert({
-        township: fields.township,
-        county: fields.county,
-        state: fields.state,
-        country: fields.country,
-      })
-      .select("id")
-      .maybeSingle();
-
-    if (insErr) {
-      return NextResponse.json({ error: insErr.message }, { status: 500 });
-    }
-    if (!inserted) {
-      return NextResponse.json(
-        { error: "Failed to create place" },
-        { status: 500 }
-      );
-    }
-
-    const newId = (inserted as { id?: string } | null)?.id;
-    if (typeof newId !== "string" || newId === "") {
-      return NextResponse.json(
-        { error: "Failed to create place" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ id: newId }, { status: 200 });
+    return NextResponse.json({ id: placeResult.id }, { status: 200 });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });

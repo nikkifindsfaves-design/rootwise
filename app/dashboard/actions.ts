@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { normalizeGender } from "@/lib/utils/gender";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -19,7 +20,7 @@ export async function addPerson(formData: FormData) {
   const last_name = String(formData.get("last_name") ?? "").trim();
   const birthRaw = formData.get("birth_date");
   const deathRaw = formData.get("death_date");
-  const gender = String(formData.get("gender") ?? "Unknown");
+  const gender = normalizeGender(String(formData.get("gender") ?? "Unknown"));
   const notes = String(formData.get("notes") ?? "").trim();
 
   // Date inputs submit as "YYYY-MM-DD" strings. Keep null when blank.

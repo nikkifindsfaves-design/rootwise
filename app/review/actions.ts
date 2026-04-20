@@ -2,6 +2,7 @@
 
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeGender } from "@/lib/utils/gender";
 import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -192,7 +193,7 @@ export async function insertPerson(
     last_name,
     birth_date: input.birth_date?.trim() || null,
     death_date: input.death_date?.trim() || null,
-    gender: input.gender?.trim() || "Unknown",
+    gender: normalizeGender(input.gender),
     notes: input.notes?.trim() || null,
   });
 
@@ -230,7 +231,7 @@ export async function insertPersonReturningId(
       last_name,
       birth_date: input.birth_date?.trim() || null,
       death_date: input.death_date?.trim() || null,
-      gender: input.gender?.trim() || "Unknown",
+      gender: normalizeGender(input.gender),
       notes: input.notes?.trim() || null,
     })
     .select("id")
@@ -273,7 +274,7 @@ export async function mergePerson(
       last_name,
       birth_date: input.birth_date?.trim() || null,
       death_date: input.death_date?.trim() || null,
-      gender: input.gender?.trim() || "Unknown",
+      gender: normalizeGender(input.gender),
       notes: input.notes?.trim() || null,
     })
     .eq("id", personId)
@@ -503,7 +504,7 @@ export async function acceptPersonCard(params: {
     last_name,
     birth_date: params.form.birth_date?.trim() || null,
     death_date: params.form.death_date?.trim() || null,
-    gender: params.form.gender?.trim() || "Unknown",
+    gender: normalizeGender(params.form.gender),
     notes: params.form.notes?.trim() || null,
   };
 
@@ -531,7 +532,7 @@ export async function acceptPersonCard(params: {
       const formMid = params.form.middle_name?.trim() || null;
       const formBirth = params.form.birth_date?.trim() || null;
       const formDeath = params.form.death_date?.trim() || null;
-      const formGender = params.form.gender?.trim() || "Unknown";
+      const formGender = normalizeGender(params.form.gender);
       const formNotes = params.form.notes?.trim() || null;
 
       updatePayload = {

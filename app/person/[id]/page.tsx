@@ -11,6 +11,7 @@ import {
 } from "@/lib/themes/canvas-themes";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
+import { normalizeGender } from "@/lib/utils/gender";
 import { formatPlace } from "@/lib/utils/places";
 import {
   RootsFramePortrait,
@@ -5264,8 +5265,7 @@ export default function PersonProfilePage() {
         addFamilyCreateDeath.trim() === ""
           ? null
           : addFamilyCreateDeath.trim();
-      const genderTrim = addFamilyCreateGender.trim();
-      const gender = genderTrim === "" ? "Unknown" : genderTrim;
+      const gender = normalizeGender(addFamilyCreateGender);
 
       const { data: newPerson, error: insP } = await supabase
         .from("persons")

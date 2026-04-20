@@ -4,6 +4,7 @@ import { useTheme } from "@/lib/theme/theme-context";
 import type { CanvasThemeId } from "@/lib/themes/canvas-themes";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
+import { normalizeGender } from "@/lib/utils/gender";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -2414,8 +2415,7 @@ export default function TreeCanvas({
       const middle_name = addMiddle.trim() === "" ? null : addMiddle.trim();
       const birth_date = addBirth.trim() === "" ? null : addBirth.trim();
       const death_date = addDeath.trim() === "" ? null : addDeath.trim();
-      const gender =
-        addGender.trim() === "" ? "Unknown" : addGender.trim();
+      const gender = normalizeGender(addGender);
 
       const { data, error } = await supabase
         .from("persons")

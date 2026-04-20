@@ -1,6 +1,7 @@
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
 import { MERGE_FIELDS, type MergeField } from "@/lib/person-merge/merge-fields";
+import { normalizeGender } from "@/lib/utils/gender";
 import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
@@ -180,7 +181,7 @@ function toPersonPayload(p: PendingPersonBody) {
     middle_name: String(p.middle_name ?? "").trim() || null,
     birth_date: String(p.birth_date ?? "").trim() || null,
     death_date: String(p.death_date ?? "").trim() || null,
-    gender: String(p.gender ?? "").trim() || "Unknown",
+    gender: normalizeGender(String(p.gender ?? "")),
     notes: String(p.notes ?? "").trim() || null,
   };
 }

@@ -14,6 +14,7 @@ import {
 } from "@/lib/review/shared-event-merge";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
+import { normalizeGender } from "@/lib/utils/gender";
 import { formatPlace } from "@/lib/utils/places";
 import {
   getIsBirthRecord,
@@ -255,11 +256,6 @@ function relatedPersonDisplayLabel(
   return rel.relatedNameExternal || "—";
 }
 
-/**
- * Must match <select> option values exactly: Male, Female, Unknown.
- * AI often returns lowercase or synonyms; normalize so the dropdown is controlled
- * correctly and localStorage matches what the user sees.
- */
 function placeFromAiField(
   v: PlaceFields | string | null | undefined
 ): string {
@@ -313,27 +309,6 @@ function placeFieldsFromDisplay(display: string): PlaceFields | null {
   return { township, county, state, country };
 }
 
-function normalizeGenderForPendingReview(
-  raw: string | null | undefined
-): "Male" | "Female" | "Unknown" {
-  const s = String(raw ?? "").trim();
-  if (!s) return "Unknown";
-  const n = s.toLowerCase();
-  if (n === "male" || n === "m" || n === "man") return "Male";
-  if (n === "female" || n === "f" || n === "woman") return "Female";
-  if (
-    n === "unknown" ||
-    n === "other" ||
-    n === "u" ||
-    n === "nonbinary" ||
-    n === "non-binary"
-  ) {
-    return "Unknown";
-  }
-  if (s === "Male" || s === "Female" || s === "Unknown") return s;
-  return "Unknown";
-}
-
 function birthPlaceDisplayForPendingPayload(form: PersonForm): string | null {
   const raw = form.birth_place_fields as PlaceFields | string | null;
   if (raw == null) {
@@ -369,7 +344,7 @@ function toForm(p: AiPerson): PersonForm {
     marital_status: p.marital_status ?? "",
     cause_of_death: p.cause_of_death ?? "",
     surviving_spouse: p.surviving_spouse ?? "",
-    gender: normalizeGenderForPendingReview(p.gender),
+    gender: normalizeGender(p.gender),
     notes: p.notes ?? "",
     military_branch: p.military_branch ?? "",
     service_number: p.service_number ?? "",
@@ -1089,7 +1064,7 @@ export default function ReviewRecordClient({
           death_place_id: c.form.death_place_id,
           death_place_fields: c.form.death_place_fields,
           death_place_display: c.form.death_place_display.trim() || null,
-          gender: normalizeGenderForPendingReview(c.form.gender),
+          gender: normalizeGender(c.form.gender),
           notes: c.form.notes.trim() || null,
           occupation: c.form.occupation.trim() || null,
           military_branch: c.form.military_branch.trim() || null,
