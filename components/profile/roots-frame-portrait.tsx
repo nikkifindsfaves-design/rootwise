@@ -7,20 +7,21 @@ const VB_W = 315;
 const VB_H = 225;
 
 /**
- * Photo window bounds from `public/Circle Frame 2.svg` clipPath `693c287f6c`:
- * M 118 68.445312 L 212.4375 68.445312 L 212.4375 187.695312 L 118 187.695312 Z
+ * Photo window bounds from `public/New Circle Frame.svg` clipPath `5baf1d4912`:
+ * M 120.121094 64 L 195 64 L 195 170 L 120.121094 170 Z
  * Portrait is clipped to the circle inscribed in this rect.
  */
-const APERTURE_LEFT = 118;
-const APERTURE_TOP = 68.445312;
-const APERTURE_W = 212.4375 - APERTURE_LEFT;
-const APERTURE_H = 187.695312 - APERTURE_TOP;
+const APERTURE_LEFT = 120.121094;
+const APERTURE_TOP = 64;
+const APERTURE_W = 195 - APERTURE_LEFT;
+const APERTURE_H = 170 - APERTURE_TOP;
 const CIRCLE_CX = APERTURE_LEFT + APERTURE_W / 2;
 const CIRCLE_CY = APERTURE_TOP + APERTURE_H / 2;
 const CIRCLE_R = Math.min(APERTURE_W, APERTURE_H) / 2;
 
 const PHOTO_W = 128;
 const PHOTO_H = 160;
+const ROOTS_FRAME_VERTICAL_SHIFT_PX = 20;
 
 /**
  * Roots / oval theme — how the **standard polaroid print** (children) sits inside the
@@ -33,7 +34,7 @@ const ROOTS_OVAL_PHOTO_FILL = 0.75;
  * Moves the **whole circular hole** (mat + photo) down relative to the SVG frame (px).
  * Use this to align the aperture with the artwork; keeps crop geometry unchanged.
  */
-const ROOTS_OVAL_HOLE_VERTICAL_OFFSET_PX = 7;
+const ROOTS_OVAL_HOLE_VERTICAL_OFFSET_PX = 0;
 
 /**
  * Extra vertical nudge on the **print wrapper** inside the hole (px). Prefer
@@ -58,7 +59,7 @@ const ROOTS_FRAME_TARGET_DISPLAY_H =
 const ROOTS_FRAME_TARGET_DISPLAY_W =
   (ROOTS_FRAME_TARGET_DISPLAY_H * VB_W) / VB_H;
 
-const FRAME_SRC = "/Circle%20Frame%202.svg";
+const FRAME_SRC = "/New%20Circle%20Frame.svg";
 
 export const ROOTS_FRAME_DISPLAY_H = ROOTS_FRAME_TARGET_DISPLAY_H;
 export const ROOTS_FRAME_DISPLAY_W = ROOTS_FRAME_TARGET_DISPLAY_W;
@@ -95,24 +96,9 @@ export function RootsFramePortrait({ isDark, children }: RootsFramePortraitProps
     position: "relative",
     width: displayW,
     height: displayH,
+    transform: `translateY(${ROOTS_FRAME_VERTICAL_SHIFT_PX}px)`,
     flexShrink: 0,
     /** Let clicks reach page chrome (nav links) outside the circular photo aperture. */
-    pointerEvents: "none",
-  };
-
-  const holeMatStyle: CSSProperties = {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    display: "block",
-    boxSizing: "border-box",
-    borderRadius: "50%",
-    overflow: "hidden",
-    zIndex: 0,
-    backgroundColor: isDark
-      ? "color-mix(in srgb, var(--dg-parchment) 42%, var(--dg-bg-main) 58%)"
-      : "rgb(245 238 226)",
     pointerEvents: "none",
   };
 
@@ -131,9 +117,6 @@ export function RootsFramePortrait({ isDark, children }: RootsFramePortraitProps
     transform: "translateZ(0)",
     /** Mat / empty ring must not steal clicks from the portrait button or the nav. */
     pointerEvents: "none",
-    boxShadow: isDark
-      ? "inset 0 11px 28px rgb(0 0 0 / 0.3), inset 0 -11px 28px rgb(0 0 0 / 0.3)"
-      : "inset 0 0 10px rgba(0,0,0,0.1)",
   };
 
   const centerStageStyle: CSSProperties = {
@@ -184,7 +167,6 @@ export function RootsFramePortrait({ isDark, children }: RootsFramePortraitProps
   return (
     <div data-dg-roots-frame-root="" style={rootStyle}>
       <div data-dg-roots-hole="" style={holeStyle}>
-        <div data-dg-roots-hole-mat="" style={holeMatStyle} aria-hidden />
         <div data-dg-roots-center-stage="" style={centerStageStyle}>
           <div data-dg-roots-photo-circle="" style={photoCircleStyle}>
             <div data-dg-roots-photo-inner="" style={photoInnerStyle}>

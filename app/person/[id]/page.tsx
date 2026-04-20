@@ -858,6 +858,12 @@ const SCRAPBOOK_CORNER_SHADOW_LIGHT = [
 
 const SCRAPBOOK_CORNER_SHADOW_DARK =
   "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.05)" as const;
+const SCRAPBOOK_TAPE_BG = "rgba(246, 236, 184, 0.34)" as const;
+const SCRAPBOOK_TAPE_STROKE = "rgba(186, 164, 106, 0.44)" as const;
+const SCRAPBOOK_TAPE_HIGHLIGHT = "rgba(255, 253, 238, 0.16)" as const;
+const HEADER_SCRAPBOOK_TAPE_H = 17;
+const HEADER_SCRAPBOOK_TAPE_TOP_OFFSET = -8;
+const HEADER_SCRAPBOOK_TAPE_BOTTOM_OFFSET = -9;
 
 function subscribeHtmlDarkClass(cb: () => void) {
   const el = document.documentElement;
@@ -971,6 +977,79 @@ function HeaderScrapbookCornerTabs() {
         }}
         aria-hidden
       />
+    </>
+  );
+}
+
+function scrapbookTapePath(
+  width: number,
+  height: number,
+  toothDepth = 1.2,
+  teethPerEdge = 4
+): string {
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const step = height / (teethPerEdge * 2);
+  const left: string[] = [];
+  const right: string[] = [];
+  for (let i = 1; i < teethPerEdge * 2; i += 1) {
+    const y = -halfH + step * i;
+    left.push(`${i % 2 === 0 ? -halfW : -halfW + toothDepth} ${y}`);
+    right.push(`${i % 2 === 0 ? halfW : halfW - toothDepth} ${y}`);
+  }
+  return [
+    `M ${-halfW} ${-halfH}`,
+    `L ${halfW} ${-halfH}`,
+    ...right.map((pt) => `L ${pt}`),
+    `L ${halfW} ${halfH}`,
+    `L ${-halfW} ${halfH}`,
+    ...left.reverse().map((pt) => `L ${pt}`),
+    "Z",
+  ].join(" ");
+}
+
+function HeaderScrapbookTapeStrips() {
+  const tapeW = Math.round(HEADER_POLAROID_IMG_W * 0.75);
+  const outer = scrapbookTapePath(tapeW, HEADER_SCRAPBOOK_TAPE_H);
+  const inner = scrapbookTapePath(tapeW - 2, HEADER_SCRAPBOOK_TAPE_H - 2, 0.9);
+  return (
+    <>
+      <svg
+        width={tapeW}
+        height={HEADER_SCRAPBOOK_TAPE_H}
+        viewBox={`${-tapeW / 2} ${-HEADER_SCRAPBOOK_TAPE_H / 2} ${tapeW} ${HEADER_SCRAPBOOK_TAPE_H}`}
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: HEADER_SCRAPBOOK_TAPE_TOP_OFFSET,
+          transform: "translateX(-50%)",
+          overflow: "visible",
+          pointerEvents: "none",
+          zIndex: 25,
+        }}
+      >
+        <path d={outer} fill={SCRAPBOOK_TAPE_BG} stroke={SCRAPBOOK_TAPE_STROKE} strokeWidth={0.9} />
+        <path d={inner} fill={SCRAPBOOK_TAPE_HIGHLIGHT} />
+      </svg>
+      <svg
+        width={tapeW}
+        height={HEADER_SCRAPBOOK_TAPE_H}
+        viewBox={`${-tapeW / 2} ${-HEADER_SCRAPBOOK_TAPE_H / 2} ${tapeW} ${HEADER_SCRAPBOOK_TAPE_H}`}
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: "50%",
+          bottom: HEADER_SCRAPBOOK_TAPE_BOTTOM_OFFSET,
+          transform: "translateX(-50%)",
+          overflow: "visible",
+          pointerEvents: "none",
+          zIndex: 25,
+        }}
+      >
+        <path d={outer} fill={SCRAPBOOK_TAPE_BG} stroke={SCRAPBOOK_TAPE_STROKE} strokeWidth={0.9} />
+        <path d={inner} fill={SCRAPBOOK_TAPE_HIGHLIGHT} />
+      </svg>
     </>
   );
 }
@@ -6247,7 +6326,11 @@ export default function PersonProfilePage() {
                             </div>
                           </div>
                         </div>
-                        <HeaderScrapbookCornerTabs />
+                        {profileCanvasTheme.id === "dead_gossip" ? (
+                          <HeaderScrapbookTapeStrips />
+                        ) : (
+                          <HeaderScrapbookCornerTabs />
+                        )}
                       </div>
                     </div>
                   ) : profileCanvasTheme.photoFrameStyle === "oval" ? (
@@ -6446,7 +6529,11 @@ export default function PersonProfilePage() {
                                   </div>
                                 </div>
                               </div>
-                              <HeaderScrapbookCornerTabs />
+                              {profileCanvasTheme.id === "dead_gossip" ? (
+                                <HeaderScrapbookTapeStrips />
+                              ) : (
+                                <HeaderScrapbookCornerTabs />
+                              )}
                             </div>
                           </div>
                         ) : profileCanvasTheme.photoFrameStyle === "oval" ? (
