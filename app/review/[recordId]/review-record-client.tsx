@@ -14,7 +14,7 @@ import {
 } from "@/lib/review/shared-event-merge";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
-import { normalizeGender } from "@/lib/utils/gender";
+import { GENDER_OPTIONS, normalizeGender } from "@/lib/utils/gender";
 import { formatPlace } from "@/lib/utils/places";
 import {
   getIsBirthRecord,
@@ -1748,9 +1748,11 @@ export default function ReviewRecordClient({
                               })
                             }
                           >
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Unknown">Unknown</option>
+                            {GENDER_OPTIONS.map((gender) => (
+                              <option key={gender} value={gender}>
+                                {gender}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         )}

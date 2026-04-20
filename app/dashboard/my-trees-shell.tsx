@@ -2,6 +2,12 @@
 
 import { useTheme } from "@/lib/theme/theme-context";
 import { createClient } from "@/lib/supabase/client";
+import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
+import {
+  CANVAS_THEME_OPTIONS,
+  DEFAULT_CANVAS_THEME_ID,
+  type CanvasThemeId,
+} from "@/lib/themes/canvas-themes";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -67,29 +73,7 @@ const VIBES = [
   },
 ] as const;
 
-const CANVAS_THEMES = [
-  {
-    id: "string",
-    name: "String",
-    description: "Default canvas theme.",
-    example: "Straightforward layout—names and lines stay easy to scan.",
-  },
-  {
-    id: "dead_gossip",
-    name: "Dead Gossip",
-    description: "Ledger and letterpress tone.",
-    example: "Ink, margins, and quiet drama fit for a family chronicle.",
-  },
-  {
-    id: "roots",
-    name: "Roots",
-    description: "Grounded, organic palette.",
-    example: "Earth tones that feel like soil, bark, and old photographs.",
-  },
-] as const;
-
 type VibeId = (typeof VIBES)[number]["id"];
-type CanvasThemeId = (typeof CANVAS_THEMES)[number]["id"];
 
 function vibeDisplayName(vibeId: string): string {
   const v = VIBES.find((x) => x.id === vibeId);
@@ -98,16 +82,16 @@ function vibeDisplayName(vibeId: string): string {
 
 function toVibeId(raw: string): VibeId {
   const v = VIBES.find((x) => x.id === raw);
-  return v ? v.id : "classic";
+  return v ? v.id : DEFAULT_VIBE;
 }
 
 function toCanvasThemeId(raw: string): CanvasThemeId {
-  const t = CANVAS_THEMES.find((x) => x.id === raw);
-  return t ? t.id : "string";
+  const t = CANVAS_THEME_OPTIONS.find((x) => x.id === raw);
+  return t ? t.id : DEFAULT_CANVAS_THEME_ID;
 }
 
 function canvasThemeDisplayName(themeId: string): string {
-  const t = CANVAS_THEMES.find((x) => x.id === themeId);
+  const t = CANVAS_THEME_OPTIONS.find((x) => x.id === themeId);
   return t?.name ?? "String";
 }
 
@@ -277,7 +261,7 @@ export default function MyTreesShell({
     setPendingTreeName(name);
     setVibeModalMode("create");
     setSelectedVibe(null);
-    setSelectedCanvasTheme("string");
+    setSelectedCanvasTheme(DEFAULT_CANVAS_THEME_ID);
     setHoveredCanvasThemePick(null);
     setVibeModalOpen(true);
   }
@@ -301,7 +285,7 @@ export default function MyTreesShell({
           user_id: user.id,
           name: pendingTreeName,
           vibe: selectedVibe,
-          canvas_theme: selectedCanvasTheme ?? "string",
+          canvas_theme: selectedCanvasTheme ?? DEFAULT_CANVAS_THEME_ID,
         })
         .select("id")
         .maybeSingle();
@@ -951,7 +935,7 @@ export default function MyTreesShell({
                   Choose how your family tree looks on the canvas.
                 </p>
                 <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  {CANVAS_THEMES.map((ct) => {
+                  {CANVAS_THEME_OPTIONS.map((ct) => {
                     const isSelected = selectedCanvasTheme === ct.id;
                     const isHovered = hoveredCanvasThemePick === ct.id;
                     return (
@@ -1097,7 +1081,7 @@ export default function MyTreesShell({
             </p>
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {CANVAS_THEMES.map((ct) => {
+              {CANVAS_THEME_OPTIONS.map((ct) => {
                 const isSelected = selectedCanvasTheme === ct.id;
                 const isHovered = hoveredCanvasThemePick === ct.id;
                 return (

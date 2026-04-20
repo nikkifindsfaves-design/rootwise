@@ -1,5 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
-import { isCanvasThemeId, type CanvasThemeId } from "@/lib/themes/canvas-themes";
+import {
+  DEFAULT_CANVAS_THEME_ID,
+  isCanvasThemeId,
+  type CanvasThemeId,
+} from "@/lib/themes/canvas-themes";
 import { redirect } from "next/navigation";
 import TreeCanvas, {
   type TreeCanvasPerson,
@@ -44,7 +48,7 @@ export default async function TreeCanvasPage({
   const rawCanvasTheme = (tree as { canvas_theme?: string | null }).canvas_theme;
   const canvasTheme: CanvasThemeId = isCanvasThemeId(rawCanvasTheme)
     ? rawCanvasTheme
-    : "string";
+    : DEFAULT_CANVAS_THEME_ID;
 
   const { data: personsRows, error: personsError } = await supabase
     .from("persons")

@@ -2,6 +2,12 @@
 
 import { useTheme } from "@/lib/theme/theme-context";
 import { createClient } from "@/lib/supabase/client";
+import {
+  addUniqueTaggedPerson,
+  createUploadedPhotoRecord,
+  displayTagPersonName,
+  removeTaggedPersonById,
+} from "@/lib/utils/photo-upload-tagging";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -33,49 +39,6 @@ type UploadTagPerson = {
   last_name: string;
   middle_name: string | null;
 };
-
-function extFromImageFile(file: File): string {
-  const t = (file.type || "").toLowerCase();
-  if (t === "image/jpeg" || t === "image/jpg") return "jpg";
-  if (t === "image/png") return "png";
-  if (t === "image/webp") return "webp";
-  if (t === "image/gif") return "gif";
-  const n = file.name.toLowerCase();
-  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "jpg";
-  if (n.endsWith(".png")) return "png";
-  if (n.endsWith(".webp")) return "webp";
-  if (n.endsWith(".gif")) return "gif";
-  return "jpg";
-}
-
-const getNaturalSize = (file: File): Promise<{ w: number; h: number }> => {
-  return new Promise((resolve) => {
-    try {
-      const url = URL.createObjectURL(file);
-      const img = new window.Image();
-      img.onload = () => {
-        const w = img.naturalWidth;
-        const h = img.naturalHeight;
-        URL.revokeObjectURL(url);
-        resolve({ w, h });
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve({ w: 0, h: 0 });
-      };
-      img.src = url;
-    } catch {
-      resolve({ w: 0, h: 0 });
-    }
-  });
-};
-
-function displayTagName(p: UploadTagPerson): string {
-  return [p.first_name, p.middle_name ?? "", p.last_name]
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join(" ");
-}
 
 export default function DeadGossipShell({
   personCount,
@@ -245,42 +208,19 @@ export default function DeadGossipShell({
         return;
       }
 
-      const firstTagId = photoUploadTags[0].id;
-      const { w: naturalWidth, h: naturalHeight } =
-        await getNaturalSize(photoUploadFile);
-
-      const ext = extFromImageFile(photoUploadFile);
-      const path = `${user.id}/${firstTagId}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("photos")
-        .upload(path, photoUploadFile, {
-          contentType: photoUploadFile.type || `image/${ext}`,
-          upsert: false,
-        });
-      if (upErr) {
-        setPhotoUploadError(upErr.message);
-        return;
-      }
-      const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
-      const file_url = pub.publicUrl;
       const dateTrim = photoUploadDate.trim();
-      const { data: newPhoto, error: insErr } = await supabase
-        .from("photos")
-        .insert({
-          user_id: user.id,
-          file_url,
-          photo_date: dateTrim === "" ? null : dateTrim,
-          ...(naturalWidth > 0 && naturalHeight > 0
-            ? { natural_width: naturalWidth, natural_height: naturalHeight }
-            : {}),
-        })
-        .select("id")
-        .maybeSingle();
-      if (insErr || !newPhoto) {
-        setPhotoUploadError(insErr?.message ?? "Could not save photo.");
+      const uploaded = await createUploadedPhotoRecord({
+        supabase,
+        userId: user.id,
+        file: photoUploadFile,
+        primaryPersonId: photoUploadTags[0].id,
+        photoDate: dateTrim === "" ? null : dateTrim,
+      });
+      if (!uploaded.ok) {
+        setPhotoUploadError(uploaded.error);
         return;
       }
-      const photoId = (newPhoto as { id: string }).id;
+      const photoId = uploaded.photoId;
       const tagRows = [
         {
         photo_id: photoId,
@@ -683,14 +623,14 @@ export default function DeadGossipShell({
                         }}
                         onClick={() => {
                           setPhotoUploadTags((prev) =>
-                            prev.some((t) => t.id === p.id) ? prev : [...prev, p]
+                            addUniqueTaggedPerson(prev, p)
                           );
                           setPhotoUploadTagSearch("");
                           setPhotoUploadTagResults([]);
                           photoUploadSearchSeqRef.current += 1;
                         }}
                       >
-                        {displayTagName(p)}
+                        {displayTagPersonName(p)}
                       </button>
                     </li>
                   ))}
@@ -709,15 +649,15 @@ export default function DeadGossipShell({
                         color: colors.brownDark,
                       }}
                     >
-                      {displayTagName(p)}
+                      {displayTagPersonName(p)}
                       <button
                         type="button"
                         className="ml-0.5 rounded px-1 leading-none"
                         style={{ color: colors.brownMid }}
-                        aria-label={`Remove ${displayTagName(p)}`}
+                        aria-label={`Remove ${displayTagPersonName(p)}`}
                         onClick={() =>
                           setPhotoUploadTags((prev) =>
-                            prev.filter((t) => t.id !== p.id)
+                            removeTaggedPersonById(prev, p.id)
                           )
                         }
                       >

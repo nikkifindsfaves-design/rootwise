@@ -6,6 +6,33 @@
 export const CANVAS_THEME_IDS = ["string", "dead_gossip", "roots"] as const;
 
 export type CanvasThemeId = (typeof CANVAS_THEME_IDS)[number];
+export const DEFAULT_CANVAS_THEME_ID: CanvasThemeId = CANVAS_THEME_IDS[0];
+export const CANVAS_THEME_ID = {
+  STRING: CANVAS_THEME_IDS[0],
+  DEAD_GOSSIP: CANVAS_THEME_IDS[1],
+  ROOTS: CANVAS_THEME_IDS[2],
+} as const;
+
+export const CANVAS_THEME_OPTIONS = [
+  {
+    id: CANVAS_THEME_ID.STRING,
+    name: "String",
+    description: "Default canvas theme.",
+    example: "Straightforward layout—names and lines stay easy to scan.",
+  },
+  {
+    id: CANVAS_THEME_ID.DEAD_GOSSIP,
+    name: "Dead Gossip",
+    description: "Ledger and letterpress tone.",
+    example: "Ink, margins, and quiet drama fit for a family chronicle.",
+  },
+  {
+    id: CANVAS_THEME_ID.ROOTS,
+    name: "Roots",
+    description: "Grounded, organic palette.",
+    example: "Earth tones that feel like soil, bark, and old photographs.",
+  },
+] as const;
 
 export type PhotoFrameStyle = "polaroid" | "scrapbook" | "oval";
 
@@ -29,8 +56,8 @@ export type CanvasThemeDefinition = CanvasThemeProperties & {
 };
 
 export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
-  string: {
-    id: "string",
+  [CANVAS_THEME_ID.STRING]: {
+    id: CANVAS_THEME_ID.STRING,
     familyPanelTitle: "The Usual Suspects",
     timelineHeader: "The Case File",
     newEventButton: "+ New Intel",
@@ -38,8 +65,8 @@ export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
     diedLabel: "CASE CLOSED",
     photoFrameStyle: "polaroid",
   },
-  dead_gossip: {
-    id: "dead_gossip",
+  [CANVAS_THEME_ID.DEAD_GOSSIP]: {
+    id: CANVAS_THEME_ID.DEAD_GOSSIP,
     familyPanelTitle: "The Inner Circle",
     timelineHeader: "The Tea",
     newEventButton: "+ Spill",
@@ -47,8 +74,8 @@ export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
     diedLabel: "CHECKED OUT",
     photoFrameStyle: "scrapbook",
   },
-  roots: {
-    id: "roots",
+  [CANVAS_THEME_ID.ROOTS]: {
+    id: CANVAS_THEME_ID.ROOTS,
     familyPanelTitle: "The Branch",
     timelineHeader: "The Chronicle",
     newEventButton: "+ Record It",
@@ -59,9 +86,5 @@ export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
 };
 
 export function isCanvasThemeId(value: string | null | undefined): value is CanvasThemeId {
-  return (
-    value === "string" ||
-    value === "dead_gossip" ||
-    value === "roots"
-  );
+  return !!value && (CANVAS_THEME_IDS as readonly string[]).includes(value);
 }

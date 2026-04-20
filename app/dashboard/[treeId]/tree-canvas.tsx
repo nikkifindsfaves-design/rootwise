@@ -1,10 +1,19 @@
 "use client";
 
 import { useTheme } from "@/lib/theme/theme-context";
-import type { CanvasThemeId } from "@/lib/themes/canvas-themes";
+import {
+  CANVAS_THEME_ID,
+  type CanvasThemeId,
+} from "@/lib/themes/canvas-themes";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
-import { normalizeGender } from "@/lib/utils/gender";
+import { GENDER_OPTIONS, normalizeGender } from "@/lib/utils/gender";
+import {
+  createUploadedPhotoRecord,
+  getNaturalSize,
+  removeTaggedPersonById,
+  toggleTaggedPerson,
+} from "@/lib/utils/photo-upload-tagging";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -360,10 +369,10 @@ function treeCardPinPointAfterVisualTransform(
 
 /** Local Y for thread endpoints (Roots: aligned to leaf apex; stem uses extra nudge separately). */
 function treeCardPinTopLocalYForThreads(canvasTheme: CanvasThemeId): number {
-  if (canvasTheme === "dead_gossip") {
+  if (canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP) {
     return -TREE_PIN_HEAD_OFFSET_Y + TREE_DEAD_GOSSIP_TOP_ANCHOR_SHIFT_Y;
   }
-  if (canvasTheme !== "roots") return -TREE_PIN_HEAD_OFFSET_Y;
+  if (canvasTheme !== CANVAS_THEME_ID.ROOTS) return -TREE_PIN_HEAD_OFFSET_Y;
   return (
     (LAYOUT_NODE_H - TREE_ROOTS_CARD_SURFACE_H) / 2 - TREE_PIN_HEAD_OFFSET_Y
   );
@@ -373,7 +382,7 @@ function treeCardPinTopLocalYForThreads(canvasTheme: CanvasThemeId): number {
 const TREE_ROOTS_STEM_EXTRA_LOCAL_Y = 20;
 
 function treeCardPinTopLocalYForStemVisual(canvasTheme: CanvasThemeId): number {
-  if (canvasTheme !== "roots") return treeCardPinTopLocalYForThreads(canvasTheme);
+  if (canvasTheme !== CANVAS_THEME_ID.ROOTS) return treeCardPinTopLocalYForThreads(canvasTheme);
   return (
     treeCardPinTopLocalYForThreads(canvasTheme) + TREE_ROOTS_STEM_EXTRA_LOCAL_Y
   );
@@ -408,7 +417,7 @@ function treeCardPinTopForThreadSegments(
   pos: { x: number; y: number; id: string },
   canvasTheme: CanvasThemeId
 ): { x: number; y: number } {
-  if (canvasTheme !== "roots") {
+  if (canvasTheme !== CANVAS_THEME_ID.ROOTS) {
     return treeCardPinTopCenterForThreads(pos, canvasTheme);
   }
   const stem = treeCardPinTopCenterForStemVisual(pos, canvasTheme);
@@ -429,7 +438,7 @@ function treeCardPinBottomCenter(
   y: number;
 } {
   const tackYFromTop =
-    canvasTheme === "dead_gossip"
+    canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
       ? TREE_COPPER_TACK_CENTER_Y_FROM_TOP_DEAD_GOSSIP
       : TREE_COPPER_TACK_CENTER_Y_FROM_TOP;
   return treeCardPinPointAfterVisualTransform(
@@ -1660,20 +1669,6 @@ function treeCardYearRange(p: TreeCanvasPerson): string {
   return `– ${d}`;
 }
 
-function extFromImageFile(file: File): string {
-  const t = (file.type || "").toLowerCase();
-  if (t === "image/jpeg" || t === "image/jpg") return "jpg";
-  if (t === "image/png") return "png";
-  if (t === "image/webp") return "webp";
-  if (t === "image/gif") return "gif";
-  const n = file.name.toLowerCase();
-  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "jpg";
-  if (n.endsWith(".png")) return "png";
-  if (n.endsWith(".webp")) return "webp";
-  if (n.endsWith(".gif")) return "gif";
-  return "jpg";
-}
-
 function isAllowedTreePhotoFile(file: File): boolean {
   const t = (file.type || "").toLowerCase();
   if (
@@ -1688,28 +1683,6 @@ function isAllowedTreePhotoFile(file: File): boolean {
   const n = file.name.toLowerCase();
   return /\.(jpe?g|png|webp|gif)$/i.test(n);
 }
-
-const getNaturalSize = (file: File): Promise<{ w: number; h: number }> => {
-  return new Promise((resolve) => {
-    try {
-      const url = URL.createObjectURL(file);
-      const img = new window.Image();
-      img.onload = () => {
-        const w = img.naturalWidth;
-        const h = img.naturalHeight;
-        URL.revokeObjectURL(url);
-        resolve({ w, h });
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve({ w: 0, h: 0 });
-      };
-      img.src = url;
-    } catch {
-      resolve({ w: 0, h: 0 });
-    }
-  });
-};
 
 type ClientPrimaryPhotoRow = {
   person_id: string;
@@ -2024,9 +1997,9 @@ export default function TreeCanvas({
   const { theme, toggleTheme } = useTheme();
   const treeSurfaceStyle = useMemo(() => {
     const isDark = theme === "dark";
-    return canvasTheme === "roots"
+    return canvasTheme === CANVAS_THEME_ID.ROOTS
       ? treeCanvasRootsSurfaceStyle(isDark)
-      : canvasTheme === "dead_gossip"
+      : canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
         ? treeCanvasDeadGossipSurfaceStyle(isDark)
         : treeCanvasCorkboardSurfaceStyle(isDark);
   }, [canvasTheme, theme]);
@@ -2526,45 +2499,15 @@ export default function TreeCanvas({
         return;
       }
 
-      const { w: naturalWidth, h: naturalHeight } =
-        await getNaturalSize(photoFile);
-      const ext = extFromImageFile(photoFile);
-      const path = `${user.id}/${primaryPersonId}/${crypto.randomUUID()}.${ext}`;
-
-      const { error: upErr } = await supabase.storage
-        .from("photos")
-        .upload(path, photoFile, {
-          contentType: photoFile.type || `image/${ext}`,
-          upsert: false,
-        });
-      if (upErr) {
-        setPhotoUploadError(upErr.message);
-        return;
-      }
-
-      const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
-      const file_url = pub.publicUrl;
-
-      const { data: insertedPhoto, error: insErr } = await supabase
-        .from("photos")
-        .insert({
-          user_id: user.id,
-          file_url,
-          ...(naturalWidth > 0 && naturalHeight > 0
-            ? { natural_width: naturalWidth, natural_height: naturalHeight }
-            : {}),
-        })
-        .select("id")
-        .maybeSingle();
-
-      if (insErr) {
-        await supabase.storage.from("photos").remove([path]);
-        setPhotoUploadError(insErr.message);
-        return;
-      }
-      if (!insertedPhoto) {
-        await supabase.storage.from("photos").remove([path]);
-        setPhotoUploadError("Could not save photo.");
+      const uploaded = await createUploadedPhotoRecord({
+        supabase,
+        userId: user.id,
+        file: photoFile,
+        primaryPersonId,
+        cleanupUploadOnInsertError: true,
+      });
+      if (!uploaded.ok) {
+        setPhotoUploadError(uploaded.error);
         return;
       }
       for (const selectedPerson of photoSelectedPersons) {
@@ -2577,7 +2520,7 @@ export default function TreeCanvas({
           .limit(1);
         const isPrimary = !existingPrimaryTags || existingPrimaryTags.length === 0;
         const { error: tagErr } = await supabase.from("photo_tags").insert({
-          photo_id: insertedPhoto.id,
+          photo_id: uploaded.photoId,
           person_id: selectedPerson.id,
           user_id: user.id,
           is_primary: isPrimary,
@@ -2586,7 +2529,7 @@ export default function TreeCanvas({
           crop_zoom: cropZoom,
         });
         if (tagErr) {
-          await supabase.storage.from("photos").remove([path]);
+          await supabase.storage.from("photos").remove([uploaded.path]);
           setPhotoUploadError(tagErr.message);
           return;
         }
@@ -3338,9 +3281,9 @@ export default function TreeCanvas({
                 <svg
                   className={
                     "absolute left-0 top-0 " +
-                    (canvasTheme === "roots"
+                    (canvasTheme === CANVAS_THEME_ID.ROOTS
                       ? "pointer-events-none z-[3]"
-                      : canvasTheme === "dead_gossip"
+                      : canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
                         ? "pointer-events-none z-[4]"
                         : "pointer-events-none z-[2]")
                   }
@@ -3505,7 +3448,7 @@ export default function TreeCanvas({
                         fill="#000000"
                       />
                     </symbol>
-                    {canvasTheme === "roots" ? (
+                    {canvasTheme === CANVAS_THEME_ID.ROOTS ? (
                       <filter
                         id="dg-tree-roots-branch-displace"
                         filterUnits="userSpaceOnUse"
@@ -3537,7 +3480,7 @@ export default function TreeCanvas({
                         />
                       </filter>
                     ) : null}
-                    {canvasTheme === "dead_gossip" ? (
+                    {canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP ? (
                       <filter
                         id="dg-tree-dead-gossip-marker-wobble"
                         filterUnits="userSpaceOnUse"
@@ -3584,7 +3527,7 @@ export default function TreeCanvas({
                       />
                     </filter>
                   </defs>
-                  {canvasTheme === "roots" ? (
+                  {canvasTheme === CANVAS_THEME_ID.ROOTS ? (
                     <>
                       <g
                         filter="url(#dg-tree-roots-branch-displace)"
@@ -3624,12 +3567,14 @@ export default function TreeCanvas({
                         y2={s.y2}
                         isMarriage={s.isMarriage}
                         rootsBranchVisual={false}
-                        deadGossipMarkerVisual={canvasTheme === "dead_gossip"}
+                        deadGossipMarkerVisual={
+                          canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
+                        }
                       />
                     ))
                   )}
                 </svg>
-                {canvasTheme === "roots" ? (
+                {canvasTheme === CANVAS_THEME_ID.ROOTS ? (
                   <svg
                     className="absolute left-0 top-0 z-[4]"
                     width={layout.contentWidth}
@@ -3732,8 +3677,9 @@ export default function TreeCanvas({
                   const cardTiltDeg = treeCardTiltDegreesFromPersonId(pos.id);
                   const cardNudgeY =
                     treeCardVerticalNudgePxFromPersonId(pos.id);
-                  const isRootsLeaf = canvasTheme === "roots";
-                  const isDeadGossipPhotoCard = canvasTheme === "dead_gossip";
+                  const isRootsLeaf = canvasTheme === CANVAS_THEME_ID.ROOTS;
+                  const isDeadGossipPhotoCard =
+                    canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP;
                   const treeCardPhotoW = isRootsLeaf
                     ? TREE_ROOTS_LEAF_IMG_W
                     : isDeadGossipPhotoCard
@@ -4039,7 +3985,7 @@ export default function TreeCanvas({
                     </div>
                   );
                 })}
-                {canvasTheme !== "roots" ? (
+                {canvasTheme !== CANVAS_THEME_ID.ROOTS ? (
                   <svg
                     className="absolute left-0 top-0 z-[3]"
                     width={layout.contentWidth}
@@ -4107,7 +4053,7 @@ export default function TreeCanvas({
                         <g key={`tree-card-pins:${pos.id}`}>
                           <g
                             transform={
-                              canvasTheme === "dead_gossip"
+                              canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
                                 ? `translate(${top.x}, ${top.y})`
                                 : treePinTopUseTransform(top.x, top.y)
                             }
@@ -4117,7 +4063,7 @@ export default function TreeCanvas({
                               ariaLabel={pinAriaLabel}
                               onAction={runPinAction}
                             >
-                              {canvasTheme === "dead_gossip" ? (
+                              {canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP ? (
                                 <g
                                   transform={`translate(0, ${TREE_DEAD_GOSSIP_TOP_TAPE_VISUAL_SHIFT_Y}) rotate(${topTapeTiltDeg})`}
                                 >
@@ -4144,7 +4090,7 @@ export default function TreeCanvas({
                             </TreePinActionWrap>
                           </g>
                           {hideBottom ? null : (
-                            canvasTheme === "dead_gossip" ? (
+                            canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP ? (
                               <g
                                 transform={`translate(${bot.x}, ${bot.y + 2.5}) rotate(${tapeTiltDeg})`}
                               >
@@ -4458,7 +4404,7 @@ export default function TreeCanvas({
                         aria-label={`Remove ${displayName(selectedPerson)}`}
                         onClick={() =>
                           setPhotoSelectedPersons((prev) =>
-                            prev.filter((x) => x.id !== selectedPerson.id)
+                            removeTaggedPersonById(prev, selectedPerson.id)
                           )
                         }
                       >
@@ -4504,9 +4450,7 @@ export default function TreeCanvas({
                         }}
                         onClick={() => {
                           setPhotoSelectedPersons((prev) =>
-                            prev.some((x) => x.id === p.id)
-                              ? prev.filter((x) => x.id !== p.id)
-                              : [...prev, p]
+                            toggleTaggedPerson(prev, p)
                           );
                           setPhotoPersonSearch("");
                         }}
@@ -4693,9 +4637,11 @@ export default function TreeCanvas({
                   style={modalInputStyle}
                 >
                   <option value="">—</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Unknown">Unknown</option>
+                  {GENDER_OPTIONS.map((gender) => (
+                    <option key={gender} value={gender}>
+                      {gender}
+                    </option>
+                  ))}
                 </select>
               </div>
 

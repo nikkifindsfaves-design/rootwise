@@ -1,6 +1,12 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import {
+  PLACE_INPUT_BLUR_CLOSE_DELAY_MS,
+  PLACE_INPUT_DEBOUNCE_MS,
+  PLACE_INPUT_RESULT_LIMIT,
+  PLACE_INPUT_SEARCH_THRESHOLD,
+} from "@/lib/constants/shared-values";
 import { formatPlace } from "@/lib/utils/places";
 import {
   useEffect,
@@ -85,7 +91,7 @@ export function PlaceInput({
     const term = value.trim();
     const gen = ++fetchGenRef.current;
 
-    if (term.length < 2) {
+    if (term.length < PLACE_INPUT_SEARCH_THRESHOLD) {
       const clearTimer = setTimeout(() => {
         if (gen !== fetchGenRef.current) return;
         setSuggestions([]);
@@ -100,7 +106,7 @@ export function PlaceInput({
         .from("places")
         .select("id, township, county, state, country")
         .or(buildPlacesOrFilter(term))
-        .limit(25);
+        .limit(PLACE_INPUT_RESULT_LIMIT);
 
       if (gen !== fetchGenRef.current) return;
 
@@ -114,7 +120,7 @@ export function PlaceInput({
       const rows = (data ?? []) as PlaceRow[];
       setSuggestions(rows);
       setListOpen(rows.length > 0);
-    }, 200);
+    }, PLACE_INPUT_DEBOUNCE_MS);
 
     return () => clearTimeout(debounce);
   }, [locked, value]);
@@ -127,7 +133,10 @@ export function PlaceInput({
   function handleInputFocus() {
     if (locked) return;
     clearBlurCloseTimer();
-    if (value.trim().length >= 2 && suggestions.length > 0) {
+    if (
+      value.trim().length >= PLACE_INPUT_SEARCH_THRESHOLD &&
+      suggestions.length > 0
+    ) {
       setListOpen(true);
     }
   }
@@ -140,7 +149,7 @@ export function PlaceInput({
       const v = inputRef.current?.value ?? value;
       onChange(v);
       setListOpen(false);
-    }, 150);
+    }, PLACE_INPUT_BLUR_CLOSE_DELAY_MS);
   }
 
   function pick(row: PlaceRow) {

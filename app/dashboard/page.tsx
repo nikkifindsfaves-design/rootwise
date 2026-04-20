@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
+import { DEFAULT_CANVAS_THEME_ID } from "@/lib/themes/canvas-themes";
 import { redirect } from "next/navigation";
 import MyTreesShell, { type TreeWithCount } from "./my-trees-shell";
 
@@ -44,8 +46,8 @@ export default async function DashboardPage() {
       id: rec.id,
       name: rec.name,
       created_at: rec.created_at,
-      vibe: rec.vibe ?? "classic",
-      canvas_theme: rec.canvas_theme ?? "string",
+      vibe: rec.vibe ?? DEFAULT_VIBE,
+      canvas_theme: rec.canvas_theme ?? DEFAULT_CANVAS_THEME_ID,
       ancestorCount: countByTreeId.get(rec.id) ?? 0,
     };
   });

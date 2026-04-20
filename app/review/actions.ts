@@ -2,7 +2,7 @@
 
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
-import { normalizeGender } from "@/lib/utils/gender";
+import { DEFAULT_GENDER, normalizeGender } from "@/lib/utils/gender";
 import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -541,7 +541,7 @@ export async function acceptPersonCard(params: {
         middle_name: isEmptyDbField(ex.middle_name) ? formMid : ex.middle_name,
         birth_date: isEmptyDbField(ex.birth_date) ? formBirth : ex.birth_date,
         death_date: isEmptyDbField(ex.death_date) ? formDeath : ex.death_date,
-        gender: isEmptyDbField(ex.gender) ? formGender : ex.gender ?? "Unknown",
+        gender: isEmptyDbField(ex.gender) ? formGender : ex.gender ?? DEFAULT_GENDER,
         notes: isEmptyDbField(ex.notes) ? formNotes : ex.notes,
       };
     } else {

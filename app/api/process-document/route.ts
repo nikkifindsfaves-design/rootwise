@@ -1,4 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  DEFAULT_VIBE,
+  MANUAL_ENTRY_DOCUMENT_SUBTYPE,
+} from "@/lib/constants/shared-values";
 import { createClient } from "@/lib/supabase/server";
 import { estimateCost } from "@/lib/utils/anthropic-cost";
 import { parseJsonFromText } from "@/lib/utils/parse-json-from-text";
@@ -590,7 +594,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  let resolvedVibe = "classic";
+  let resolvedVibe = DEFAULT_VIBE;
   if (resolvedTreeId !== null) {
     const { data: vibeRow, error: vibeErr } = await supabase
       .from("trees")
@@ -671,7 +675,7 @@ export async function POST(request: NextRequest) {
       parent_events: [],
       relationships: [],
       is_multi_person: false,
-      document_subtype: "Manual entry",
+      document_subtype: MANUAL_ENTRY_DOCUMENT_SUBTYPE,
       extraction_skipped: true,
     };
 
@@ -684,7 +688,7 @@ export async function POST(request: NextRequest) {
         ai_response: manualAiResponse,
         ...(recordTypeStr ? { record_type: recordTypeStr } : {}),
         ...(resolvedTreeId != null ? { tree_id: resolvedTreeId } : {}),
-        document_subtype: "Manual entry",
+        document_subtype: MANUAL_ENTRY_DOCUMENT_SUBTYPE,
       })
       .select("id")
       .maybeSingle();

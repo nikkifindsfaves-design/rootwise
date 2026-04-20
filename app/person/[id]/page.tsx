@@ -5,13 +5,19 @@ import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
 import { RECORD_TYPES } from "@/lib/records/record-types";
 import {
+  CANVAS_THEME_ID,
   CANVAS_THEMES,
+  DEFAULT_CANVAS_THEME_ID,
   isCanvasThemeId,
   type PhotoFrameStyle,
 } from "@/lib/themes/canvas-themes";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
-import { normalizeGender } from "@/lib/utils/gender";
+import {
+  GENDER_OPTIONS,
+  GENDER_VALUES,
+  normalizeGender,
+} from "@/lib/utils/gender";
 import { formatPlace } from "@/lib/utils/places";
 import {
   RootsFramePortrait,
@@ -2031,7 +2037,8 @@ function TimelineEventStoryBlock({
 
 type PersonProfilePageBodyProps = {
   /**
-   * Resolved from `trees.canvas_theme` for the person row’s `tree_id`, or `"string"` when missing.
+   * Resolved from `trees.canvas_theme` for the person row’s `tree_id`,
+   * or the shared default when missing.
    */
   canvasTheme: string;
   children: ReactNode;
@@ -2088,9 +2095,11 @@ export default function PersonProfilePage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [canvasTheme, setCanvasTheme] = useState("string");
+  const [canvasTheme, setCanvasTheme] = useState(DEFAULT_CANVAS_THEME_ID);
   const profileCanvasTheme = useMemo(() => {
-    const id = isCanvasThemeId(canvasTheme) ? canvasTheme : "string";
+    const id = isCanvasThemeId(canvasTheme)
+      ? canvasTheme
+      : DEFAULT_CANVAS_THEME_ID;
     return CANVAS_THEMES[id];
   }, [canvasTheme]);
   const scrapbookPhotoTiltDeg = useMemo(
@@ -2729,7 +2738,7 @@ export default function PersonProfilePage() {
      */
     const themeTreeId = treeId !== "" ? treeId : personTreeId;
 
-    let resolvedCanvasTheme = "string";
+    let resolvedCanvasTheme = DEFAULT_CANVAS_THEME_ID;
     if (themeTreeId !== "") {
       const { data: treeThemeRow, error: treeThemeErr } = await supabase
         .from("trees")
@@ -2745,7 +2754,7 @@ export default function PersonProfilePage() {
           const normalized = ct.trim().toLowerCase();
           resolvedCanvasTheme = isCanvasThemeId(normalized)
             ? normalized
-            : "string";
+            : DEFAULT_CANVAS_THEME_ID;
         }
       }
     }
@@ -4708,9 +4717,9 @@ export default function PersonProfilePage() {
     const gRaw = (person.gender ?? "").trim();
     const gLower = gRaw.toLowerCase();
     let genderVal = gRaw;
-    if (gLower === "male") genderVal = "Male";
-    else if (gLower === "female") genderVal = "Female";
-    else if (gLower === "unknown") genderVal = "Unknown";
+    if (gLower === "male") genderVal = GENDER_VALUES.MALE;
+    else if (gLower === "female") genderVal = GENDER_VALUES.FEMALE;
+    else if (gLower === "unknown") genderVal = GENDER_VALUES.UNKNOWN;
 
     setEditPersonDraft({
       first_name: person.first_name,
@@ -4984,9 +4993,9 @@ export default function PersonProfilePage() {
       setAddFamilyCoParentId(opts.coParentId);
     }
     if (opts?.createGenderDefault === "male") {
-      setAddFamilyCreateGender("Male");
+      setAddFamilyCreateGender(GENDER_VALUES.MALE);
     } else if (opts?.createGenderDefault === "female") {
-      setAddFamilyCreateGender("Female");
+      setAddFamilyCreateGender(GENDER_VALUES.FEMALE);
     }
     setAddFamilyModalOpen(true);
   }
@@ -6227,7 +6236,7 @@ export default function PersonProfilePage() {
                             </div>
                           </div>
                         </div>
-                        {profileCanvasTheme.id === "dead_gossip" ? (
+                        {profileCanvasTheme.id === CANVAS_THEME_ID.DEAD_GOSSIP ? (
                           <HeaderScrapbookTapeStrips />
                         ) : (
                           <HeaderScrapbookCornerTabs />
@@ -6430,7 +6439,7 @@ export default function PersonProfilePage() {
                                   </div>
                                 </div>
                               </div>
-                              {profileCanvasTheme.id === "dead_gossip" ? (
+                              {profileCanvasTheme.id === CANVAS_THEME_ID.DEAD_GOSSIP ? (
                                 <HeaderScrapbookTapeStrips />
                               ) : (
                                 <HeaderScrapbookCornerTabs />
@@ -9281,11 +9290,13 @@ export default function PersonProfilePage() {
                   style={modalInputStyle}
                 >
                   <option value="">—</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Unknown">Unknown</option>
+                  {GENDER_OPTIONS.map((gender) => (
+                    <option key={gender} value={gender}>
+                      {gender}
+                    </option>
+                  ))}
                   {editPersonDraft.gender &&
-                  !["", "Male", "Female", "Unknown"].includes(
+                  !(["", ...GENDER_OPTIONS] as readonly string[]).includes(
                     editPersonDraft.gender
                   ) ? (
                     <option value={editPersonDraft.gender}>

@@ -1,4 +1,8 @@
 import { addPerson } from "./actions";
+import {
+  DEFAULT_GENDER,
+  GENDER_OPTIONS,
+} from "@/lib/utils/gender";
 
 const sans = "var(--font-dg-body), Lato, sans-serif";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
@@ -161,7 +165,7 @@ export default function AddPersonForm() {
           <select
             id="gender"
             name="gender"
-            defaultValue="Unknown"
+            defaultValue={DEFAULT_GENDER}
             className={`${fieldClass} sm:max-w-xs`}
             style={{
               fontFamily: sans,
@@ -172,9 +176,11 @@ export default function AddPersonForm() {
               color: "var(--dg-brown-dark)",
             }}
           >
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
-            <option value="Unknown">Unknown</option>
+            {GENDER_OPTIONS.map((gender) => (
+              <option key={gender} value={gender}>
+                {gender}
+              </option>
+            ))}
           </select>
         </div>
 

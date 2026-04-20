@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse, type NextRequest } from "next/server";
+import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
 import { createClient } from "@/lib/supabase/server";
 import { estimateCost } from "@/lib/utils/anthropic-cost";
 import { parseJsonFromText } from "@/lib/utils/parse-json-from-text";
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let vibe = "classic";
+  let vibe = DEFAULT_VIBE;
   const storedVibe = (treeRow as { vibe?: string | null }).vibe;
   if (typeof storedVibe === "string" && storedVibe.trim() !== "") {
     vibe = storedVibe.trim();
