@@ -20,6 +20,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Design Check (Standard Workflow)
+
+Before adding or changing extracted fields, review `DATA_OWNERSHIP_MAP.md`.
+
+- Confirm canonical table ownership for each fact.
+- Only mirror fields when a sync rule is explicitly defined.
+- Keep source-link traceability for extracted facts (record/document linkage).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

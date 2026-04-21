@@ -21,6 +21,8 @@ type PendingPersonBody = {
   death_date?: unknown;
   birth_place_id?: unknown;
   birth_place_fields?: unknown;
+  death_place_id?: unknown;
+  death_place_fields?: unknown;
   marital_status?: string | null;
   cause_of_death?: string | null;
   surviving_spouse?: string | null;
@@ -28,6 +30,7 @@ type PendingPersonBody = {
   service_number?: string | null;
   gender?: unknown;
   notes?: unknown;
+  occupation?: unknown;
   relationships?: unknown;
   events?: unknown;
 };
@@ -172,6 +175,31 @@ async function resolveEventPlaceIdFromEvent(
   return { id: r.id, error: null };
 }
 
+async function resolveDeathPlaceIdFromBody(
+  supabase: SupabaseClient,
+  p: PendingPersonBody
+): Promise<{ id: string | null; error: string | null }> {
+  const rawId = p.death_place_id;
+  if (typeof rawId === "string" && rawId.trim() !== "") {
+    return { id: rawId.trim(), error: null };
+  }
+  let fields = parsePlaceFields(p.death_place_fields);
+  if (fields === null && typeof p.death_place_fields === "string") {
+    const display = p.death_place_fields.trim();
+    if (display !== "") {
+      fields = parsePlaceDisplayToFields(display);
+    }
+  }
+  if (fields === null) {
+    return { id: null, error: null };
+  }
+  const r = await findOrCreatePlace(supabase, fields);
+  if (!r.ok) {
+    return { id: null, error: r.message };
+  }
+  return { id: r.id, error: null };
+}
+
 function toPersonPayload(p: PendingPersonBody) {
   const first_name = String(p.first_name ?? "").trim();
   const last_name = String(p.last_name ?? "").trim();
@@ -188,6 +216,7 @@ function toPersonPayload(p: PendingPersonBody) {
 
 type PersonPayload = ReturnType<typeof toPersonPayload> & {
   birth_place_id: string | null;
+  death_place_id: string | null;
 };
 
 function valueForMergeUpdate(
@@ -239,6 +268,19 @@ function parseMergeDecisions(raw: unknown): Map<string, Record<string, "existing
 function parsePendingPersons(raw: unknown): PendingPersonBody[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((x) => typeof x === "object" && x !== null) as PendingPersonBody[];
+}
+
+function observedYearFromEvents(eventsRaw: unknown): number | null {
+  if (!Array.isArray(eventsRaw)) return null;
+  for (const ev of eventsRaw) {
+    if (typeof ev !== "object" || ev === null) continue;
+    const rec = ev as Record<string, unknown>;
+    const rawDate = String(rec.event_date ?? "").trim();
+    if (!rawDate) continue;
+    const yearMatch = rawDate.match(/(\d{4})/);
+    if (yearMatch) return Number.parseInt(yearMatch[1]!, 10);
+  }
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -316,15 +358,23 @@ export async function POST(request: NextRequest) {
       console.error("[save-review]", "birth-place-resolve", birthRes.error);
       return NextResponse.json({ error: birthRes.error }, { status: 500 });
     }
+    const deathRes = await resolveDeathPlaceIdFromBody(supabase, p);
+    if (deathRes.error) {
+      console.error("[save-review]", "death-place-resolve", deathRes.error);
+      return NextResponse.json({ error: deathRes.error }, { status: 500 });
+    }
     const payload: PersonPayload = {
       ...toPersonPayload(p),
       birth_place_id: birthRes.id,
+      death_place_id: deathRes.id,
     };
 
     if (existingId) {
       const { data: row, error: fetchErr } = await supabase
         .from("persons")
-        .select("id, birth_place_id")
+        .select(
+          "id, birth_place_id, death_place_id, marital_status, cause_of_death, surviving_spouse"
+        )
         .eq("id", existingId)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -360,6 +410,45 @@ export async function POST(request: NextRequest) {
         !isEmptyDbField(payload.birth_place_id)
       ) {
         updates.birth_place_id = payload.birth_place_id;
+      }
+      const existingDeathPlaceId = (row as { death_place_id?: string | null })
+        .death_place_id;
+      if (
+        isEmptyDbField(existingDeathPlaceId) &&
+        !isEmptyDbField(payload.death_place_id)
+      ) {
+        (updates as Record<string, string | null>).death_place_id =
+          payload.death_place_id;
+      }
+      const existingMaritalStatus = (row as { marital_status?: string | null })
+        .marital_status;
+      if (
+        isEmptyDbField(existingMaritalStatus) &&
+        typeof p.marital_status === "string" &&
+        p.marital_status.trim() !== ""
+      ) {
+        (updates as Record<string, string | null>).marital_status =
+          p.marital_status.trim();
+      }
+      const existingCauseOfDeath = (row as { cause_of_death?: string | null })
+        .cause_of_death;
+      if (
+        isEmptyDbField(existingCauseOfDeath) &&
+        typeof p.cause_of_death === "string" &&
+        p.cause_of_death.trim() !== ""
+      ) {
+        (updates as Record<string, string | null>).cause_of_death =
+          p.cause_of_death.trim();
+      }
+      const existingSurvivingSpouse = (row as { surviving_spouse?: string | null })
+        .surviving_spouse;
+      if (
+        isEmptyDbField(existingSurvivingSpouse) &&
+        typeof p.surviving_spouse === "string" &&
+        p.surviving_spouse.trim() !== ""
+      ) {
+        (updates as Record<string, string | null>).surviving_spouse =
+          p.surviving_spouse.trim();
       }
 
       if (Object.keys(updates).length > 0) {
@@ -416,6 +505,7 @@ export async function POST(request: NextRequest) {
         birth_date: payload.birth_date,
         death_date: payload.death_date,
         birth_place_id: payload.birth_place_id,
+        death_place_id: payload.death_place_id,
         marital_status: p.marital_status ?? null,
         cause_of_death: p.cause_of_death ?? null,
         surviving_spouse: p.surviving_spouse ?? null,
@@ -453,6 +543,80 @@ export async function POST(request: NextRequest) {
       }
 
       resolvedIds.push(inserted.id as string);
+    }
+  }
+
+  for (let i = 0; i < pendingPersons.length; i++) {
+    const p = pendingPersons[i];
+    const personId = resolvedIds[i];
+    if (!personId) continue;
+    const occupationTitle = String(p.occupation ?? "").trim();
+    if (!occupationTitle) continue;
+    const yearObserved = observedYearFromEvents(p.events);
+
+    const { data: existingOcc, error: existingOccErr } = await supabase
+      .from("occupations")
+      .select("id, record_id")
+      .eq("person_id", personId)
+      .eq("job_title", occupationTitle)
+      .limit(1);
+
+    if (existingOccErr) {
+      console.error(
+        "[save-review]",
+        "occupation-existing-query",
+        existingOccErr.message
+      );
+      return NextResponse.json({ error: existingOccErr.message }, { status: 500 });
+    }
+
+    if ((existingOcc ?? []).length > 0) {
+      const existing = existingOcc?.[0] as
+        | { id?: string; record_id?: string | null }
+        | undefined;
+      const existingId =
+        typeof existing?.id === "string" ? existing.id.trim() : "";
+      const existingRecordId =
+        typeof existing?.record_id === "string"
+          ? existing.record_id.trim()
+          : "";
+      if (existingId && existingRecordId === "") {
+        const { error: occLinkErr } = await supabase
+          .from("occupations")
+          .update({ record_id: recordId })
+          .eq("id", existingId)
+          .eq("person_id", personId);
+        if (occLinkErr) {
+          console.error(
+            "[save-review]",
+            "occupation-link-update",
+            occLinkErr.message
+          );
+          return NextResponse.json({ error: occLinkErr.message }, { status: 500 });
+        }
+      }
+      continue;
+    }
+
+    const insertRow: {
+      person_id: string;
+      job_title: string;
+      year_observed?: number | null;
+      record_id: string;
+    } = {
+      person_id: personId,
+      job_title: occupationTitle,
+      record_id: recordId,
+    };
+    if (yearObserved !== null) insertRow.year_observed = yearObserved;
+
+    const { error: occInsertErr } = await supabase
+      .from("occupations")
+      .insert(insertRow);
+
+    if (occInsertErr) {
+      console.error("[save-review]", "occupation-insert", occInsertErr.message);
+      return NextResponse.json({ error: occInsertErr.message }, { status: 500 });
     }
   }
 

@@ -1,6 +1,4 @@
 export function getVoiceInstructions(vibe: string): string {
-  const lengthRule = "STRICT LIMIT: Your response must be 250 characters or fewer including spaces. Count every character before responding. Do not exceed this limit under any circumstances.";
-
   let voice: string;
   switch (vibe) {
     case "gossip_girl":
@@ -20,5 +18,5 @@ export function getVoiceInstructions(vibe: string): string {
       voice = `Write like a true-crime podcaster narrating a life moment — direct, occasionally dry, never sentimental. Lead with what happened. Don't editorialize excessively but let one sharp observation land per story. Vary your structure every time: sometimes open with place, sometimes with the person, sometimes drop straight into the event. Never use the same sentence construction twice in a row across stories.`;
   }
 
-  return `${voice}\n\n${lengthRule}`;
+  return voice;
 }

@@ -110,7 +110,7 @@ type TreePersonSearchRow = {
   birth_date: string | null;
 };
 
-type PersonDeskPanel = "none" | "margin" | "file" | "receipts";
+type PersonDeskPanel = "none" | "margin" | "file" | "receipts" | "occupation";
 
 /**
  * Maps UI relationship choice (how the other person relates to the profile) to
@@ -325,6 +325,16 @@ type EventSourceRow = {
   created_at: string;
 };
 
+type OccupationRow = {
+  id: string;
+  person_id: string;
+  user_id: string | null;
+  job_title: string | null;
+  year_observed: number | null;
+  record_id?: string | null;
+  document_id?: string | null;
+};
+
 type PhotoEventTagRow = {
   photo_id: string;
   event_id: string;
@@ -434,6 +444,25 @@ function recordTypeLabel(row: RecordRow): string {
     return ai.record_type;
   }
   return "Record";
+}
+
+function occupationLinkedRecordId(row: OccupationRow): string | null {
+  const candidates = [row.record_id, row.document_id];
+  for (const raw of candidates) {
+    const id = String(raw ?? "").trim();
+    if (id) return id;
+  }
+  return null;
+}
+
+function occupationUiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  const msg = error.message.trim();
+  if (!msg) return fallback;
+  if (msg.toLowerCase().includes("column occupations.user_id does not exist")) {
+    return fallback;
+  }
+  return fallback;
 }
 
 function eventsSortedByDate(cluster: EventCluster): EventRow[] {
@@ -1262,6 +1291,50 @@ function IconPhoto({ className }: { className?: string }) {
       <rect x="3" y="5" width="18" height="14" rx="2" ry="2" />
       <circle cx="9" cy="10" r="2" />
       <path d="M21 16l-5-5L5 19" />
+    </svg>
+  );
+}
+
+function IconBriefcase({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+      <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+      <path d="M2 12h20" />
+    </svg>
+  );
+}
+
+function IconDocument({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" />
+      <path d="M14 2v7h7" />
+      <path d="M9 13h6M9 17h6" />
     </svg>
   );
 }
@@ -2143,6 +2216,23 @@ export default function PersonProfilePage() {
   const [editRelBusy, setEditRelBusy] = useState(false);
   const [editRelError, setEditRelError] = useState<string | null>(null);
   const [deskPanelOpen, setDeskPanelOpen] = useState<PersonDeskPanel>("none");
+  const [occupations, setOccupations] = useState<OccupationRow[]>([]);
+  const [occupationLoading, setOccupationLoading] = useState(false);
+  const [occupationError, setOccupationError] = useState<string | null>(null);
+  const [editingOccupationId, setEditingOccupationId] = useState<string | null>(null);
+  const [occupationEditDraft, setOccupationEditDraft] = useState<{
+    job_title: string;
+    year_observed: string;
+  } | null>(null);
+  const [occupationSaving, setOccupationSaving] = useState(false);
+  const [occupationDeletingId, setOccupationDeletingId] = useState<string | null>(
+    null
+  );
+  const [addingOccupation, setAddingOccupation] = useState(false);
+  const [occupationAddDraft, setOccupationAddDraft] = useState({
+    job_title: "",
+    year_observed: "",
+  });
   const [signedDocUrls, setSignedDocUrls] = useState<Map<string, string>>(
     new Map()
   );
@@ -2297,6 +2387,8 @@ export default function PersonProfilePage() {
   const [editingResearchNotesEventId, setEditingResearchNotesEventId] =
     useState<string | null>(null);
   const headerActionsDropdownRef = useRef<HTMLDivElement>(null);
+  const occupationPanelRef = useRef<HTMLDivElement>(null);
+  const occupationToggleRef = useRef<HTMLButtonElement>(null);
   const headerPhotoFileInputRef = useRef<HTMLInputElement>(null);
 
   const [cropModalPhoto, setCropModalPhoto] = useState<Record<
@@ -2471,6 +2563,19 @@ export default function PersonProfilePage() {
   }, [headerMenuOpen]);
 
   useEffect(() => {
+    if (deskPanelOpen !== "occupation") return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const panel = occupationPanelRef.current;
+      const toggle = occupationToggleRef.current;
+      const target = e.target as Node;
+      if (panel?.contains(target) || toggle?.contains(target)) return;
+      setDeskPanelOpen("none");
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [deskPanelOpen]);
+
+  useEffect(() => {
     if (cropModalPhoto) return;
     cropMouseDragCleanupRef.current?.();
     cropMouseDragCleanupRef.current = null;
@@ -2637,6 +2742,58 @@ export default function PersonProfilePage() {
     );
   }, [photoSetupZoom, photoSetupNaturalSize]);
 
+  const loadOccupations = useCallback(async () => {
+    if (!personId) return;
+    setOccupationLoading(true);
+    setOccupationError(null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setOccupationLoading(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("occupations")
+      .select("*")
+      .eq("person_id", personId)
+      .order("year_observed", { ascending: true, nullsFirst: false });
+    if (error) {
+      setOccupationError(
+        occupationUiErrorMessage(error, "Could not load occupations.")
+      );
+      setOccupationLoading(false);
+      return;
+    }
+    const occupationRows = (data ?? []) as OccupationRow[];
+    setOccupations(occupationRows);
+
+    const linkedRecordIds = [
+      ...new Set(
+        occupationRows
+          .map((row) => occupationLinkedRecordId(row))
+          .filter((id): id is string => typeof id === "string" && id.trim() !== "")
+      ),
+    ];
+    if (linkedRecordIds.length > 0) {
+      const { data: occRecData, error: occRecErr } = await supabase
+        .from("records")
+        .select("id, record_type, file_type, file_url, created_at, ai_response")
+        .in("id", linkedRecordIds);
+      if (!occRecErr && occRecData) {
+        setRecordsById((prev) => {
+          const next = new Map(prev);
+          for (const rec of occRecData as RecordRow[]) {
+            next.set(rec.id, rec);
+          }
+          return next;
+        });
+      }
+    }
+    setOccupationLoading(false);
+  }, [personId]);
+
   const load = useCallback(async () => {
     if (!personId) {
       setError("Invalid profile.");
@@ -2651,6 +2808,11 @@ export default function PersonProfilePage() {
     setResearchNoteUpdatedAt(null);
     setResearchNoteSaveError(null);
     setResearchNoteSavedFlash(false);
+    setOccupationError(null);
+    setEditingOccupationId(null);
+    setOccupationEditDraft(null);
+    setAddingOccupation(false);
+    setOccupationAddDraft({ job_title: "", year_observed: "" });
 
     const supabase = createClient();
     const {
@@ -3418,8 +3580,9 @@ export default function PersonProfilePage() {
     setResearchNoteId(pnId);
     setResearchNoteText(pnContent);
     setResearchNoteUpdatedAt(pnUpdated);
+    await loadOccupations();
     setLoading(false);
-  }, [personId, router, treeId]);
+  }, [loadOccupations, personId, router, treeId]);
 
   useEffect(() => {
     void load();
@@ -5734,6 +5897,125 @@ export default function PersonProfilePage() {
     });
   }
 
+  async function saveNewOccupation() {
+    if (!personId || occupationSaving) return;
+    const title = occupationAddDraft.job_title.trim();
+    if (!title) {
+      setOccupationError("Job title is required.");
+      return;
+    }
+    const yearRaw = occupationAddDraft.year_observed.trim();
+    const yearValue =
+      yearRaw === ""
+        ? null
+        : /^\d{4}$/.test(yearRaw)
+          ? Number.parseInt(yearRaw, 10)
+          : Number.NaN;
+    if (Number.isNaN(yearValue)) {
+      setOccupationError("Year observed must be a four digit year.");
+      return;
+    }
+    setOccupationSaving(true);
+    setOccupationError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+      const { error } = await supabase.from("occupations").insert({
+        person_id: personId,
+        job_title: title,
+        year_observed: yearValue,
+      });
+      if (error) throw error;
+      setOccupationAddDraft({ job_title: "", year_observed: "" });
+      setAddingOccupation(false);
+      await loadOccupations();
+    } catch (e) {
+      setOccupationError(occupationUiErrorMessage(e, "Could not add occupation."));
+    } finally {
+      setOccupationSaving(false);
+    }
+  }
+
+  async function saveEditedOccupation(row: OccupationRow) {
+    if (!occupationEditDraft || occupationSaving) return;
+    const title = occupationEditDraft.job_title.trim();
+    if (!title) {
+      setOccupationError("Job title is required.");
+      return;
+    }
+    const yearRaw = occupationEditDraft.year_observed.trim();
+    const yearValue =
+      yearRaw === ""
+        ? null
+        : /^\d{4}$/.test(yearRaw)
+          ? Number.parseInt(yearRaw, 10)
+          : Number.NaN;
+    if (Number.isNaN(yearValue)) {
+      setOccupationError("Year observed must be a four digit year.");
+      return;
+    }
+    setOccupationSaving(true);
+    setOccupationError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+      const { error } = await supabase
+        .from("occupations")
+        .update({
+          job_title: title,
+          year_observed: yearValue,
+        })
+        .eq("id", row.id)
+        .eq("person_id", personId);
+      if (error) throw error;
+      setEditingOccupationId(null);
+      setOccupationEditDraft(null);
+      await loadOccupations();
+    } catch (e) {
+      setOccupationError(
+        occupationUiErrorMessage(e, "Could not update occupation.")
+      );
+    } finally {
+      setOccupationSaving(false);
+    }
+  }
+
+  async function deleteOccupation(row: OccupationRow) {
+    if (!personId || occupationDeletingId) return;
+    setOccupationDeletingId(row.id);
+    setOccupationError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+      const { error } = await supabase
+        .from("occupations")
+        .delete()
+        .eq("id", row.id)
+        .eq("person_id", personId);
+      if (error) throw error;
+      if (editingOccupationId === row.id) {
+        setEditingOccupationId(null);
+        setOccupationEditDraft(null);
+      }
+      await loadOccupations();
+    } catch (e) {
+      setOccupationError(
+        occupationUiErrorMessage(e, "Could not delete occupation.")
+      );
+    } finally {
+      setOccupationDeletingId(null);
+    }
+  }
+
   const btnOutline: React.CSSProperties = {
     fontFamily: sans,
     borderWidth: 2,
@@ -6037,6 +6319,39 @@ export default function PersonProfilePage() {
     if (a.eventDateMs !== b.eventDateMs) return a.eventDateMs - b.eventDateMs;
     return recordTypeLabel(a.record).localeCompare(recordTypeLabel(b.record));
   });
+
+  const yearsLived = (() => {
+    const birthYear = personProfileYearFromDate(person.birth_date);
+    const deathYear = personProfileYearFromDate(person.death_date);
+    if (!birthYear || !deathYear) return null;
+    const birthNum = Number.parseInt(birthYear, 10);
+    const deathNum = Number.parseInt(deathYear, 10);
+    if (!Number.isFinite(birthNum) || !Number.isFinite(deathNum)) return null;
+    const diff = deathNum - birthNum;
+    return diff >= 0 ? diff : null;
+  })();
+
+  const marriageCount = events.reduce((count, ev) => {
+    return ev.event_type.trim().toLowerCase() === "marriage" ? count + 1 : count;
+  }, 0);
+
+  const childrenCount = Object.values(relationshipMetaByPersonId).reduce(
+    (count, relMeta) =>
+      relMeta.relationshipType === "child" ? count + 1 : count,
+    0
+  );
+
+  const recordsCount = documentRecordIds.size;
+
+  const heroStats: { label: string; value: string }[] = [
+    {
+      label: "YEARS LIVED",
+      value: yearsLived == null ? "-" : String(yearsLived),
+    },
+    { label: "MARRIAGES", value: marriageCount > 0 ? String(marriageCount) : "-" },
+    { label: "CHILDREN", value: childrenCount > 0 ? String(childrenCount) : "-" },
+    { label: "RECORDS", value: recordsCount > 0 ? String(recordsCount) : "-" },
+  ];
 
   const isOvalProfileHeader = profileCanvasTheme.photoFrameStyle === "oval";
   const headerPolaroidOverflowVisible =
@@ -6574,58 +6889,60 @@ export default function PersonProfilePage() {
             )
             )}
           </div>
-          <div className="min-w-0 w-full flex-1 self-start text-left sm:w-auto sm:self-center sm:pl-0">
-            <h1
-              className="text-3xl font-bold leading-tight sm:text-4xl sm:leading-[1.08]"
-              style={{
-                fontFamily: serif,
-                color: `color-mix(in srgb, var(--dg-brown-dark) 88%, var(--dg-brown-outline) 12%)`,
-              }}
-            >
-              {personFullName || "—"}
-            </h1>
-            <div
-              className="mt-2.5 grid w-full max-w-md grid-cols-2 gap-x-10 gap-y-1 text-left sm:gap-x-14"
-              style={{ fontFamily: sans }}
-            >
-              <div
-                className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
-                style={{
-                  color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
-                }}
-              >
-                {profileCanvasTheme.bornLabel}
+          <div className="min-w-0 w-full flex-1 self-start sm:self-center">
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="min-w-0 text-left">
+                <h1
+                  className="text-3xl font-bold leading-tight sm:text-4xl sm:leading-[1.08]"
+                  style={{
+                    fontFamily: serif,
+                    color: `color-mix(in srgb, var(--dg-brown-dark) 88%, var(--dg-brown-outline) 12%)`,
+                  }}
+                >
+                  {personFullName || "—"}
+                </h1>
+                <div
+                  className="mt-2.5 grid w-full max-w-md grid-cols-2 gap-x-10 gap-y-1 text-left sm:gap-x-14"
+                  style={{ fontFamily: sans }}
+                >
+                  <div
+                    className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
+                    style={{
+                      color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
+                    }}
+                  >
+                    {profileCanvasTheme.bornLabel}
+                  </div>
+                  <div
+                    className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
+                    style={{
+                      color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
+                    }}
+                  >
+                    {profileCanvasTheme.diedLabel}
+                  </div>
+                  <div
+                    className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
+                    style={{
+                      color: `color-mix(in srgb, var(--dg-brown-dark) 82%, var(--dg-brown-outline) 18%)`,
+                    }}
+                  >
+                    {personProfileYearFromDate(person.birth_date) ?? "—"}
+                  </div>
+                  <div
+                    className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
+                    style={{
+                      color: `color-mix(in srgb, var(--dg-brown-dark) 82%, var(--dg-brown-outline) 18%)`,
+                    }}
+                  >
+                    {personProfileYearFromDate(person.death_date) ?? "—"}
+                  </div>
+                </div>
               </div>
               <div
-                className="text-[10px] font-semibold tracking-[0.12em] sm:text-[11px]"
-                style={{
-                  color: `color-mix(in srgb, var(--dg-brown-dark) 55%, var(--dg-brown-muted) 45%)`,
-                }}
+                ref={headerActionsDropdownRef}
+                className="relative z-[100] flex shrink-0 flex-col items-stretch gap-2 self-end sm:self-start sm:items-end"
               >
-                {profileCanvasTheme.diedLabel}
-              </div>
-              <div
-                className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
-                style={{
-                  color: `color-mix(in srgb, var(--dg-brown-dark) 82%, var(--dg-brown-outline) 18%)`,
-                }}
-              >
-                {personProfileYearFromDate(person.birth_date) ?? "—"}
-              </div>
-              <div
-                className="text-base font-semibold tabular-nums leading-snug sm:text-lg"
-                style={{
-                  color: `color-mix(in srgb, var(--dg-brown-dark) 82%, var(--dg-brown-outline) 18%)`,
-                }}
-              >
-                {personProfileYearFromDate(person.death_date) ?? "—"}
-              </div>
-            </div>
-          </div>
-          <div
-            ref={headerActionsDropdownRef}
-            className="relative z-[100] flex shrink-0 flex-col items-stretch gap-2 self-end sm:self-start sm:items-end"
-          >
           <input
             ref={headerPhotoFileInputRef}
             id="person-profile-photo-upload-header"
@@ -6767,7 +7084,48 @@ export default function PersonProfilePage() {
             </div>
           ) : null}
           </div>
-        </div>
+              </div>
+            </div>
+            <div
+              className="mt-[25px] grid w-full max-w-[24rem] grid-cols-4 sm:max-w-[27.5rem] lg:max-w-[31rem]"
+              style={{
+                borderTop:
+                  "1px solid color-mix(in srgb, var(--dg-brown-border) 28%, transparent)",
+              }}
+            >
+              {heroStats.map((stat, idx) => (
+                <div
+                  key={stat.label}
+                  className="flex min-w-0 flex-col items-center justify-center px-1.5 py-2 text-center sm:px-2 sm:py-2.5"
+                  style={{
+                    borderRight:
+                      idx < heroStats.length - 1
+                        ? "1px solid color-mix(in srgb, var(--dg-brown-border) 24%, transparent)"
+                        : undefined,
+                  }}
+                >
+                  <span
+                    className="text-lg font-semibold leading-tight tabular-nums sm:text-xl"
+                    style={{
+                      fontFamily: serif,
+                      color: colors.brownDark,
+                    }}
+                  >
+                    {stat.value}
+                  </span>
+                  <span
+                    className="mt-0.5 text-[9px] font-semibold tracking-[0.15em] sm:text-[9.5px]"
+                    style={{
+                      fontFamily: sans,
+                      color: colors.brownMuted,
+                    }}
+                  >
+                    {stat.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </header>
 
@@ -8160,14 +8518,21 @@ export default function PersonProfilePage() {
                       "repeating-linear-gradient(to bottom, transparent 0, transparent 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 26px, color-mix(in srgb, var(--dg-brown-border) 26%, transparent) 27px)",
                     boxShadow: "0 4px 18px rgb(var(--dg-shadow-rgb) / 0.08)",
                     transform:
-                      deskPanelOpen === "file"
+                      deskPanelOpen === "file" || deskPanelOpen === "occupation"
                         ? "translateX(0)"
                         : "translateX(100%)",
-                    pointerEvents: deskPanelOpen === "file" ? "auto" : "none",
+                    pointerEvents:
+                      deskPanelOpen === "file" || deskPanelOpen === "occupation"
+                        ? "auto"
+                        : "none",
                   }}
                   role="dialog"
-                  {...(deskPanelOpen === "file" ? { "aria-modal": true } : {})}
-                  aria-hidden={deskPanelOpen !== "file"}
+                  {...(deskPanelOpen === "file" || deskPanelOpen === "occupation"
+                    ? { "aria-modal": true }
+                    : {})}
+                  aria-hidden={
+                    deskPanelOpen !== "file" && deskPanelOpen !== "occupation"
+                  }
                   aria-labelledby="person-desk-file-title"
                 >
                   <div className="flex shrink-0 items-center gap-2 px-2 pb-1 pt-2 sm:px-3 sm:pt-2.5">
@@ -8192,6 +8557,30 @@ export default function PersonProfilePage() {
                     >
                       Vitals
                     </p>
+                    <button
+                      ref={occupationToggleRef}
+                      type="button"
+                      className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-md border-0 bg-transparent opacity-75 transition hover:opacity-100"
+                      style={{
+                        fontFamily: sans,
+                        color:
+                          deskPanelOpen === "occupation"
+                            ? colors.forest
+                            : colors.brownMuted,
+                        cursor: "pointer",
+                      }}
+                      aria-label="Open occupation history"
+                      title="Occupation history"
+                      aria-expanded={deskPanelOpen === "occupation"}
+                      aria-controls="person-vitals-occupation-panel"
+                      onClick={() =>
+                        setDeskPanelOpen((curr) =>
+                          curr === "occupation" ? "none" : "occupation"
+                        )
+                      }
+                    >
+                      <IconBriefcase className="shrink-0" />
+                    </button>
                     <button
                       type="button"
                       className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-md border-0 bg-transparent opacity-75 transition hover:opacity-100"
@@ -8251,6 +8640,323 @@ export default function PersonProfilePage() {
                       </p>
                     )}
                   </div>
+                  {deskPanelOpen === "occupation" ? (
+                    <div
+                      className="absolute inset-0 z-[35] flex items-start justify-end bg-[rgb(var(--dg-shadow-rgb)/0.14)] p-2 sm:p-3"
+                      role="presentation"
+                    >
+                      <div
+                        id="person-vitals-occupation-panel"
+                        ref={occupationPanelRef}
+                        className="flex max-h-full w-full max-w-[28rem] flex-col overflow-hidden rounded-lg border"
+                        style={{
+                          borderColor: colors.brownBorder,
+                          backgroundColor: colors.parchment,
+                          boxShadow: "0 10px 26px rgb(var(--dg-shadow-rgb) / 0.15)",
+                        }}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Occupation history"
+                      >
+                        <div
+                          className="flex items-center justify-between border-b px-3 py-2"
+                          style={{ borderColor: `${colors.brownBorder}88` }}
+                        >
+                          <p
+                            className="text-xs font-bold uppercase tracking-[0.12em]"
+                            style={{ fontFamily: sans, color: colors.brownMid }}
+                          >
+                            Occupation History
+                          </p>
+                          <button
+                            type="button"
+                            className="rounded border px-2 py-1 text-[11px] font-bold uppercase tracking-wide"
+                            style={{
+                              fontFamily: sans,
+                              borderColor: colors.brownBorder,
+                              color: colors.forest,
+                              backgroundColor: "transparent",
+                            }}
+                            onClick={() => {
+                              setAddingOccupation((v) => !v);
+                              setOccupationError(null);
+                            }}
+                          >
+                            {addingOccupation ? "Cancel" : "Add"}
+                          </button>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+                          {occupationLoading ? (
+                            <p
+                              className="text-sm italic"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              Loading occupations...
+                            </p>
+                          ) : null}
+                          {addingOccupation ? (
+                            <div
+                              className="mb-2 rounded-md border p-2"
+                              style={{
+                                borderColor: `${colors.brownBorder}88`,
+                                backgroundColor: colors.cream,
+                              }}
+                            >
+                              <input
+                                value={occupationAddDraft.job_title}
+                                onChange={(e) =>
+                                  setOccupationAddDraft((d) => ({
+                                    ...d,
+                                    job_title: e.target.value,
+                                  }))
+                                }
+                                placeholder="Job title"
+                                className="mb-1.5 w-full rounded border px-2 py-1.5 text-sm"
+                                style={{
+                                  fontFamily: sans,
+                                  borderColor: colors.brownBorder,
+                                  backgroundColor: colors.parchment,
+                                  color: colors.brownDark,
+                                }}
+                              />
+                              <input
+                                value={occupationAddDraft.year_observed}
+                                onChange={(e) =>
+                                  setOccupationAddDraft((d) => ({
+                                    ...d,
+                                    year_observed: e.target.value,
+                                  }))
+                                }
+                                placeholder="Year observed (optional)"
+                                inputMode="numeric"
+                                maxLength={4}
+                                className="w-full rounded border px-2 py-1.5 text-sm"
+                                style={{
+                                  fontFamily: sans,
+                                  borderColor: colors.brownBorder,
+                                  backgroundColor: colors.parchment,
+                                  color: colors.brownDark,
+                                }}
+                              />
+                              <div className="mt-2 flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded border px-2 py-1 text-xs font-bold uppercase tracking-wide"
+                                  style={{
+                                    fontFamily: sans,
+                                    borderColor: colors.brownBorder,
+                                    color: colors.brownMuted,
+                                    backgroundColor: "transparent",
+                                  }}
+                                  onClick={() => setAddingOccupation(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={occupationSaving}
+                                  className="rounded border px-2 py-1 text-xs font-bold uppercase tracking-wide"
+                                  style={{
+                                    fontFamily: sans,
+                                    borderColor: colors.forest,
+                                    color: colors.forest,
+                                    backgroundColor: "transparent",
+                                  }}
+                                  onClick={() => void saveNewOccupation()}
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                          {occupations.length === 0 && !occupationLoading ? (
+                            <p
+                              className="text-sm italic"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              No occupation entries yet.
+                            </p>
+                          ) : (
+                            <ul className="m-0 list-none p-0">
+                              {occupations.map((row) => {
+                                const yearText =
+                                  row.year_observed == null ? "—" : String(row.year_observed);
+                                const linkedRecordId = occupationLinkedRecordId(row);
+                                const linkedRecord = linkedRecordId
+                                  ? recordsById.get(linkedRecordId) ?? null
+                                  : null;
+                                const linkedHrefFromRecord = linkedRecord
+                                  ? resolveRecordHref(linkedRecord, signedDocUrls)
+                                  : null;
+                                const linkedHref =
+                                  linkedHrefFromRecord ??
+                                  (linkedRecordId ? `/review/${linkedRecordId}` : null);
+                                const isEditing = editingOccupationId === row.id;
+                                return (
+                                  <li
+                                    key={row.id}
+                                    className="border-0 border-b border-solid py-1.5"
+                                    style={{ borderBottomColor: `${colors.brownBorder}88` }}
+                                  >
+                                    {isEditing ? (
+                                      <div
+                                        className="rounded-md p-2"
+                                        style={{ backgroundColor: colors.cream }}
+                                      >
+                                        <input
+                                          value={occupationEditDraft?.job_title ?? ""}
+                                          onChange={(e) =>
+                                            setOccupationEditDraft((d) =>
+                                              d
+                                                ? { ...d, job_title: e.target.value }
+                                                : { job_title: e.target.value, year_observed: "" }
+                                            )
+                                          }
+                                          className="mb-1.5 w-full rounded border px-2 py-1.5 text-sm"
+                                          style={{
+                                            fontFamily: sans,
+                                            borderColor: colors.brownBorder,
+                                            backgroundColor: colors.parchment,
+                                            color: colors.brownDark,
+                                          }}
+                                        />
+                                        <input
+                                          value={occupationEditDraft?.year_observed ?? ""}
+                                          onChange={(e) =>
+                                            setOccupationEditDraft((d) =>
+                                              d
+                                                ? { ...d, year_observed: e.target.value }
+                                                : { job_title: "", year_observed: e.target.value }
+                                            )
+                                          }
+                                          inputMode="numeric"
+                                          maxLength={4}
+                                          className="w-full rounded border px-2 py-1.5 text-sm"
+                                          style={{
+                                            fontFamily: sans,
+                                            borderColor: colors.brownBorder,
+                                            backgroundColor: colors.parchment,
+                                            color: colors.brownDark,
+                                          }}
+                                        />
+                                        <div className="mt-2 flex items-center justify-end gap-2">
+                                          <button
+                                            type="button"
+                                            className="rounded border px-2 py-1 text-xs font-bold uppercase tracking-wide"
+                                            style={{
+                                              fontFamily: sans,
+                                              borderColor: colors.brownBorder,
+                                              color: colors.brownMuted,
+                                            }}
+                                            onClick={() => {
+                                              setEditingOccupationId(null);
+                                              setOccupationEditDraft(null);
+                                            }}
+                                          >
+                                            Cancel
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={occupationSaving}
+                                            className="rounded border px-2 py-1 text-xs font-bold uppercase tracking-wide"
+                                            style={{
+                                              fontFamily: sans,
+                                              borderColor: colors.forest,
+                                              color: colors.forest,
+                                            }}
+                                            onClick={() => void saveEditedOccupation(row)}
+                                          >
+                                            Save
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div
+                                        className="flex w-full cursor-pointer items-center gap-2"
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => {
+                                          setEditingOccupationId(row.id);
+                                          setOccupationEditDraft({
+                                            job_title: (row.job_title ?? "").trim(),
+                                            year_observed:
+                                              row.year_observed == null
+                                                ? ""
+                                                : String(row.year_observed),
+                                          });
+                                          setOccupationError(null);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            setEditingOccupationId(row.id);
+                                            setOccupationEditDraft({
+                                              job_title: (row.job_title ?? "").trim(),
+                                              year_observed:
+                                                row.year_observed == null
+                                                  ? ""
+                                                  : String(row.year_observed),
+                                            });
+                                            setOccupationError(null);
+                                          }
+                                        }}
+                                      >
+                                        <span
+                                          className="min-w-0 flex-1 truncate text-sm"
+                                          style={{ fontFamily: serif, color: colors.brownDark }}
+                                        >
+                                          {row.job_title?.trim() || "Untitled occupation"}
+                                        </span>
+                                        <span
+                                          className="text-xs"
+                                          style={{ fontFamily: sans, color: colors.brownMuted }}
+                                        >
+                                          {yearText}
+                                        </span>
+                                        {linkedHref ? (
+                                          <a
+                                            href={linkedHref}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex h-6 w-6 items-center justify-center rounded border"
+                                            style={{
+                                              borderColor: `${colors.brownBorder}88`,
+                                              color: colors.brownMuted,
+                                            }}
+                                            title="Open linked document"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <IconDocument className="h-3.5 w-3.5" />
+                                          </a>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className="inline-flex h-6 w-6 items-center justify-center rounded border"
+                                          style={{
+                                            borderColor: `${colors.brownBorder}88`,
+                                            color: "var(--dg-danger)",
+                                            backgroundColor: "transparent",
+                                          }}
+                                          title="Delete occupation"
+                                          disabled={occupationDeletingId === row.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void deleteOccupation(row);
+                                          }}
+                                        >
+                                          <IconTrash className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div

@@ -118,46 +118,72 @@ export async function POST(request: NextRequest) {
           .join("\n")
       : "- (none provided)";
 
-  const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 500,
-    system: `You generate genealogy story fields for a single event.
+  const systemPrompt = `You generate genealogy story fields for a single event.
 
 Voice style:
 ${getVoiceInstructions(vibe)}
 
 Return ONLY valid JSON with this exact shape:
 {
-  "story_full": "2-3 sentences"
+  "story_full": "story text"
 }
 
 Requirements:
 - Use only the provided event details; do not invent facts.
-- story_full must be 2-3 sentences.
+- story_full must be 250 characters or fewer, including spaces.
 - Keep the person the event is about as the subject.
 - Never include markdown fences or extra keys.
-- If event_type is "residence", use event_notes as the primary source for household relationship language. Additionally incorporate any relationships listed in related_people that are not already described in event_notes — for example a sibling, cousin, or neighbor relationship added by the researcher. Never use the word "sibling" unless event_notes or related_people explicitly states it.`,
-    messages: [
-      {
-        role: "user",
-        content: `Event details:
+- Do not start story_full with a date in any format.
+- Do not restate the exact event_date in story_full unless it is required to disambiguate the event from another otherwise-identical event.
+- Only refer to people provided in event details or related_people.
+- You may use a person's full name, first name, or possessive form (for example, "Dorothy's"). If multiple people share the same first name, use full names for clarity.
+- If event_type is "residence", use event_notes as the primary source for household relationship language. Additionally incorporate any relationships listed in related_people that are not already described in event_notes. Never use the word "sibling" unless event_notes or related_people explicitly states it.
+- Vary openings and sentence rhythm across generations. Use one opening mode per story and rotate naturally: place-led, person-led, action-led, document-led, contrast-led, relationship-led, or consequence-led.
+- Avoid repeating a generic opening template when another valid opening mode fits the same facts.`;
+
+  const baseUserPrompt = `Event details:
 ${JSON.stringify(eventJson, null, 2)}
 
 People referenced in this story:
 ${relatedPeopleBlock}
 
-Use these exact names when referring to these people in the story. Do not use any other names.`,
-      },
-    ],
-  });
+Use only these people when naming someone in the story. You may use a full name, first name, or possessive form when unambiguous.`;
 
-  console.log("[DG] Story regen tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens));
+  const staleOpeningPatterns: RegExp[] = [
+    /^in the verdant countryside of\b/i,
+    /^in the [a-z]+ countryside of\b/i,
+    /^in the quiet [a-z]+\b/i,
+    /^in the [a-z]+\s+[a-z]+\s+of\b/i,
+  ];
 
-  const text = message.content
-    .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
+  async function generateStoryText(extraInstruction?: string): Promise<string> {
+    const userPrompt = extraInstruction
+      ? `${baseUserPrompt}\n\nAdditional requirement for this retry:\n${extraInstruction}`
+      : baseUserPrompt;
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      temperature: 0.8,
+      top_p: 0.9,
+      max_tokens: 500,
+      system: systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+    });
+
+    console.log("[DG] Story regen tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens));
+
+    return message.content
+      .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+  }
+
+  const text = await generateStoryText();
 
   if (!text) {
     return NextResponse.json(
@@ -190,6 +216,46 @@ Use these exact names when referring to these people in the story. Do not use an
       { error: "Model did not return required story fields." },
       { status: 502 }
     );
+  }
+
+  const startsWithDate =
+    /^(?:\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}(?:[/-]\d{1,2}(?:[/-]\d{1,2})?)?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,\s*\d{2,4})?)/i.test(
+      storyFull
+    );
+  const startsWithStaleOpening = staleOpeningPatterns.some((pattern) =>
+    pattern.test(storyFull)
+  );
+
+  if (startsWithDate || startsWithStaleOpening) {
+    const retryText = await generateStoryText(
+      "Do not begin with a date or year. Do not use cliche landscape openers like 'in the verdant countryside of'. Open with a concrete person, action, record detail, relationship, contrast, or consequence."
+    );
+    if (retryText) {
+      try {
+        const retryParsed = parseJsonFromText(retryText);
+        const retryRecord =
+          typeof retryParsed === "object" && retryParsed !== null
+            ? (retryParsed as Record<string, unknown>)
+            : null;
+        const retryStoryFull =
+          retryRecord && typeof retryRecord.story_full === "string"
+            ? retryRecord.story_full.trim()
+            : "";
+        if (
+          retryStoryFull &&
+          !/^(?:\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}(?:[/-]\d{1,2}(?:[/-]\d{1,2})?)?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,\s*\d{2,4})?)/i.test(
+            retryStoryFull
+          ) &&
+          !staleOpeningPatterns.some((pattern) => pattern.test(retryStoryFull))
+        ) {
+          return NextResponse.json({
+            story_full: retryStoryFull,
+          });
+        }
+      } catch {
+        // Fall through to original valid output if retry JSON parse fails.
+      }
+    }
   }
 
   return NextResponse.json({

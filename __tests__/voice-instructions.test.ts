@@ -10,9 +10,6 @@ const VALID_VIBES = [
   "gen_z",
 ] as const;
 
-const CHARACTER_LIMIT_INSTRUCTION =
-  "STRICT LIMIT: Your response must be 250 characters or fewer including spaces. Count every character before responding. Do not exceed this limit under any circumstances.";
-
 describe("getVoiceInstructions", () => {
   describe("valid vibe keys", () => {
     it.each(VALID_VIBES)(
@@ -30,12 +27,9 @@ describe("getVoiceInstructions", () => {
       expect(unique.size).toBe(VALID_VIBES.length);
     });
 
-    it.each(VALID_VIBES)(
-      "includes the 250-character limit instruction in the output for %s",
-      (vibe) => {
-        expect(getVoiceInstructions(vibe)).toContain(CHARACTER_LIMIT_INSTRUCTION);
-      },
-    );
+    it.each(VALID_VIBES)("does not include a strict character limit for %s", (vibe) => {
+      expect(getVoiceInstructions(vibe)).not.toContain("STRICT LIMIT:");
+    });
   });
 
   describe("unrecognized vibe keys", () => {

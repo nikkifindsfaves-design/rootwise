@@ -51,6 +51,14 @@ The developer is a non-technical Product Manager. She understands systems logica
 - Never combine a schema change with a feature change in the same session — do them separately
 - Never delete or rename a column without flagging it — existing data will be affected
 - If a query touches a table that already has data, say so before running it
+- If a runtime/database error indicates a schema mismatch (example: "column does not exist"), STOP and present options before changing code behavior
+- When a complete fix requires work outside Cursor (Supabase SQL, dashboard changes, migrations), explicitly label it as "Outside Cursor required" and provide step-by-step instructions
+- Do not silently switch column names, table contracts, or data ownership assumptions to unblock a flow — ask for approval first
+- For any schema-dependent fix, require a decision gate with explicit options:
+  - Option A: adjust code to current schema
+  - Option B: update schema to intended contract
+  - Option C: compatibility bridge + staged migration
+- After the user chooses, restate the chosen path and then implement only that path
 
 ### API key safety
 - `ANTHROPIC_API_KEY` must only appear in server-side files (`app/api/`, server actions, `lib/` utilities called from server)
