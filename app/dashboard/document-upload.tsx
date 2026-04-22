@@ -1,7 +1,7 @@
 "use client";
 
 import { RECORD_TYPES } from "@/lib/records/record-types";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 
 const sans = "var(--font-dg-body), Lato, sans-serif";
@@ -115,6 +115,7 @@ export default function DocumentUploadSection({
   embedded = false,
 }: DocumentUploadSectionProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [file, setFile] = useState<File | null>(null);
   const [recordType, setRecordType] = useState<(typeof RECORD_TYPES)[number]>(
     "Birth Record"
@@ -183,6 +184,15 @@ export default function DocumentUploadSection({
     setPendingPeople([]);
     setMultiPersonNameQuery("");
     setMultiPersonProcessing(false);
+  }
+
+  function reviewHrefForRecord(recordId: string): string {
+    const params = new URLSearchParams();
+    if (pathname && pathname.trim() !== "") {
+      params.set("returnTo", pathname);
+    }
+    const query = params.toString();
+    return query ? `/review/${recordId}?${query}` : `/review/${recordId}`;
   }
 
   async function handleUpload(options: { skipExtraction: boolean }) {
@@ -263,7 +273,7 @@ export default function DocumentUploadSection({
         return;
       }
 
-      router.push(`/review/${recordId}`);
+      router.push(reviewHrefForRecord(recordId));
     } catch (err) {
       console.log("[document-upload] process-document error", err);
       setError("Something went wrong while uploading your document.");
@@ -326,7 +336,7 @@ export default function DocumentUploadSection({
       }
 
       resetMultiPersonModal();
-      router.push(`/review/${newRecordId}`);
+      router.push(reviewHrefForRecord(newRecordId));
     } catch (err) {
       console.log("[document-upload] process-document error", err);
       setError("Something went wrong while processing your document.");
@@ -346,7 +356,7 @@ export default function DocumentUploadSection({
     if (pendingRecordId) {
       const id = pendingRecordId;
       resetMultiPersonModal();
-      router.push(`/review/${id}`);
+      router.push(reviewHrefForRecord(id));
     }
   }
 

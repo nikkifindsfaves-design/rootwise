@@ -282,11 +282,18 @@ export default function ReviewDuplicatesPage() {
         typeof pr.returnTreeId === "string" && pr.returnTreeId.trim() !== ""
           ? pr.returnTreeId.trim()
           : null;
+      const returnPath =
+        typeof pr.returnPath === "string" &&
+        pr.returnPath.trim() !== "" &&
+        pr.returnPath.trim().startsWith("/")
+          ? pr.returnPath.trim()
+          : null;
 
       const payload: PendingReviewPayload = {
         recordId: pr.recordId,
         recordTypeLabel:
           typeof pr.recordTypeLabel === "string" ? pr.recordTypeLabel : "",
+        ...(returnPath ? { returnPath } : {}),
         ...(returnTreeId ? { returnTreeId } : {}),
         people: pr.people as PendingPerson[],
       };
@@ -598,10 +605,12 @@ export default function ReviewDuplicatesPage() {
         // still redirect
       }
       const dest =
-        pendingReview.returnTreeId &&
-        pendingReview.returnTreeId.trim() !== ""
-          ? `/dashboard/${pendingReview.returnTreeId.trim()}`
-          : "/dashboard";
+        pendingReview.returnPath && pendingReview.returnPath.trim() !== ""
+          ? pendingReview.returnPath.trim()
+          : pendingReview.returnTreeId &&
+              pendingReview.returnTreeId.trim() !== ""
+            ? `/dashboard/${pendingReview.returnTreeId.trim()}`
+            : "/dashboard";
       router.push(dest);
     } catch {
       setSubmitError("Network error. Try again.");

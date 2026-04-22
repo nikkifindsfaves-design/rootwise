@@ -35,33 +35,33 @@ const VIBES = [
     id: "classic",
     name: "Classic",
     description:
-      "Dry wit, sharp observations. Like a true-crime podcast about your family.",
+      "Evidence-first true-crime narration with one sharp observational beat.",
     example:
-      "Della Mae Hutchins arrived in Pittsylvania County on a Tuesday in March, 1887, and the paperwork was filed accordingly.",
+      "Case file: Della Mae Hutchins enters the record in Pittsylvania County, March 1887. The filing is routine. The timing is what makes it interesting.",
   },
   {
     id: "gossip_girl",
     name: "Gossip Girl",
     description:
-      "Theatrical, knowing, slightly scandalous. XOXO.",
+      "Socially sharp, theatrical, and reveal-driven. Status always matters.",
     example:
-      "Della Mae Hutchins made her entrance in March 1887 — already fashionably late to the nineteenth century, and not yet done surprising people.",
+      "Our girl Della Mae Hutchins debuts in March 1887, Pittsylvania County, with perfect timing and just enough mystery to keep everyone talking.",
   },
   {
     id: "old_timey",
     name: "Old-Timey",
     description:
-      "A learned gentleman of the 1800s with time to spare and a lot to say.",
+      "Formal nineteenth-century chronicler voice: stately, precise, and dignified.",
     example:
-      "It is with no small measure of satisfaction that we record the birth of Miss Della Mae Hutchins, who arrived in Pittsylvania County, Virginia, on the fourth of March, 1887, as if she had always intended to.",
+      "It is with due propriety that we record the birth of Miss Della Mae Hutchins, entered at Pittsylvania County in March of 1887, an occasion of clear familial consequence.",
   },
   {
     id: "southern_gothic",
     name: "Southern Gothic",
     description:
-      "Slow, atmospheric, beautiful and a little haunted.",
+      "Atmospheric Southern prose: sensory, haunted, and place-soaked.",
     example:
-      "Della Mae Hutchins came into the world in the red clay county of Pittsylvania, Virginia, in the early days of March 1887, when the ground was still cold and everything was beginning anyway.",
+      "In Pittsylvania's cold red clay spring of 1887, Della Mae Hutchins arrives while the air still holds winter and the porch boards remember every footstep.",
   },
   {
     id: "gen_z",

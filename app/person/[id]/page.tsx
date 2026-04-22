@@ -430,7 +430,42 @@ function sourceHostLabel(href: string | null): string | null {
 
 function parseEventDateMs(s: string | null | undefined): number | null {
   if (s == null) return null;
-  const t = Date.parse(s.trim());
+  const raw = s.trim();
+  if (!raw) return null;
+
+  const normalized = formatDateString(raw).trim();
+
+  // Year-only dates sort to the end of that year, but still display as year-only.
+  const yearOnly = /^(\d{4})$/.exec(normalized);
+  if (yearOnly) {
+    const y = Number(yearOnly[1]);
+    if (Number.isFinite(y) && y >= 1) {
+      return Date.UTC(y, 11, 31, 23, 59, 59, 999);
+    }
+  }
+
+  // Month/year dates sort after fully dated events in that month.
+  const monthYear = /^(\d{2})\/(\d{4})$/.exec(normalized);
+  if (monthYear) {
+    const mo = Number(monthYear[1]);
+    const y = Number(monthYear[2]);
+    if (mo >= 1 && mo <= 12 && y >= 1) {
+      return Date.UTC(y, mo, 0, 23, 59, 59, 999);
+    }
+  }
+
+  // Fully known dates sort by that exact day.
+  const full = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(normalized);
+  if (full) {
+    const mo = Number(full[1]);
+    const d = Number(full[2]);
+    const y = Number(full[3]);
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 1) {
+      return Date.UTC(y, mo - 1, d, 12, 0, 0, 0);
+    }
+  }
+
+  const t = Date.parse(raw);
   return Number.isNaN(t) ? null : t;
 }
 
@@ -520,6 +555,29 @@ function clusterLinkedSources(
 function eventDateLabel(ev: EventRow): string {
   const d = ev.event_date?.trim();
   if (!d) return "Date unknown";
+  const normalized = formatDateString(d).trim();
+
+  // Keep partial dates as partial dates; do not fabricate month/day values.
+  if (/^\d{4}$/.test(normalized)) return normalized;
+  const monthYear = /^(\d{2})\/(\d{4})$/.exec(normalized);
+  if (monthYear) {
+    const monthName = new Date(
+      Date.UTC(Number(monthYear[2]), Number(monthYear[1]) - 1, 1)
+    ).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+    return `${monthName} ${monthYear[2]}`;
+  }
+  const full = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(normalized);
+  if (full) {
+    const mo = Number(full[1]);
+    const day = Number(full[2]);
+    const year = Number(full[3]);
+    const monthName = new Date(Date.UTC(year, mo - 1, 1)).toLocaleDateString(
+      "en-US",
+      { month: "long", timeZone: "UTC" }
+    );
+    return `${monthName} ${day}, ${year}`;
+  }
+
   try {
     const parsed = new Date(d.replace(/-/g, '/'));
     if (isNaN(parsed.getTime())) return formatDateString(d);
@@ -536,6 +594,28 @@ function eventDateLabel(ev: EventRow): string {
 function eventTimelineMonthDayLabel(ev: EventRow): string {
   const d = ev.event_date?.trim();
   if (!d) return "Date unknown";
+  const normalized = formatDateString(d).trim();
+
+  // Keep partial dates partial in timeline labels.
+  if (/^\d{4}$/.test(normalized)) return "—";
+  const monthYear = /^(\d{2})\/(\d{4})$/.exec(normalized);
+  if (monthYear) {
+    return new Date(
+      Date.UTC(Number(monthYear[2]), Number(monthYear[1]) - 1, 1)
+    ).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+  }
+  const full = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(normalized);
+  if (full) {
+    const mo = Number(full[1]);
+    const day = Number(full[2]);
+    const year = Number(full[3]);
+    const monthName = new Date(Date.UTC(year, mo - 1, 1)).toLocaleDateString(
+      "en-US",
+      { month: "long", timeZone: "UTC" }
+    );
+    return `${monthName} ${day}`;
+  }
+
   try {
     const parsed = new Date(d.replace(/-/g, "/"));
     if (isNaN(parsed.getTime())) {
@@ -1248,6 +1328,29 @@ function IconTrash({ className }: { className?: string }) {
       <path d="M3 6h18" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+function IconRefreshCw({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
     </svg>
   );
 }
@@ -2276,6 +2379,11 @@ export default function PersonProfilePage() {
   } | null>(null);
   const [eventEditSaving, setEventEditSaving] = useState(false);
   const [eventEditError, setEventEditError] = useState<string | null>(null);
+  const [regeneratingEventId, setRegeneratingEventId] = useState<string | null>(
+    null
+  );
+  const [regenerateStoryErrorByEventId, setRegenerateStoryErrorByEventId] =
+    useState<Record<string, string>>({});
   const [eventDeleteConfirmId, setEventDeleteConfirmId] = useState<
     string | null
   >(null);
@@ -5687,6 +5795,148 @@ export default function PersonProfilePage() {
     cancelEditEvent();
   }
 
+  async function regenerateEventStory(ev: EventRow) {
+    if (!person || !personId) return;
+    if (!person.tree_id || person.tree_id.trim() === "") {
+      setRegenerateStoryErrorByEventId((prev) => ({
+        ...prev,
+        [ev.id]: "This person is missing a tree context for story regeneration.",
+      }));
+      return;
+    }
+
+    setRegeneratingEventId(ev.id);
+    setRegenerateStoryErrorByEventId((prev) => {
+      const next = { ...prev };
+      delete next[ev.id];
+      return next;
+    });
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error("Not signed in.");
+      }
+
+      const personName = [person.first_name, person.middle_name, person.last_name]
+        .filter((x) => typeof x === "string" && x.trim() !== "")
+        .join(" ")
+        .trim();
+      if (!personName) {
+        throw new Error("Missing person name for story regeneration.");
+      }
+
+      const relationshipRows = [
+        ...family.parents.map((p) => ({
+          id: p.id,
+          relationship_type: "parent",
+          name: [p.first_name, p.middle_name, p.last_name]
+            .filter((x) => typeof x === "string" && x.trim() !== "")
+            .join(" ")
+            .trim(),
+        })),
+        ...family.children.map((p) => ({
+          id: p.id,
+          relationship_type: "child",
+          name: [p.first_name, p.middle_name, p.last_name]
+            .filter((x) => typeof x === "string" && x.trim() !== "")
+            .join(" ")
+            .trim(),
+        })),
+        ...family.spouses.map((p) => ({
+          id: p.id,
+          relationship_type: "spouse",
+          name: [p.first_name, p.middle_name, p.last_name]
+            .filter((x) => typeof x === "string" && x.trim() !== "")
+            .join(" ")
+            .trim(),
+        })),
+        ...family.siblings.map((p) => ({
+          id: p.id,
+          relationship_type: "sibling",
+          name: [p.first_name, p.middle_name, p.last_name]
+            .filter((x) => typeof x === "string" && x.trim() !== "")
+            .join(" ")
+            .trim(),
+        })),
+      ]
+        .filter((row) => row.id !== personId && row.name !== "")
+        .filter(
+          (row, idx, arr) =>
+            arr.findIndex((x) => x.id === row.id && x.relationship_type === row.relationship_type) === idx
+        )
+        .map((row) => ({ name: row.name, relationship_type: row.relationship_type }));
+
+      const placeString = ev.event_place ? formatPlace(ev.event_place) : null;
+      const contextPersonIds = [
+        personId,
+        ...family.parents.map((p) => p.id),
+        ...family.children.map((p) => p.id),
+        ...family.spouses.map((p) => p.id),
+        ...family.siblings.map((p) => p.id),
+      ].filter((id, idx, arr) => id && arr.indexOf(id) === idx);
+
+      const regenRes = await fetch("/api/regenerate-story", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tree_id: person.tree_id,
+          anchor_person_id: personId,
+          context_person_ids: contextPersonIds,
+          exclude_event_id: ev.id,
+          person_name: personName,
+          event_type: ev.event_type,
+          event_date: ev.event_date,
+          event_place: placeString,
+          event_notes: ev.notes?.trim() || null,
+          related_people: relationshipRows,
+        }),
+      });
+
+      let regenData: { story_full?: string; error?: string } | null = null;
+      try {
+        regenData = (await regenRes.json()) as { story_full?: string; error?: string };
+      } catch {
+        regenData = null;
+      }
+      if (!regenRes.ok) {
+        throw new Error(regenData?.error || "Story regeneration failed.");
+      }
+
+      const nextStory = (regenData?.story_full ?? "").trim();
+      if (!nextStory) {
+        throw new Error("No regenerated story returned.");
+      }
+
+      const { error: updateErr } = await supabase
+        .from("events")
+        .update({ story_full: nextStory })
+        .eq("id", ev.id)
+        .eq("user_id", user.id);
+      if (updateErr) throw updateErr;
+
+      setEvents((prev) =>
+        sortEventsChronologically(
+          prev.map((row) =>
+            row.id === ev.id ? { ...row, story_full: nextStory } : row
+          )
+        )
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to regenerate this story.";
+      setRegenerateStoryErrorByEventId((prev) => ({
+        ...prev,
+        [ev.id]: message,
+      }));
+    } finally {
+      setRegeneratingEventId((curr) => (curr === ev.id ? null : curr));
+    }
+  }
+
   async function deleteSourceLink(
     recordId: string,
     clusterEventIds: string[]
@@ -7626,6 +7876,50 @@ export default function PersonProfilePage() {
                                       toggleTimelineStoryExpanded(ev.id)
                                     }
                                   />
+                                  <div className="mt-2 flex justify-end">
+                                    <button
+                                      type="button"
+                                      disabled={regeneratingEventId === ev.id}
+                                      onClick={() => {
+                                        void regenerateEventStory(ev);
+                                      }}
+                                      className="inline-flex items-center gap-1.5 border-none bg-transparent p-0 text-sm underline decoration-dotted underline-offset-2"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.forest,
+                                        fontWeight: 600,
+                                        cursor:
+                                          regeneratingEventId === ev.id
+                                            ? "wait"
+                                            : "pointer",
+                                        opacity: regeneratingEventId === ev.id ? 0.7 : 1,
+                                      }}
+                                      aria-label="Regenerate this story"
+                                      title="Regenerate story"
+                                    >
+                                      <IconRefreshCw
+                                        className={
+                                          regeneratingEventId === ev.id
+                                            ? "animate-spin"
+                                            : undefined
+                                        }
+                                      />
+                                      {regeneratingEventId === ev.id
+                                        ? "Regenerating..."
+                                        : "Regenerate story"}
+                                    </button>
+                                  </div>
+                                  {regenerateStoryErrorByEventId[ev.id] ? (
+                                    <p
+                                      className="mt-2 text-xs"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: "var(--dg-danger)",
+                                      }}
+                                    >
+                                      {regenerateStoryErrorByEventId[ev.id]}
+                                    </p>
+                                  ) : null}
                                   <p
                                     className="mt-1 text-sm italic"
                                     style={{

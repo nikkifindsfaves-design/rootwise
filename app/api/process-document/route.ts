@@ -226,7 +226,7 @@ PEOPLE — extract every person in the household who appears to be a family memb
 
 EVENTS — produce exactly one residence event per person, no exceptions. Every single person in the people array must have a corresponding residence event in the events array. If you are uncertain about any detail for a person, still produce their residence event with whatever date and place information is available from the document. A person with no residence event is an extraction error.
 - event_type: exactly "residence"
-- event_date: the census year as "YYYY" only, e.g. "1880"
+- event_date: use the census enumeration date shown on the document (often printed at the top of the page). If month, day, and year are all present, return "YYYY-MM-DD". If only month and year are visible, return "YYYY-MM". If only the year is visible, return "YYYY". Do not invent missing month or day.
 - event_place: the household location parsed into { township, county, state, country }. Use the same place rules as birth_place — spell out abbreviations, reflect the political entity at the time of the record.
 - description: state the person's role in the household (head, wife, son, daughter, etc.) and their occupation if stated.
 - person_name: the full name of the person this event belongs to.

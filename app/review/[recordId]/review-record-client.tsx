@@ -22,7 +22,7 @@ import {
   getIsDeathRecord,
   getIsMarriageRecord,
 } from "@/lib/utils/review-visibility";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -165,6 +165,8 @@ export type PendingReviewPayload = {
   recordTypeLabel: string;
   /** When set, duplicate matching and post-save redirect target this tree. */
   returnTreeId?: string | null;
+  /** When set, post-save redirect returns to the upload origin page. */
+  returnPath?: string | null;
   people: Array<{
     first_name: string;
     middle_name: string | null;
@@ -814,6 +816,7 @@ export default function ReviewRecordClient({
   documentSubtype?: string | null;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const parsed = useMemo(
     () => parsedShapeFromAiResponse(aiResponse),
@@ -824,6 +827,14 @@ export default function ReviewRecordClient({
     () => extractionSkippedFromAi(aiResponse),
     [aiResponse]
   );
+  const returnPath = useMemo(() => {
+    const raw = searchParams.get("returnTo");
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    // Keep redirects in-app only.
+    if (!trimmed.startsWith("/")) return null;
+    return trimmed;
+  }, [searchParams]);
 
   const [cards, setCards] = useState<PersonCardState[]>(() => {
     const init = createInitialCardsAndShared(aiResponse);
@@ -948,6 +959,7 @@ export default function ReviewRecordClient({
         recordId,
         recordTypeLabel,
         ...(recordTreeId ? { returnTreeId: recordTreeId } : {}),
+        ...(returnPath ? { returnPath } : {}),
         people: checked.map((c) => ({
           first_name: c.form.first_name.trim(),
           middle_name: c.form.middle_name.trim() || null,
