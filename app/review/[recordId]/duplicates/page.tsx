@@ -512,81 +512,83 @@ export default function ReviewDuplicatesPage() {
           if (nm) nameById.set(r.id, nm);
         }
 
-        for (const se of savedEvents) {
-          const personPayload = pendingPersonsPayload[se.personIndex];
-          if (!personPayload) continue;
-          if (personPayload.generate_story === false) continue;
-          const ev = personPayload.events?.[se.eventIndex];
-          if (!ev) continue;
+        await Promise.all(
+          savedEvents.map(async (se) => {
+            const personPayload = pendingPersonsPayload[se.personIndex];
+            if (!personPayload) return;
+            if (personPayload.generate_story === false) return;
+            const ev = personPayload.events?.[se.eventIndex];
+            if (!ev) return;
 
-          const personName =
-            nameById.get(se.personId) ?? fullNameFromPending(personPayload);
-          const eventType = (ev.event_type ?? "").trim() || "other";
-          const eventDate = ev.event_date?.trim() || null;
-          const fromDisplay = ev.event_place_display?.trim();
-          const fromFields =
-            ev.event_place_fields != null
-              ? formatPlace(ev.event_place_fields).trim()
-              : "";
-          const eventPlace = fromDisplay || fromFields || null;
-          const eventNotes = ev.notes?.trim() || null;
+            const personName =
+              nameById.get(se.personId) ?? fullNameFromPending(personPayload);
+            const eventType = (ev.event_type ?? "").trim() || "other";
+            const eventDate = ev.event_date?.trim() || null;
+            const fromDisplay = ev.event_place_display?.trim();
+            const fromFields =
+              ev.event_place_fields != null
+                ? formatPlace(ev.event_place_fields).trim()
+                : "";
+            const eventPlace = fromDisplay || fromFields || null;
+            const eventNotes = ev.notes?.trim() || null;
 
-          const related_people = (personPayload.relationships ?? [])
-            .map((rel) => {
-              const name = (rel.related_name ?? "").trim();
-              if (!name) return null;
-              return {
-                name,
-                relationship_type: rel.relationship_type?.trim() || "other",
-              };
-            })
-            .filter(
-              (rp): rp is { name: string; relationship_type: string } =>
-                rp !== null
-            );
+            const related_people = (personPayload.relationships ?? [])
+              .map((rel) => {
+                const name = (rel.related_name ?? "").trim();
+                if (!name) return null;
+                return {
+                  name,
+                  relationship_type: rel.relationship_type?.trim() || "other",
+                };
+              })
+              .filter(
+                (rp): rp is { name: string; relationship_type: string } =>
+                  rp !== null
+              );
 
-          let storyFull: string | null = null;
-          try {
-            const regRes = await fetch("/api/regenerate-story", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
+            let storyFull: string | null = null;
+            try {
+              const regRes = await fetch("/api/regenerate-story", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
                 body: JSON.stringify({
-                tree_id: treeId,
-                person_name: personName,
-                event_type: eventType,
-                event_date: eventDate,
-                event_place: eventPlace,
-                event_notes: eventNotes,
-                related_people,
-                anchor_person_id: se.personId,
-                context_person_ids: contextPersonIds,
-                exclude_event_id: se.eventId,
-                record_type_label: pendingReview.recordTypeLabel,
-              }),
-            });
-            const regData = (await regRes.json()) as {
-              story_full?: unknown;
-              error?: string;
-            };
-            if (regRes.ok && typeof regData.story_full === "string") {
-              storyFull = regData.story_full;
+                  tree_id: treeId,
+                  person_name: personName,
+                  event_type: eventType,
+                  event_date: eventDate,
+                  event_place: eventPlace,
+                  event_notes: eventNotes,
+                  related_people,
+                  anchor_person_id: se.personId,
+                  context_person_ids: contextPersonIds,
+                  exclude_event_id: se.eventId,
+                  record_type_label: pendingReview.recordTypeLabel,
+                }),
+              });
+              const regData = (await regRes.json()) as {
+                story_full?: unknown;
+                error?: string;
+              };
+              if (regRes.ok && typeof regData.story_full === "string") {
+                storyFull = regData.story_full;
+              }
+            } catch {
+              // keep null; save already succeeded
             }
-          } catch {
-            // keep null; save already succeeded
-          }
 
-          if (storyFull) {
-            const { error: upErr } = await supabase
-              .from("events")
-              .update({ story_full: storyFull })
-              .eq("id", se.eventId)
-              .eq("user_id", user.id);
-            if (upErr) {
-              console.error("[duplicates] persist story_full", upErr.message);
+            if (storyFull) {
+              const { error: upErr } = await supabase
+                .from("events")
+                .update({ story_full: storyFull })
+                .eq("id", se.eventId)
+                .eq("user_id", user.id);
+              if (upErr) {
+                console.error("[duplicates] persist story_full", upErr.message);
+              }
             }
-          }
-        }
+          })
+        );
         }
       }
 

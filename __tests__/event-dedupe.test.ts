@@ -182,4 +182,55 @@ describe("savePersonEventWithDedupe", () => {
     expect(new Set(db.events.map((e) => e.id)).size).toBe(2);
     expect(db.event_sources).toHaveLength(2);
   });
+
+  it("dedupes same-instance land events and links sources", async () => {
+    const { supabase, db } = createSupabaseMock();
+
+    const first = await savePersonEventWithDedupe(supabase, "u1", "p1", "r1", {
+      event_type: "land",
+      event_date: "1899-01-01",
+      event_place_id: "place_a",
+      notes: "Tax assessment",
+      story_full: "Land story one",
+    });
+
+    const second = await savePersonEventWithDedupe(supabase, "u1", "p1", "r2", {
+      event_type: "land",
+      event_date: "1899-01-01",
+      event_place_id: "place_a",
+      notes: "Tax assessment",
+      story_full: "Land story two",
+    });
+
+    expect(first.error).toBeNull();
+    expect(second.error).toBeNull();
+    expect(db.events).toHaveLength(1);
+    expect(db.event_sources).toHaveLength(2);
+    expect(db.event_sources[1]?.event_id).toBe(db.event_sources[0]?.event_id);
+  });
+
+  it("creates distinct child died events when the child differs", async () => {
+    const { supabase, db } = createSupabaseMock();
+
+    const first = await savePersonEventWithDedupe(supabase, "u1", "parent_1", "r1", {
+      event_type: "child died",
+      event_date: "1910-04-01",
+      event_place_id: null,
+      notes: "Death of child Mary Smith",
+      story_full: "Mary story",
+    });
+
+    const second = await savePersonEventWithDedupe(supabase, "u1", "parent_1", "r2", {
+      event_type: "child died",
+      event_date: "1910-04-01",
+      event_place_id: null,
+      notes: "Death of child John Smith",
+      story_full: "John story",
+    });
+
+    expect(first.error).toBeNull();
+    expect(second.error).toBeNull();
+    expect(db.events).toHaveLength(2);
+    expect(db.event_sources).toHaveLength(2);
+  });
 });

@@ -4,29 +4,140 @@
     return (t || "other").trim().toLowerCase() || "other";
   }
 
-function allowsMultipleEventsPerPerson(eventTypeRaw: string): boolean {
+function isSingleInstanceEventType(eventTypeRaw: string): boolean {
   const eventType = normalizeEventTypeKey(eventTypeRaw);
-  return eventType === "child born";
+  return eventType === "birth" || eventType === "death";
 }
 
-  export async function findExistingEventIdForPersonType(
+function normalizeDateKey(raw: string | null): string | null {
+  const t = (raw ?? "").trim();
+  if (!t) return null;
+  const m = t.match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/);
+  if (!m) return t.toLowerCase();
+  const y = m[1];
+  const mo = m[2];
+  const d = m[3];
+  if (!mo) return y;
+  if (!d) return `${y}-${mo}`;
+  return `${y}-${mo}-${d}`;
+}
+
+function yearsMatch(a: string, b: string): boolean {
+  const ya = a.slice(0, 4);
+  const yb = b.slice(0, 4);
+  return /^\d{4}$/.test(ya) && /^\d{4}$/.test(yb) && ya === yb;
+}
+
+function datesMatch(aRaw: string | null, bRaw: string | null): boolean {
+  const a = normalizeDateKey(aRaw);
+  const b = normalizeDateKey(bRaw);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Treat year-only input as matching specific same-year dates.
+  if ((a.length === 4 || b.length === 4) && yearsMatch(a, b)) return true;
+  return false;
+}
+
+function normalizeTextKey(raw: string | null): string {
+  return (raw ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractLinkedPersonName(eventTypeRaw: string, notesRaw: string | null): string {
+  const eventType = normalizeEventTypeKey(eventTypeRaw);
+  const notes = normalizeTextKey(notesRaw);
+  if (!notes) return "";
+  if (eventType === "child born" || eventType === "child died") {
+    const m = notes.match(/\bchild\s+([a-z0-9 ]{2,80})$/);
+    if (m?.[1]) return m[1].trim();
+  }
+  if (eventType === "spouse died") {
+    const m = notes.match(/\bspouse\s+([a-z0-9 ]{2,80})$/);
+    if (m?.[1]) return m[1].trim();
+  }
+  return "";
+}
+
+type ExistingEventCandidate = {
+  id: string;
+  event_type: string | null;
+  event_date: string | null;
+  event_place_id: string | null;
+  notes: string | null;
+};
+
+function pickBestSingleInstanceCandidate(
+  candidates: ExistingEventCandidate[],
+  incomingDate: string | null
+): string | null {
+  for (const c of candidates) {
+    if (datesMatch(c.event_date, incomingDate)) return c.id;
+  }
+  return candidates[0]?.id ?? null;
+}
+
+function isSameEventInstance(
+  existing: ExistingEventCandidate,
+  incoming: {
+    event_type: string;
+    event_date: string | null;
+    event_place_id: string | null;
+    notes: string | null;
+  }
+): boolean {
+  const incomingType = normalizeEventTypeKey(incoming.event_type);
+  if (normalizeEventTypeKey(existing.event_type ?? "") !== incomingType) return false;
+  if (!datesMatch(existing.event_date, incoming.event_date)) return false;
+
+  const existingPlace = (existing.event_place_id ?? "").trim();
+  const incomingPlace = (incoming.event_place_id ?? "").trim();
+  if (existingPlace && incomingPlace) return existingPlace === incomingPlace;
+
+  const linkedExisting = extractLinkedPersonName(incomingType, existing.notes);
+  const linkedIncoming = extractLinkedPersonName(incomingType, incoming.notes);
+  if (linkedExisting && linkedIncoming) return linkedExisting === linkedIncoming;
+
+  const existingNotes = normalizeTextKey(existing.notes);
+  const incomingNotes = normalizeTextKey(incoming.notes);
+  if (existingNotes && incomingNotes) return existingNotes === incomingNotes;
+
+  // If we only have type + date, treat as duplicate.
+  return true;
+}
+
+export async function findExistingEventIdForPersonType(
     supabase: SupabaseClient,
     userId: string,
     personId: string,
-    eventTypeRaw: string
+  fields: {
+    event_type: string;
+    event_date: string | null;
+    event_place_id: string | null;
+    notes: string | null;
+  }
   ): Promise<string | null> {
-    const target = normalizeEventTypeKey(eventTypeRaw);
+  const target = normalizeEventTypeKey(fields.event_type);
     const { data, error } = await supabase
       .from("events")
-      .select("id, event_type")
+    .select("id, event_type, event_date, event_place_id, notes")
       .eq("user_id", userId)
-      .eq("person_id", personId);
+    .eq("person_id", personId);
 
     if (error || !data?.length) return null;
-    for (const row of data as { id: string; event_type: string | null }[]) {
-      if (normalizeEventTypeKey(row.event_type ?? "") === target) {
-        return row.id;
-      }
+  const candidates = (data as ExistingEventCandidate[]).filter(
+    (row) => normalizeEventTypeKey(row.event_type ?? "") === target
+  );
+  if (!candidates.length) return null;
+
+  if (isSingleInstanceEventType(fields.event_type)) {
+    return pickBestSingleInstanceCandidate(candidates, fields.event_date);
+  }
+
+  for (const row of candidates) {
+    if (isSameEventInstance(row, fields)) return row.id;
     }
     return null;
   }
@@ -73,15 +184,17 @@ function allowsMultipleEventsPerPerson(eventTypeRaw: string): boolean {
       land_data?: { acres: number | null; transaction_type: string | null } | null;
     }
   ): Promise<{ error: string | null; eventId: string | null }> {
-  const dedupeByType = !allowsMultipleEventsPerPerson(fields.event_type);
-  const existingId = dedupeByType
-    ? await findExistingEventIdForPersonType(
-        supabase,
-        userId,
-        personId,
-        fields.event_type
-      )
-    : null;
+  const existingId = await findExistingEventIdForPersonType(
+    supabase,
+    userId,
+    personId,
+    {
+      event_type: fields.event_type,
+      event_date: fields.event_date,
+      event_place_id: fields.event_place_id,
+      notes: fields.notes,
+    }
+  );
 
     if (existingId) {
       const src = await insertEventSourceIfMissing(

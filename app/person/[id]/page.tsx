@@ -2824,14 +2824,26 @@ export default function PersonProfilePage() {
       return;
     }
 
-    const { data: personData, error: personErr } = await supabase
-      .from("persons")
-      .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
-      )
-      .eq("id", personId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const [personRes, eventRes] = await Promise.all([
+      supabase
+        .from("persons")
+        .select(
+          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+        )
+        .eq("id", personId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("events")
+        .select(
+          "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at, event_place:places!event_place_id(township, county, state, country)"
+        )
+        .eq("person_id", personId)
+        .eq("user_id", user.id)
+        .order("event_date", { ascending: true, nullsFirst: false }),
+    ]);
+    const personData = personRes.data;
+    const personErr = personRes.error;
 
     if (personErr) {
       setError(personErr.message);
@@ -2921,15 +2933,8 @@ export default function PersonProfilePage() {
       }
     }
 
-    const { data: eventData, error: eventErr } = await supabase
-      .from("events")
-      .select(
-        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at, event_place:places!event_place_id(township, county, state, country)"
-      )
-      .eq("person_id", personId)
-      .eq("user_id", user.id)
-      .order("event_date", { ascending: true, nullsFirst: false });
-
+    const eventData = eventRes.data;
+    const eventErr = eventRes.error;
     if (eventErr) {
       setError(eventErr.message);
       setLoading(false);
@@ -2965,6 +2970,12 @@ export default function PersonProfilePage() {
     });
     const sortedEvents = sortEventsChronologically(evs);
 
+    // Phase 1 perf: paint core profile content first, then hydrate secondary panels.
+    setPerson(p);
+    setCanvasTheme(resolvedCanvasTheme);
+    setEvents(sortedEvents);
+    setLoading(false);
+
     let relQuery = supabase
       .from("relationships")
       .select("id, person_a_id, person_b_id, relationship_type")
@@ -2973,7 +2984,32 @@ export default function PersonProfilePage() {
     if (effectiveTreeForRels !== "") {
       relQuery = relQuery.eq("tree_id", effectiveTreeForRels);
     }
-    const { data: relData, error: relErr } = await relQuery;
+    const eventIds = sortedEvents.map((e) => e.id);
+    const [relRes, tagLinkRes, sourceRes, personNotesRes] = await Promise.all([
+      relQuery,
+      supabase
+        .from("photo_tags")
+        .select("photo_id, crop_x, crop_y, crop_zoom, is_primary")
+        .eq("person_id", personId)
+        .eq("user_id", user.id),
+      eventIds.length > 0
+        ? supabase
+            .from("event_sources")
+            .select("id, event_id, record_id, notes, created_at")
+            .in("event_id", eventIds)
+        : Promise.resolve({
+            data: [] as EventSourceRow[],
+            error: null,
+          }),
+      supabase
+        .from("person_notes")
+        .select("id, content, updated_at")
+        .eq("person_id", personId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
+    const relData = relRes.data;
+    const relErr = relRes.error;
 
     if (relErr) {
       setError(relErr.message);
@@ -3008,15 +3044,27 @@ export default function PersonProfilePage() {
       ...new Set([...parents, ...children, ...spouses, ...siblings]),
     ];
 
-    let relativesMap = new Map<string, PersonRow>();
+    const relativesMap = new Map<string, PersonRow>();
     if (relatedIds.length > 0) {
-      const { data: relPeople, error: rpErr } = await supabase
-        .from("persons")
-        .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender"
-        )
-        .eq("user_id", user.id)
-        .in("id", relatedIds);
+      const [relPeopleRes, relPhotosRes] = await Promise.all([
+        supabase
+          .from("persons")
+          .select(
+            "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender"
+          )
+          .eq("user_id", user.id)
+          .in("id", relatedIds),
+        supabase
+          .from("photo_tags")
+          .select(
+            "person_id, crop_x, crop_y, crop_zoom, photos(file_url, natural_width, natural_height)"
+          )
+          .eq("is_primary", true)
+          .eq("user_id", user.id)
+          .in("person_id", relatedIds),
+      ]);
+      const relPeople = relPeopleRes.data;
+      const rpErr = relPeopleRes.error;
 
       if (rpErr) {
         setError(rpErr.message);
@@ -3033,14 +3081,8 @@ export default function PersonProfilePage() {
         natural_height?: number;
       };
 
-      const { data: relPhotos, error: relPhErr } = await supabase
-        .from("photo_tags")
-        .select(
-          "person_id, crop_x, crop_y, crop_zoom, photos(file_url, natural_width, natural_height)"
-        )
-        .eq("is_primary", true)
-        .eq("user_id", user.id)
-        .in("person_id", relatedIds);
+      const relPhotos = relPhotosRes.data;
+      const relPhErr = relPhotosRes.error;
 
       if (relPhErr) {
         setError(relPhErr.message);
@@ -3358,11 +3400,8 @@ export default function PersonProfilePage() {
     }
 
     let photosParsed: Record<string, unknown>[] = [];
-    const { data: tagLinkRows, error: tagLinkErr } = await supabase
-      .from("photo_tags")
-      .select("photo_id, crop_x, crop_y, crop_zoom, is_primary")
-      .eq("person_id", personId)
-      .eq("user_id", user.id);
+    const tagLinkRows = tagLinkRes.data;
+    const tagLinkErr = tagLinkRes.error;
 
     if (tagLinkErr) {
       setError(tagLinkErr.message);
@@ -3378,21 +3417,45 @@ export default function PersonProfilePage() {
       ),
     ];
 
+    const sortedEventIds = sortedEvents.map((e) => e.id);
     let photosData: Record<string, unknown>[] = [];
+    let photoEventTagRows: PhotoEventTagRow[] = [];
     if (tagPhotoIds.length > 0) {
-      const { data, error: photosErr } = await supabase
-        .from("photos")
-        .select("*")
-        .eq("user_id", user.id)
-        .in("id", tagPhotoIds)
-        .order("created_at", { ascending: false });
+      const [photosRes, photoEventTagsRes] = await Promise.all([
+        supabase
+          .from("photos")
+          .select("*")
+          .eq("user_id", user.id)
+          .in("id", tagPhotoIds)
+          .order("created_at", { ascending: false }),
+        sortedEventIds.length > 0
+          ? supabase
+              .from("photo_event_tags")
+              .select("photo_id, event_id")
+              .eq("user_id", user.id)
+              .in("photo_id", tagPhotoIds)
+              .in("event_id", sortedEventIds)
+          : Promise.resolve({
+              data: [] as PhotoEventTagRow[],
+              error: null,
+            }),
+      ]);
 
+      const photosErr = photosRes.error;
       if (photosErr) {
         setError(photosErr.message);
         setLoading(false);
         return;
       }
-      photosData = (data ?? []) as Record<string, unknown>[];
+      photosData = (photosRes.data ?? []) as Record<string, unknown>[];
+
+      const petErr = photoEventTagsRes.error;
+      if (petErr) {
+        setError(petErr.message);
+        setLoading(false);
+        return;
+      }
+      photoEventTagRows = (photoEventTagsRes.data ?? []) as PhotoEventTagRow[];
     }
 
     const photosById = new Map<string, Record<string, unknown>>();
@@ -3481,38 +3544,13 @@ export default function PersonProfilePage() {
         return tb - ta;
       });
 
-    let photoEventTagRows: PhotoEventTagRow[] = [];
-    const sortedEventIds = sortedEvents.map((e) => e.id);
-    if (tagPhotoIds.length > 0 && sortedEventIds.length > 0) {
-      const { data: petData, error: petErr } = await supabase
-        .from("photo_event_tags")
-        .select("photo_id, event_id")
-        .eq("user_id", user.id)
-        .in("photo_id", tagPhotoIds)
-        .in("event_id", sortedEventIds);
-      if (petErr) {
-        setError(petErr.message);
-        setLoading(false);
-        return;
-      }
-      photoEventTagRows = (petData ?? []) as PhotoEventTagRow[];
+    const esErr = sourceRes.error;
+    if (esErr) {
+      setError(esErr.message);
+      setLoading(false);
+      return;
     }
-
-    let sourceRows: EventSourceRow[] = [];
-    const eventIds = sortedEvents.map((e) => e.id);
-    if (eventIds.length > 0) {
-      const { data: esData, error: esErr } = await supabase
-        .from("event_sources")
-        .select("id, event_id, record_id, notes, created_at")
-        .in("event_id", eventIds);
-
-      if (esErr) {
-        setError(esErr.message);
-        setLoading(false);
-        return;
-      }
-      sourceRows = (esData ?? []) as EventSourceRow[];
-    }
+    const sourceRows = (sourceRes.data ?? []) as EventSourceRow[];
 
     const recordIdSet = new Set<string>();
     for (const e of sortedEvents) {
@@ -3525,7 +3563,7 @@ export default function PersonProfilePage() {
     }
     const recordIds = [...recordIdSet];
 
-    let recMap = new Map<string, RecordRow>();
+    const recMap = new Map<string, RecordRow>();
     if (recordIds.length > 0) {
       const { data: recData, error: recErr } = await supabase
         .from("records")
@@ -3543,12 +3581,8 @@ export default function PersonProfilePage() {
     let pnId: string | null = null;
     let pnContent = "";
     let pnUpdated: string | null = null;
-    const { data: pnData, error: pnErr } = await supabase
-      .from("person_notes")
-      .select("id, content, updated_at")
-      .eq("person_id", personId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const pnData = personNotesRes.data;
+    const pnErr = personNotesRes.error;
 
     if (!pnErr && pnData) {
       const row = pnData as {
@@ -3561,9 +3595,6 @@ export default function PersonProfilePage() {
       pnUpdated = row.updated_at ?? null;
     }
 
-    setPerson(p);
-    setCanvasTheme(resolvedCanvasTheme);
-    setEvents(sortedEvents);
     setEventSources(sourceRows);
     setPhotoRows(photosParsed);
     setPhotoEventTags(photoEventTagRows);
@@ -3580,8 +3611,8 @@ export default function PersonProfilePage() {
     setResearchNoteId(pnId);
     setResearchNoteText(pnContent);
     setResearchNoteUpdatedAt(pnUpdated);
-    await loadOccupations();
-    setLoading(false);
+    // Phase 1 perf: render the profile first; occupations can hydrate right after.
+    void loadOccupations();
   }, [loadOccupations, personId, router, treeId]);
 
   useEffect(() => {

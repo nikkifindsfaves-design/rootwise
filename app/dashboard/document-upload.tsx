@@ -134,11 +134,16 @@ export default function DocumentUploadSection({
   const [multiPersonProcessing, setMultiPersonProcessing] = useState(false);
 
   const buildFormData = useCallback(
-    (f: File, options?: { skipExtraction?: boolean }) => {
+    (
+      f: File,
+      options?: { skipExtraction?: boolean; anchorPersonNameOverride?: string }
+    ) => {
       const formData = new FormData();
       formData.append("file", f);
       formData.append("record_type", recordType);
-      if (censusSurname.trim() !== "") {
+      const usesSurnameFilter =
+        recordType === "Census Record" || recordType === "Land Record";
+      if (usesSurnameFilter && censusSurname.trim() !== "") {
         formData.append("census_surname", censusSurname.trim());
       }
       if (treeId != null && treeId.trim() !== "") {
@@ -149,6 +154,10 @@ export default function DocumentUploadSection({
       }
       if (options?.skipExtraction === true) {
         formData.append("skip_extraction", "true");
+      }
+      const anchorName = (options?.anchorPersonNameOverride ?? "").trim();
+      if (anchorName !== "") {
+        formData.append("anchor_person_name", anchorName);
       }
       return formData;
     },
@@ -182,12 +191,16 @@ export default function DocumentUploadSection({
       return;
     }
 
+    const usesSurnameFilter =
+      recordType === "Census Record" || recordType === "Land Record";
+    const typedAnchorName = usesSurnameFilter ? "" : censusSurname.trim();
+
     if (
       !options.skipExtraction &&
-      recordType === "Census Record" &&
+      usesSurnameFilter &&
       censusSurname.trim() === ""
     ) {
-      setError("Please enter a family surname for census records.");
+      setError("Please enter a family surname for census or land records.");
       return;
     }
 
@@ -202,6 +215,7 @@ export default function DocumentUploadSection({
       setIsAdjustingImage(false);
       const formData = buildFormData(uploadFile, {
         skipExtraction: options.skipExtraction,
+        anchorPersonNameOverride: typedAnchorName || undefined,
       });
 
       const response = await fetch("/api/process-document", {
@@ -239,7 +253,7 @@ export default function DocumentUploadSection({
       if (
         isMultiPerson &&
         !anchorSet &&
-        !(censusSurname.trim() !== "")
+        typedAnchorName === ""
       ) {
         const names = extractPeopleFullNames(data);
         setPendingRecordId(recordId);
@@ -279,7 +293,10 @@ export default function DocumentUploadSection({
       setIsAdjustingImage(true);
       const uploadFile = await downscaleImageIfNeeded(file);
       setIsAdjustingImage(false);
-      const formData = buildFormData(uploadFile, { skipExtraction: false });
+      const formData = buildFormData(uploadFile, {
+        skipExtraction: false,
+        anchorPersonNameOverride: selectedName,
+      });
 
       const response = await fetch("/api/process-document", {
         method: "POST",
@@ -398,7 +415,7 @@ export default function DocumentUploadSection({
           className="mb-1 block text-sm font-medium"
           style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
         >
-          Ancestor's name
+          Ancestor&apos;s name
         </label>
         <input
           id="census_family_surname"
