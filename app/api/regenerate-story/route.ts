@@ -249,7 +249,7 @@ ${JSON.stringify(lifeSpine, null, 2)}
   const openingHint = openingModeHint(personName, eventType, eventDate);
   const texture = textureChannel(personName, eventType, eventDate);
 
-  const systemPrompt = `You generate genealogy story fields for a single event.
+  const systemPrompt = `You generate genealogy story JSON for one event.
 
 Voice style:
 ${getVoiceInstructions(vibe)}
@@ -260,10 +260,10 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Requirements:
-- Ground every genealogical claim in the event details, related_people, and (when provided) the life timeline context block. Do not invent people, dates, places, or relationships beyond those sources.
-- The user message names a **story texture** (spine | notes | era) that rotates per event. Treat it as “what leads this beat,” not “use only that source.” Lead with the strongest honest detail from that channel; weave others only if they still fit in 250 characters. If the chosen channel has nothing usable, take the next-richest channel without inventing.
-- **spine** = a household or timeline contrast from the life timeline context (when present). **notes** = a concrete line from event_notes — vary *which* clause you pick when notes are repetitive (e.g. do not always choose the physician first when other human beats exist). **era** = one compact time-and-place atmosphere line (general, no new names or dates); richer when the year is clearly pre-midcentury, lighter otherwise.
-- For event_type "birth" or "child born": do not make every story the same certificate paragraph. When texture is **not** notes, do not default the hook to the attending physician unless nothing else in the allowed sources supports a line.
+- Ground every claim in event details, related_people, and life timeline context (if provided). Never invent people, dates, places, or relationships.
+- The user message sets a **story texture** (spine | notes | era). Treat it as the lead layer, not the only layer. If the chosen layer is weak, use the next-richest allowed layer without inventing.
+- **spine**: household/timeline contrast from life timeline context. **notes**: a concrete event_notes detail (vary clause choice when notes repeat). **era**: a compact time/place atmosphere line (general only; no new names or dates).
+- For event_type "birth" or "child born": avoid samey certificate wording. If texture is not **notes**, do not default to attending physician unless no better allowed hook exists.
 - story_full must be 250 characters or fewer, including spaces.
 - Keep the person the event is about as the subject.
 - Never include markdown fences or extra keys.
@@ -273,7 +273,7 @@ Requirements:
 - Only use personal names that appear in event details, related_people, or subject_name entries in the life timeline context.
 - You may use a person's full name, first name, or possessive form (for example, "Dorothy's"). If multiple people share the same first name, use full names for clarity.
 - If event_type is "residence", use event_notes as the primary source for household relationship language. Additionally incorporate any relationships listed in related_people that are not already described in event_notes. Never use the word "sibling" unless event_notes or related_people explicitly states it.
-- Opening mode vocabulary (pick one per story): place-led, person-led, action-led, document-led, contrast-led, relationship-led, consequence-led. Follow the user-message hint for which mode to use this time; do not default to the same mode you would use for a different hint.`;
+- Opening mode vocabulary (pick one): place-led, person-led, action-led, document-led, contrast-led, relationship-led, consequence-led. Follow the user hint for this story.`;
 
   const baseUserPrompt = `Event details:
 ${JSON.stringify(eventJson, null, 2)}
@@ -281,9 +281,9 @@ ${spineBlock}
 People referenced in this story:
 ${relatedPeopleBlock}
 
-Narrator: Open in **${openingHint}** style (see system list). Do not use the same opening shape you would use if the hint were different.
+Narrator: Open in **${openingHint}** style (see system list).
 
-Story texture (rotates across events — roughly equal over many stories): **${texture}**. Lead with one strong hook from that layer first; spine = timeline beat, notes = document detail from event_notes, era = time-and-place atmosphere. Do not force all three into every story.
+Story texture: **${texture}**. Lead with one strong hook from that layer first. Do not force all layers into one story.
 
 Use only these people (and spine subject_name entries, when present) when naming someone in the story. You may use a full name, first name, or possessive form when unambiguous.`;
 
@@ -304,7 +304,6 @@ Use only these people (and spine subject_name entries, when present) when naming
     const message = await anthropic.messages.create({
       model: MODEL,
       temperature: 0.92,
-      top_p: 0.92,
       max_tokens: 500,
       system: systemPrompt,
       messages: [
@@ -315,7 +314,7 @@ Use only these people (and spine subject_name entries, when present) when naming
       ],
     });
 
-    console.log("[DG] Story regen tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens));
+    console.log("[DG] Story regen tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens, MODEL));
 
     return message.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")

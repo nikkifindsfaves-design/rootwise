@@ -29,6 +29,11 @@ describe("getIsDeathRecord", () => {
   it("returns false for an empty string", () => {
     expect(getIsDeathRecord("")).toBe(false);
   });
+
+  it("returns true for normalized case/whitespace variants", () => {
+    expect(getIsDeathRecord(" death record ")).toBe(true);
+    expect(getIsDeathRecord("DEATH RECORD")).toBe(true);
+  });
 });
 
 describe("getIsMarriageRecord", () => {
@@ -47,6 +52,11 @@ describe("getIsMarriageRecord", () => {
   it("returns false for an empty string", () => {
     expect(getIsMarriageRecord("")).toBe(false);
   });
+
+  it("returns true for normalized case/whitespace variants", () => {
+    expect(getIsMarriageRecord(" marriage record ")).toBe(true);
+    expect(getIsMarriageRecord("MARRIAGE RECORD")).toBe(true);
+  });
 });
 
 describe("getIsBirthRecord", () => {
@@ -64,6 +74,11 @@ describe("getIsBirthRecord", () => {
 
   it("returns false for an empty string", () => {
     expect(getIsBirthRecord("")).toBe(false);
+  });
+
+  it("returns true for normalized case/whitespace variants", () => {
+    expect(getIsBirthRecord(" birth record ")).toBe(true);
+    expect(getIsBirthRecord("BIRTH RECORD")).toBe(true);
   });
 });
 
@@ -131,6 +146,10 @@ describe("getIsCensusRecord", () => {
   it('returns true for "Census Record"', () => {
     expect(getIsCensusRecord("Census Record")).toBe(true);
   });
+  it("returns true for normalized case/whitespace variants", () => {
+    expect(getIsCensusRecord(" census record ")).toBe(true);
+    expect(getIsCensusRecord("CENSUS RECORD")).toBe(true);
+  });
   it("returns false for other labels", () => {
     expect(getIsCensusRecord("Birth Record")).toBe(false);
     expect(getIsCensusRecord("")).toBe(false);
@@ -140,6 +159,10 @@ describe("getIsCensusRecord", () => {
 describe("getIsLandRecord", () => {
   it('returns true for "Land Record"', () => {
     expect(getIsLandRecord("Land Record")).toBe(true);
+  });
+  it("returns true for normalized case/whitespace variants", () => {
+    expect(getIsLandRecord(" land record ")).toBe(true);
+    expect(getIsLandRecord("LAND RECORD")).toBe(true);
   });
   it("returns false for other labels", () => {
     expect(getIsLandRecord("Church Record")).toBe(false);

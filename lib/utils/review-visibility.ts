@@ -1,9 +1,13 @@
+function normalizeRecordType(recordType: string): string {
+  return recordType.trim().toLowerCase();
+}
+
 /**
  * Whether the review session’s document is labeled as a death record.
  * Matches `recordTypeLabel === "Death Record"` in the review UI.
  */
 export function getIsDeathRecord(recordType: string): boolean {
-  return recordType === "Death Record";
+  return normalizeRecordType(recordType) === "death record";
 }
 
 /**
@@ -27,7 +31,7 @@ export function getIsBirthRecordChild(
  * Matches `recordTypeLabel === "Birth Record"` (same convention as upload / record types).
  */
 export function getIsBirthRecord(recordType: string): boolean {
-  return recordType === "Birth Record";
+  return normalizeRecordType(recordType) === "birth record";
 }
 
 /**
@@ -35,15 +39,15 @@ export function getIsBirthRecord(recordType: string): boolean {
  * Matches `recordTypeLabel === "Marriage Record"` (marriage-specific field hiding and shared marriage block).
  */
 export function getIsMarriageRecord(recordType: string): boolean {
-  return recordType === "Marriage Record";
+  return normalizeRecordType(recordType) === "marriage record";
 }
 
 /** Matches upload / review label for census documents (`RECORD_TYPES`). */
 export function getIsCensusRecord(recordType: string): boolean {
-  return recordType === "Census Record";
+  return normalizeRecordType(recordType) === "census record";
 }
 
 /** Matches upload / review label for land documents (`RECORD_TYPES`). */
 export function getIsLandRecord(recordType: string): boolean {
-  return recordType === "Land Record";
+  return normalizeRecordType(recordType) === "land record";
 }

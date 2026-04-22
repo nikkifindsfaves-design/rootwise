@@ -781,7 +781,7 @@ export async function POST(request: NextRequest) {
       ),
       messages: [{ role: "user", content: userContent }],
     });
-    console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens));
+    console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens, MODEL));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Anthropic request failed";
     return NextResponse.json({ error: msg }, { status: 502 });
