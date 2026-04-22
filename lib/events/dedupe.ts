@@ -179,7 +179,6 @@ export async function findExistingEventIdForPersonType(
       event_date: string | null;
       event_place_id: string | null;
       notes: string | null;
-      story_short?: string | null;
       story_full: string | null;
       land_data?: { acres: number | null; transaction_type: string | null } | null;
     }
@@ -217,7 +216,6 @@ export async function findExistingEventIdForPersonType(
         event_date: fields.event_date,
         event_place_id: fields.event_place_id,
         notes: fields.notes,
-        story_short: fields.story_short ?? null,
         story_full: fields.story_full,
         land_data: fields.land_data ?? null,
       })

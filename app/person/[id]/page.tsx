@@ -289,7 +289,6 @@ type EventRow = {
   record_id: string | null;
   notes: string | null;
   research_notes: string | null;
-  story_short: string | null;
   story_full: string | null;
   created_at: string | null;
 };
@@ -1407,8 +1406,8 @@ function timelineDedupeKey(ev: EventRow): string {
 }
 
 function pickRepresentativeForTimelineGroup(group: EventRow[]): EventRow {
-  const withShort = group.filter((e) => (e.story_short ?? "").trim() !== "");
-  const pool = withShort.length > 0 ? withShort : group;
+  const withFull = group.filter((e) => (e.story_full ?? "").trim() !== "");
+  const pool = withFull.length > 0 ? withFull : group;
   return pool.reduce((best, cur) => {
     const bt = parseCreatedAtMs(best.created_at);
     const ct = parseCreatedAtMs(cur.created_at);
@@ -1418,7 +1417,7 @@ function pickRepresentativeForTimelineGroup(group: EventRow[]): EventRow {
   });
 }
 
-/** One row per (event_type, event_date); prefers story_short, else newest created_at. */
+/** One row per (event_type, event_date); prefers story_full, else newest created_at. */
 function dedupeTimelineEvents(list: EventRow[]): EventRow[] {
   const byKey = new Map<string, EventRow[]>();
   for (const ev of list) {
@@ -2272,7 +2271,6 @@ export default function PersonProfilePage() {
     event_date: string;
     event_place_id: string | null;
     event_place_display: string;
-    story_short: string;
     story_full: string;
     notes: string;
   } | null>(null);
@@ -2848,7 +2846,7 @@ export default function PersonProfilePage() {
       supabase
         .from("events")
         .select(
-          "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at, event_place:places!event_place_id(township, county, state, country)"
+          "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_full, created_at, event_place:places!event_place_id(township, county, state, country)"
         )
         .eq("person_id", personId)
         .eq("user_id", user.id)
@@ -5604,7 +5602,6 @@ export default function PersonProfilePage() {
       event_date: normalizeDateToMMDDYYYY(ev.event_date),
       event_place_id: ev.event_place_id ?? null,
       event_place_display: ev.event_place ? formatPlace(ev.event_place) : "",
-      story_short: ev.story_short?.trim() ?? "",
       story_full: ev.story_full?.trim() ?? "",
       notes: ev.notes?.trim() ?? "",
     });
@@ -5651,14 +5648,13 @@ export default function PersonProfilePage() {
         event_type: d.event_type.trim() || "other",
         event_date: d.event_date.trim() || null,
         event_place_id: resolvedEventPlaceId,
-        story_short: d.story_short.trim() || null,
         story_full: d.story_full.trim() || null,
         notes: d.notes.trim() || null,
       })
       .eq("id", eventId)
       .eq("user_id", user.id)
       .select(
-        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_short, story_full, created_at"
+        "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_full, created_at"
       )
       .maybeSingle();
 
@@ -7514,35 +7510,6 @@ export default function PersonProfilePage() {
                                             : null
                                         )
                                       }
-                                      style={modalInputStyle}
-                                    />
-                                  </div>
-                                  <div>
-                                    <label
-                                      className="mb-1 block text-xs font-bold uppercase tracking-wide"
-                                      style={{
-                                        fontFamily: sans,
-                                        color: colors.brownMuted,
-                                      }}
-                                      htmlFor={`ev-short-${ev.id}`}
-                                    >
-                                      Story (short)
-                                    </label>
-                                    <textarea
-                                      id={`ev-short-${ev.id}`}
-                                      rows={2}
-                                      value={eventEditDraft.story_short}
-                                      onChange={(e) =>
-                                        setEventEditDraft((prev) =>
-                                          prev
-                                            ? {
-                                                ...prev,
-                                                story_short: e.target.value,
-                                              }
-                                            : null
-                                        )
-                                      }
-                                      className="resize-y"
                                       style={modalInputStyle}
                                     />
                                   </div>

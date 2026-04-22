@@ -12,7 +12,6 @@ type EventRow = {
   event_date: string | null;
   event_place_id: string | null;
   notes: string | null;
-  story_short: string | null;
   story_full: string | null;
   land_data: { acres: number | null; transaction_type: string | null } | null;
 };
@@ -71,7 +70,6 @@ function createSupabaseMock(seed?: {
             event_date: (payload.event_date as string | null) ?? null,
             event_place_id: (payload.event_place_id as string | null) ?? null,
             notes: (payload.notes as string | null) ?? null,
-            story_short: (payload.story_short as string | null) ?? null,
             story_full: (payload.story_full as string | null) ?? null,
             land_data:
               (payload.land_data as {
@@ -134,7 +132,6 @@ describe("savePersonEventWithDedupe", () => {
           event_date: "1870-01-01",
           event_place_id: null,
           notes: "existing",
-          story_short: null,
           story_full: "existing story",
           land_data: null,
         },

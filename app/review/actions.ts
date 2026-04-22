@@ -408,7 +408,6 @@ export type CardEventInput = {
   event_place_id: string | null;
   event_place_fields: PlaceFields | null;
   notes: string | null;
-  story_short: string | null;
   story_full: string | null;
 };
 
@@ -454,7 +453,7 @@ function inverseRelationshipType(t: string): string {
  * Saves the person, relationship edges (two rows per relationship: A→B and B→A perspectives), and events.
  * `relationships`: this person's relationship toward `related_name` with `relationship_type`.
  * Tables: `relationships` (user_id, person_a_id, person_b_id, relationship_type),
- * `events` (user_id, person_id, record_id, event_type, event_date, event_place_id, notes, story_short, story_full).
+ * `events` (user_id, person_id, record_id, event_type, event_date, event_place_id, notes, story_full).
  */
 export async function acceptPersonCard(params: {
   form: PersonFormInput;
