@@ -72,7 +72,7 @@ function allowsMultipleEventsPerPerson(eventTypeRaw: string): boolean {
       story_full: string | null;
       land_data?: { acres: number | null; transaction_type: string | null } | null;
     }
-  ): Promise<{ error: string | null }> {
+  ): Promise<{ error: string | null; eventId: string | null }> {
   const dedupeByType = !allowsMultipleEventsPerPerson(fields.event_type);
   const existingId = dedupeByType
     ? await findExistingEventIdForPersonType(
@@ -84,13 +84,14 @@ function allowsMultipleEventsPerPerson(eventTypeRaw: string): boolean {
     : null;
 
     if (existingId) {
-      return insertEventSourceIfMissing(
+      const src = await insertEventSourceIfMissing(
         supabase,
         userId,
         existingId,
         recordId,
         fields.notes
       );
+      return { error: src.error, eventId: existingId };
     }
 
     const { data: inserted, error: insErr } = await supabase
@@ -111,14 +112,19 @@ function allowsMultipleEventsPerPerson(eventTypeRaw: string): boolean {
       .maybeSingle();
 
     if (insErr || !inserted) {
-      return { error: insErr?.message ?? "Failed to create event." };
+      return {
+        error: insErr?.message ?? "Failed to create event.",
+        eventId: null,
+      };
     }
 
-    return insertEventSourceIfMissing(
+    const newId = inserted.id as string;
+    const src = await insertEventSourceIfMissing(
       supabase,
       userId,
-      inserted.id as string,
+      newId,
       recordId,
       fields.notes
     );
+    return { error: src.error, eventId: newId };
   }

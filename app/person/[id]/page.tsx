@@ -5723,6 +5723,7 @@ export default function PersonProfilePage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               tree_id: person.tree_id,
+              anchor_person_id: personId,
               person_name: personName,
               event_type: addEventDraft.event_type.trim(),
               event_date: addEventDraft.event_date.trim() || null,

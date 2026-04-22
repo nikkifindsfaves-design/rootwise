@@ -21,8 +21,10 @@ type PendingPersonBody = {
   death_date?: unknown;
   birth_place_id?: unknown;
   birth_place_fields?: unknown;
+  birth_place_display?: unknown;
   death_place_id?: unknown;
   death_place_fields?: unknown;
+  death_place_display?: unknown;
   marital_status?: string | null;
   cause_of_death?: string | null;
   surviving_spouse?: string | null;
@@ -140,13 +142,25 @@ async function resolveBirthPlaceIdFromBody(
     return { id: rawId.trim(), error: null };
   }
   let fields = parsePlaceFields(p.birth_place_fields);
+  if (fields != null && fields.country.trim() === "") {
+    fields = null;
+  }
   if (fields === null && typeof p.birth_place_fields === "string") {
     const display = p.birth_place_fields.trim();
     if (display !== "") {
       fields = parsePlaceDisplayToFields(display);
     }
   }
+  if (fields === null && typeof p.birth_place_display === "string") {
+    const display = p.birth_place_display.trim();
+    if (display !== "") {
+      fields = parsePlaceDisplayToFields(display);
+    }
+  }
   if (fields === null) {
+    return { id: null, error: null };
+  }
+  if (fields.country.trim() === "") {
     return { id: null, error: null };
   }
   const r = await findOrCreatePlace(supabase, fields);
@@ -164,8 +178,20 @@ async function resolveEventPlaceIdFromEvent(
   if (typeof rawId === "string" && rawId.trim() !== "") {
     return { id: rawId.trim(), error: null };
   }
-  const fields = parsePlaceFields(e.event_place_fields);
+  let fields = parsePlaceFields(e.event_place_fields);
+  if (fields != null && fields.country.trim() === "") {
+    fields = null;
+  }
+  if (fields === null && typeof e.event_place_display === "string") {
+    const display = e.event_place_display.trim();
+    if (display !== "") {
+      fields = parsePlaceDisplayToFields(display);
+    }
+  }
   if (fields === null) {
+    return { id: null, error: null };
+  }
+  if (fields.country.trim() === "") {
     return { id: null, error: null };
   }
   const r = await findOrCreatePlace(supabase, fields);
@@ -184,13 +210,25 @@ async function resolveDeathPlaceIdFromBody(
     return { id: rawId.trim(), error: null };
   }
   let fields = parsePlaceFields(p.death_place_fields);
+  if (fields != null && fields.country.trim() === "") {
+    fields = null;
+  }
   if (fields === null && typeof p.death_place_fields === "string") {
     const display = p.death_place_fields.trim();
     if (display !== "") {
       fields = parsePlaceDisplayToFields(display);
     }
   }
+  if (fields === null && typeof p.death_place_display === "string") {
+    const display = p.death_place_display.trim();
+    if (display !== "") {
+      fields = parsePlaceDisplayToFields(display);
+    }
+  }
   if (fields === null) {
+    return { id: null, error: null };
+  }
+  if (fields.country.trim() === "") {
     return { id: null, error: null };
   }
   const r = await findOrCreatePlace(supabase, fields);
@@ -348,6 +386,12 @@ export async function POST(request: NextRequest) {
       : null;
 
   const resolvedIds: string[] = [];
+  const savedEvents: Array<{
+    personIndex: number;
+    eventIndex: number;
+    personId: string;
+    eventId: string;
+  }> = [];
 
   for (const p of pendingPersons) {
     const existingId =
@@ -741,7 +785,8 @@ export async function POST(request: NextRequest) {
     const personId = resolvedIds[i]!;
     const evs = Array.isArray(p.events) ? p.events : [];
 
-    for (const ev of evs) {
+    for (let evIdx = 0; evIdx < evs.length; evIdx++) {
+      const ev = evs[evIdx];
       if (typeof ev !== "object" || ev === null) continue;
       const e = ev as Record<string, unknown>;
       const noteText =
@@ -772,24 +817,33 @@ export async function POST(request: NextRequest) {
           typeof rawTt === "string" ? rawTt.trim() || null : null;
         landData = { acres, transaction_type };
       }
-      const { error: evSaveErr } = await savePersonEventWithDedupe(
-        supabase,
-        user.id,
-        personId,
-        recordId,
-        {
-          event_type: String(e.event_type ?? "").trim() || "other",
-          event_date: String(e.event_date ?? "").trim() || null,
-          event_place_id: evPlaceRes.id,
-          notes: noteText,
-          story_full: storyFull,
-          land_data: landData,
-        }
-      );
+      const { error: evSaveErr, eventId: savedEventId } =
+        await savePersonEventWithDedupe(
+          supabase,
+          user.id,
+          personId,
+          recordId,
+          {
+            event_type: String(e.event_type ?? "").trim() || "other",
+            event_date: String(e.event_date ?? "").trim() || null,
+            event_place_id: evPlaceRes.id,
+            notes: noteText,
+            story_full: storyFull,
+            land_data: landData,
+          }
+        );
 
       if (evSaveErr) {
         console.error("[save-review]", "event-save-dedupe", evSaveErr);
         return NextResponse.json({ error: evSaveErr }, { status: 500 });
+      }
+      if (typeof savedEventId === "string" && savedEventId.trim() !== "") {
+        savedEvents.push({
+          personIndex: i,
+          eventIndex: evIdx,
+          personId,
+          eventId: savedEventId.trim(),
+        });
       }
     }
   }
@@ -935,5 +989,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({
+    success: true,
+    personIds: resolvedIds,
+    savedEvents,
+  });
 }

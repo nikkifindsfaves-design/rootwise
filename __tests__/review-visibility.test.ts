@@ -3,7 +3,9 @@
 import {
   getIsBirthRecord,
   getIsBirthRecordChild,
+  getIsCensusRecord,
   getIsDeathRecord,
+  getIsLandRecord,
   getIsMarriageRecord,
 } from "@/lib/utils/review-visibility";
 
@@ -123,4 +125,24 @@ describe("getIsBirthRecordChild", () => {
       ).toBe(true);
     },
   );
+});
+
+describe("getIsCensusRecord", () => {
+  it('returns true for "Census Record"', () => {
+    expect(getIsCensusRecord("Census Record")).toBe(true);
+  });
+  it("returns false for other labels", () => {
+    expect(getIsCensusRecord("Birth Record")).toBe(false);
+    expect(getIsCensusRecord("")).toBe(false);
+  });
+});
+
+describe("getIsLandRecord", () => {
+  it('returns true for "Land Record"', () => {
+    expect(getIsLandRecord("Land Record")).toBe(true);
+  });
+  it("returns false for other labels", () => {
+    expect(getIsLandRecord("Church Record")).toBe(false);
+    expect(getIsLandRecord("")).toBe(false);
+  });
 });

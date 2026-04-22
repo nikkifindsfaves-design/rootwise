@@ -2,11 +2,79 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse, type NextRequest } from "next/server";
 import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getIsCensusRecord,
+  getIsLandRecord,
+} from "@/lib/utils/review-visibility";
+import {
+  fetchLifeContextForPersonIds,
+  fetchLifeSpineFromDatabase,
+  parseLifeSpineFromRequestBody,
+  type LifeSpineEntry,
+} from "@/lib/story/life-spine";
 import { estimateCost } from "@/lib/utils/anthropic-cost";
 import { parseJsonFromText } from "@/lib/utils/parse-json-from-text";
 import { getVoiceInstructions } from "@/lib/vibes/voice-instructions";
 
 const MODEL = "claude-sonnet-4-20250514";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(s: string): boolean {
+  return UUID_RE.test(s.trim());
+}
+
+function parseUuidArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const x of raw) {
+    if (typeof x !== "string") continue;
+    const t = x.trim();
+    if (isUuid(t)) out.push(t);
+  }
+  return [...new Set(out)];
+}
+
+/** Stable hint so parallel requests don’t all pick the same opener. */
+function openingModeHint(
+  personName: string,
+  eventType: string,
+  eventDate: string | null
+): string {
+  const s = `${personName.trim().toLowerCase()}\0${eventType.trim().toLowerCase()}\0${(eventDate ?? "").trim()}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const modes = [
+    "place-led",
+    "person-led",
+    "action-led",
+    "document-led",
+    "contrast-led",
+    "relationship-led",
+    "consequence-led",
+  ] as const;
+  return modes[Math.abs(h) % modes.length] ?? "person-led";
+}
+
+/** Rotates which “layer” leads so births don’t all read like the same certificate. */
+function textureChannel(
+  personName: string,
+  eventType: string,
+  eventDate: string | null
+): "spine" | "notes" | "era" {
+  const s = `${personName.trim().toLowerCase()}\0${eventType.trim().toLowerCase()}\0${(eventDate ?? "").trim()}\0texture`;
+  let h = 3735928559;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 2654435761);
+  }
+  const channels = ["spine", "notes", "era"] as const;
+  return channels[Math.abs(h >>> 0) % 3]!;
+}
 
 type RequestBody = {
   tree_id?: unknown;
@@ -16,6 +84,16 @@ type RequestBody = {
   event_place?: unknown;
   event_notes?: unknown;
   related_people?: unknown;
+  /** When set, server loads timeline rows from the tree (same tree as tree_id). */
+  anchor_person_id?: unknown;
+  /** Client-built spine — used only when context_person_ids is not sent. */
+  life_spine?: unknown;
+  /** All people in the saved batch; server loads their events as spine. */
+  context_person_ids?: unknown;
+  /** Omit this event row from spine so the focal event is not duplicated in context. */
+  exclude_event_id?: unknown;
+  /** When this is a census or land **document**, timeline context is omitted (thin stories). */
+  record_type_label?: unknown;
 };
 
 export async function POST(request: NextRequest) {
@@ -77,6 +155,49 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const clientSpine = parseLifeSpineFromRequestBody(body.life_spine);
+  const contextPersonIds = parseUuidArray(body.context_person_ids);
+  const anchorPersonRaw = body.anchor_person_id;
+  const anchorPersonId =
+    typeof anchorPersonRaw === "string" ? anchorPersonRaw.trim() : "";
+  const excludeEventRaw = body.exclude_event_id;
+  const excludeEventId =
+    typeof excludeEventRaw === "string" ? excludeEventRaw.trim() : "";
+  const recordTypeLabel =
+    typeof body.record_type_label === "string"
+      ? body.record_type_label.trim()
+      : "";
+  const omitTimelineContext =
+    getIsCensusRecord(recordTypeLabel) || getIsLandRecord(recordTypeLabel);
+
+  let lifeSpine: LifeSpineEntry[] = [];
+  if (!omitTimelineContext) {
+    if (
+      contextPersonIds.length > 0 &&
+      anchorPersonId !== "" &&
+      isUuid(anchorPersonId)
+    ) {
+      lifeSpine = await fetchLifeContextForPersonIds({
+        supabase,
+        userId: user.id,
+        treeId,
+        focalPersonId: anchorPersonId,
+        contextPersonIds,
+        excludeEventId:
+          excludeEventId !== "" && isUuid(excludeEventId) ? excludeEventId : null,
+      });
+    } else if (clientSpine != null && clientSpine.length > 0) {
+      lifeSpine = clientSpine;
+    } else if (anchorPersonId !== "" && isUuid(anchorPersonId)) {
+      lifeSpine = await fetchLifeSpineFromDatabase({
+        supabase,
+        userId: user.id,
+        treeId,
+        anchorPersonId,
+      });
+    }
+  }
+
   const { data: treeRow, error: treeErr } = await supabase
     .from("trees")
     .select("vibe")
@@ -118,6 +239,16 @@ export async function POST(request: NextRequest) {
           .join("\n")
       : "- (none provided)";
 
+  const spineBlock =
+    lifeSpine.length > 0
+      ? `Life timeline context (chronological facts from the family tree). Facts below are fair game when they sharpen the beat; stay true to them and do not invent relatives or dates.
+${JSON.stringify(lifeSpine, null, 2)}
+`
+      : "";
+
+  const openingHint = openingModeHint(personName, eventType, eventDate);
+  const texture = textureChannel(personName, eventType, eventDate);
+
   const systemPrompt = `You generate genealogy story fields for a single event.
 
 Voice style:
@@ -129,31 +260,41 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Requirements:
-- Use only the provided event details; do not invent facts.
+- Ground every genealogical claim in the event details, related_people, and (when provided) the life timeline context block. Do not invent people, dates, places, or relationships beyond those sources.
+- The user message names a **story texture** (spine | notes | era) that rotates per event. Treat it as “what leads this beat,” not “use only that source.” Lead with the strongest honest detail from that channel; weave others only if they still fit in 250 characters. If the chosen channel has nothing usable, take the next-richest channel without inventing.
+- **spine** = a household or timeline contrast from the life timeline context (when present). **notes** = a concrete line from event_notes — vary *which* clause you pick when notes are repetitive (e.g. do not always choose the physician first when other human beats exist). **era** = one compact time-and-place atmosphere line (general, no new names or dates); richer when the year is clearly pre-midcentury, lighter otherwise.
+- For event_type "birth" or "child born": do not make every story the same certificate paragraph. When texture is **not** notes, do not default the hook to the attending physician unless nothing else in the allowed sources supports a line.
 - story_full must be 250 characters or fewer, including spaces.
 - Keep the person the event is about as the subject.
 - Never include markdown fences or extra keys.
 - Do not start story_full with a date in any format.
 - Do not restate the exact event_date in story_full unless it is required to disambiguate the event from another otherwise-identical event.
-- Only refer to people provided in event details or related_people.
+- Never open with stacked interjections ("well well well", "oh oh oh", "dear reader", etc.).
+- Only use personal names that appear in event details, related_people, or subject_name entries in the life timeline context.
 - You may use a person's full name, first name, or possessive form (for example, "Dorothy's"). If multiple people share the same first name, use full names for clarity.
 - If event_type is "residence", use event_notes as the primary source for household relationship language. Additionally incorporate any relationships listed in related_people that are not already described in event_notes. Never use the word "sibling" unless event_notes or related_people explicitly states it.
-- Vary openings and sentence rhythm across generations. Use one opening mode per story and rotate naturally: place-led, person-led, action-led, document-led, contrast-led, relationship-led, or consequence-led.
-- Avoid repeating a generic opening template when another valid opening mode fits the same facts.`;
+- Opening mode vocabulary (pick one per story): place-led, person-led, action-led, document-led, contrast-led, relationship-led, consequence-led. Follow the user-message hint for which mode to use this time; do not default to the same mode you would use for a different hint.`;
 
   const baseUserPrompt = `Event details:
 ${JSON.stringify(eventJson, null, 2)}
-
+${spineBlock}
 People referenced in this story:
 ${relatedPeopleBlock}
 
-Use only these people when naming someone in the story. You may use a full name, first name, or possessive form when unambiguous.`;
+Narrator: Open in **${openingHint}** style (see system list). Do not use the same opening shape you would use if the hint were different.
+
+Story texture (rotates across events — roughly equal over many stories): **${texture}**. Lead with one strong hook from that layer first; spine = timeline beat, notes = document detail from event_notes, era = time-and-place atmosphere. Do not force all three into every story.
+
+Use only these people (and spine subject_name entries, when present) when naming someone in the story. You may use a full name, first name, or possessive form when unambiguous.`;
 
   const staleOpeningPatterns: RegExp[] = [
     /^in the verdant countryside of\b/i,
     /^in the [a-z]+ countryside of\b/i,
     /^in the quiet [a-z]+\b/i,
     /^in the [a-z]+\s+[a-z]+\s+of\b/i,
+    /^(?:well[,.\s]+){2,}well\b/i,
+    /^oh[,.\s]+oh[,.\s]+oh\b/i,
+    /^dear reader\b/i,
   ];
 
   async function generateStoryText(extraInstruction?: string): Promise<string> {
@@ -162,8 +303,8 @@ Use only these people when naming someone in the story. You may use a full name,
       : baseUserPrompt;
     const message = await anthropic.messages.create({
       model: MODEL,
-      temperature: 0.8,
-      top_p: 0.9,
+      temperature: 0.92,
+      top_p: 0.92,
       max_tokens: 500,
       system: systemPrompt,
       messages: [
@@ -228,7 +369,7 @@ Use only these people when naming someone in the story. You may use a full name,
 
   if (startsWithDate || startsWithStaleOpening) {
     const retryText = await generateStoryText(
-      "Do not begin with a date or year. Do not use cliche landscape openers like 'in the verdant countryside of'. Open with a concrete person, action, record detail, relationship, contrast, or consequence."
+      `Do not begin with a date or year. Do not use cliche landscape openers. Do not open with repeated interjections ("well well well", etc.). Open in **${openingHint}** mode; keep story texture **${texture}** as the lead layer (see user message).`
     );
     if (retryText) {
       try {

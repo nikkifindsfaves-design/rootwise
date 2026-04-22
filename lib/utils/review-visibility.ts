@@ -37,3 +37,13 @@ export function getIsBirthRecord(recordType: string): boolean {
 export function getIsMarriageRecord(recordType: string): boolean {
   return recordType === "Marriage Record";
 }
+
+/** Matches upload / review label for census documents (`RECORD_TYPES`). */
+export function getIsCensusRecord(recordType: string): boolean {
+  return recordType === "Census Record";
+}
+
+/** Matches upload / review label for land documents (`RECORD_TYPES`). */
+export function getIsLandRecord(recordType: string): boolean {
+  return recordType === "Land Record";
+}

@@ -189,11 +189,15 @@ export type PendingReviewPayload = {
       related_name: string;
       relationship_type: string;
     }>;
+    /** When false, skip AI story generation for this person after add-to-tree. */
+    generate_story?: boolean;
     events: Array<{
       event_type: string;
       event_date: string | null;
       event_place_id: string | null;
       event_place_fields: PlaceFields | null;
+      /** Used by save-review when structured fields omit country (e.g. display-only UI). */
+      event_place_display?: string | null;
       notes: string | null;
       story_full: string | null;
       land_data?: { acres: number | null; transaction_type: string | null } | null;
@@ -561,7 +565,10 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
       form,
       relationships,
       events,
-      generateStory: relationships.some((r) => r.relationshipType === "spouse"),
+      // Post–add-to-tree story regen reads `generate_story` from the pending payload.
+      // Default on for every extracted person (birth/death/etc.); only marriage had
+      // spouse edges, so the old "spouse only" default skipped all birth stories.
+      generateStory: true,
     };
   });
 }
@@ -833,7 +840,6 @@ export default function ReviewRecordClient({
     useState<SharedEventDetailsState>(() =>
       createInitialCardsAndShared(aiResponse).shared
     );
-  const [isRegeneratingStories, setIsRegeneratingStories] = useState(false);
   const [treePersonNameSuggestions, setTreePersonNameSuggestions] = useState<string[]>([]);
 
   useEffect(() => {
@@ -885,9 +891,7 @@ export default function ReviewRecordClient({
     setCards((prev) => prev.map((c) => (c.key === key ? next : c)));
   }
 
-  async function handleContinue() {
-    if (isRegeneratingStories) return;
-    setIsRegeneratingStories(true);
+  function handleContinue() {
     try {
       const isDeathRecord = getIsDeathRecord(recordTypeLabel);
       const primaryCard = cards.find((c) =>
@@ -937,114 +941,7 @@ export default function ReviewRecordClient({
         };
       });
 
-      let workingCards = cardsWithSynthesized;
-      const eventsToRegenerate = cardsWithSynthesized.flatMap((card) => {
-        if (!card.include)
-          return [] as Array<{ cardKey: string; eventKey: string }>;
-        return card.events.map((e) => ({ cardKey: card.key, eventKey: e.key }));
-      });
-
-      console.log("[review continue] eventsToRegenerate", eventsToRegenerate);
-
-      if (recordTreeId && eventsToRegenerate.length > 0) {
-        const regenerated = await Promise.all(
-          eventsToRegenerate.map(async (target) => {
-            const card = cardsWithSynthesized.find((c) => c.key === target.cardKey);
-            const event = card?.events.find((e) => e.key === target.eventKey);
-            if (!card || !event) return null;
-
-            try {
-              const resolvedEv = resolveEventDatePlaceNotes(
-                event,
-                sharedEventDetails,
-                manualEntryReview
-              );
-              const response = await fetch("/api/regenerate-story", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  tree_id: recordTreeId,
-                  person_name: fullNameFromForm(card.form),
-                  event_type: event.eventType,
-                  event_date: resolvedEv.eventDate.trim() || null,
-                  event_place: resolvedEv.event_place_display.trim() || null,
-                  event_notes: resolvedEv.eventNotes.trim() || null,
-                  related_people: card.relationships
-                    .map((rel) => {
-                      if (rel.relatedPeerIndex != null) {
-                        const peer = cardsWithSynthesized[rel.relatedPeerIndex];
-                        if (!peer) return null;
-                        return {
-                          name: fullNameFromForm(peer.form).trim(),
-                          relationship_type: rel.relationshipType,
-                        };
-                      }
-                      const external = rel.relatedNameExternal.trim();
-                      let name = external;
-                      for (const c of cardsWithSynthesized) {
-                        const fn = fullNameFromForm(c.form);
-                        if (namesMatch(fn, external)) {
-                          name = fn.trim();
-                          break;
-                        }
-                      }
-                      return {
-                        name,
-                        relationship_type: rel.relationshipType,
-                      };
-                    })
-                    .filter(
-                      (
-                        rp
-                      ): rp is { name: string; relationship_type: RelOption } =>
-                        rp !== null && rp.name !== ""
-                    ),
-                }),
-              });
-              if (!response.ok) return null;
-              const data = (await response.json()) as {
-                story_full?: unknown;
-              };
-              if (typeof data.story_full !== "string") {
-                return null;
-              }
-              return {
-                ...target,
-                storyFull: data.story_full,
-              };
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        workingCards = cardsWithSynthesized.map((card) => ({
-          ...card,
-          events: card.events.map((event) => {
-            if (!card.include) return event;
-            const match = regenerated.find(
-              (r) => r && r.cardKey === card.key && r.eventKey === event.key
-            );
-            if (!match) return event;
-            return {
-              ...event,
-              eventStoryFull: match.storyFull,
-            };
-          }),
-        }));
-        setCards(workingCards);
-        console.log(
-          "[review continue] workingCards events after regenerate",
-          workingCards.flatMap((card) =>
-            card.events.map((e) => ({
-              cardKey: card.key,
-              eventType: e.eventType,
-              eventStoryFull: e.eventStoryFull,
-              eventDate: e.eventDate,
-            }))
-          )
-        );
-      }
+      const workingCards = cardsWithSynthesized;
 
       const checked = workingCards.filter((c) => c.include);
       const payload: PendingReviewPayload = {
@@ -1068,6 +965,7 @@ export default function ReviewRecordClient({
           occupation: c.form.occupation.trim() || null,
           military_branch: c.form.military_branch.trim() || null,
           service_number: c.form.service_number.trim() || null,
+          generate_story: c.generateStory,
           marital_status: c.form.marital_status.trim() || null,
           cause_of_death: c.form.cause_of_death.trim() || null,
           surviving_spouse: c.form.surviving_spouse.trim() || null,
@@ -1100,6 +998,7 @@ export default function ReviewRecordClient({
               event_date: r.eventDate.trim() || null,
               event_place_id: r.event_place_id,
               event_place_fields: r.event_place_fields,
+              event_place_display: r.event_place_display.trim() || null,
               notes: r.eventNotes.trim() || null,
               story_full: e.eventStoryFull.trim() || null,
               land_data: e.landData ?? null,
@@ -1119,8 +1018,8 @@ export default function ReviewRecordClient({
         // still navigate; step 2 may show empty if storage blocked
       }
       router.push(`/review/${recordId}/duplicates`);
-    } finally {
-      setIsRegeneratingStories(false);
+    } catch {
+      // localStorage / navigation can throw in edge cases; ignore
     }
   }
 
@@ -2484,10 +2383,9 @@ export default function ReviewRecordClient({
               <button
                 type="button"
                 onClick={handleContinue}
-                disabled={isRegeneratingStories}
                 className="w-full rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
               >
-                {isRegeneratingStories ? "Updating stories…" : "Continue"}
+                Continue
               </button>
             </div>
           </section>

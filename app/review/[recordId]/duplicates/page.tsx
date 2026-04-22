@@ -28,6 +28,7 @@ type DbPerson = {
 
 type PendingPerson = PendingReviewPayload["people"][number] & {
   birth_place_display?: string | null;
+  generate_story?: boolean;
 };
 
 type PersonWithMatch = {
@@ -460,11 +461,135 @@ export default function ReviewDuplicatesPage() {
           mergeDecisions: mergeDecisionsPayload,
         }),
       });
-      const data = (await res.json()) as { success?: boolean; error?: string };
+      const data = (await res.json()) as {
+        success?: boolean;
+        error?: string;
+        personIds?: string[];
+        savedEvents?: Array<{
+          personIndex: number;
+          eventIndex: number;
+          personId: string;
+          eventId: string;
+        }>;
+      };
       if (!res.ok || !data.success) {
         setSubmitError(data.error ?? "Request failed.");
         return;
       }
+
+      const treeId = pendingReview.returnTreeId?.trim() ?? "";
+      const personIds = data.personIds ?? [];
+      const savedEvents = data.savedEvents ?? [];
+      const contextPersonIds = [...new Set(personIds)];
+
+      if (treeId && savedEvents.length > 0 && contextPersonIds.length > 0) {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          console.warn("[duplicates] skip story regen: not signed in");
+        } else {
+        const { data: nameRows } = await supabase
+          .from("persons")
+          .select("id, first_name, middle_name, last_name")
+          .eq("user_id", user.id)
+          .in("id", contextPersonIds);
+
+        const nameById = new Map<string, string>();
+        for (const row of nameRows ?? []) {
+          const r = row as {
+            id: string;
+            first_name: string | null;
+            middle_name: string | null;
+            last_name: string | null;
+          };
+          const nm = [r.first_name, r.middle_name, r.last_name]
+            .map((x) => (x ?? "").trim())
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          if (nm) nameById.set(r.id, nm);
+        }
+
+        for (const se of savedEvents) {
+          const personPayload = pendingPersonsPayload[se.personIndex];
+          if (!personPayload) continue;
+          if (personPayload.generate_story === false) continue;
+          const ev = personPayload.events?.[se.eventIndex];
+          if (!ev) continue;
+
+          const personName =
+            nameById.get(se.personId) ?? fullNameFromPending(personPayload);
+          const eventType = (ev.event_type ?? "").trim() || "other";
+          const eventDate = ev.event_date?.trim() || null;
+          const fromDisplay = ev.event_place_display?.trim();
+          const fromFields =
+            ev.event_place_fields != null
+              ? formatPlace(ev.event_place_fields).trim()
+              : "";
+          const eventPlace = fromDisplay || fromFields || null;
+          const eventNotes = ev.notes?.trim() || null;
+
+          const related_people = (personPayload.relationships ?? [])
+            .map((rel) => {
+              const name = (rel.related_name ?? "").trim();
+              if (!name) return null;
+              return {
+                name,
+                relationship_type: rel.relationship_type?.trim() || "other",
+              };
+            })
+            .filter(
+              (rp): rp is { name: string; relationship_type: string } =>
+                rp !== null
+            );
+
+          let storyFull: string | null = null;
+          try {
+            const regRes = await fetch("/api/regenerate-story", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+                body: JSON.stringify({
+                tree_id: treeId,
+                person_name: personName,
+                event_type: eventType,
+                event_date: eventDate,
+                event_place: eventPlace,
+                event_notes: eventNotes,
+                related_people,
+                anchor_person_id: se.personId,
+                context_person_ids: contextPersonIds,
+                exclude_event_id: se.eventId,
+                record_type_label: pendingReview.recordTypeLabel,
+              }),
+            });
+            const regData = (await regRes.json()) as {
+              story_full?: unknown;
+              error?: string;
+            };
+            if (regRes.ok && typeof regData.story_full === "string") {
+              storyFull = regData.story_full;
+            }
+          } catch {
+            // keep null; save already succeeded
+          }
+
+          if (storyFull) {
+            const { error: upErr } = await supabase
+              .from("events")
+              .update({ story_full: storyFull })
+              .eq("id", se.eventId)
+              .eq("user_id", user.id);
+            if (upErr) {
+              console.error("[duplicates] persist story_full", upErr.message);
+            }
+          }
+        }
+        }
+      }
+
       try {
         localStorage.removeItem(PENDING_REVIEW_KEY);
       } catch {
@@ -576,7 +701,7 @@ export default function ReviewDuplicatesPage() {
               className="text-base font-medium"
               style={{ color: "var(--dg-brown-dark)" }}
             >
-              Adding to your tree…
+              Saving and writing stories…
             </p>
           </div>
         </div>
