@@ -1616,6 +1616,11 @@ function FamilyMemberCard({
   hideRelationshipLabel?: boolean;
   onEditRelationship?: () => void;
 }) {
+  const familyCardParams = useParams() as { treeId?: string };
+  const familyCardTreeId =
+    typeof familyCardParams.treeId === "string" && familyCardParams.treeId.trim() !== ""
+      ? familyCardParams.treeId.trim()
+      : "";
   const displayName = [p.first_name, p.middle_name ?? "", p.last_name]
     .map((s) => s.trim())
     .filter(Boolean)
@@ -1669,10 +1674,14 @@ function FamilyMemberCard({
   ]
     .filter(Boolean)
     .join(" · ");
+  const familyCardHref =
+    familyCardTreeId !== ""
+      ? `/dashboard/${familyCardTreeId}/person/${p.id}`
+      : `/person/${p.id}`;
 
   return (
     <Link
-      href={`/person/${p.id}`}
+      href={familyCardHref}
       className="flex min-w-0 items-start gap-3 py-3"
       style={{
         textDecoration: "none",
@@ -2145,8 +2154,12 @@ export default function PersonProfilePage() {
     typeof raw.treeId === "string" && raw.treeId.trim() !== ""
       ? raw.treeId.trim()
       : "";
-  const backToTreeHref = treeId !== "" ? `/dashboard/${treeId}` : "/dashboard";
-  const backToTreeLabel = treeId !== "" ? "Back to tree" : "Back to My Trees";
+  const [person, setPerson] = useState<PersonRow | null>(null);
+  const personTreeId = (person?.tree_id ?? "").trim();
+  const effectiveBackTreeId = treeId !== "" ? treeId : personTreeId;
+  const backToTreeHref =
+    effectiveBackTreeId !== "" ? `/dashboard/${effectiveBackTreeId}` : "/dashboard";
+  const backToTreeLabel = "Return to tree";
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
@@ -2179,7 +2192,6 @@ export default function PersonProfilePage() {
     () => scrapbookHeaderPhotoTiltDeg(personId),
     [personId]
   );
-  const [person, setPerson] = useState<PersonRow | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [photoRows, setPhotoRows] = useState<Record<string, unknown>[]>([]);
   const [photoEventTags, setPhotoEventTags] = useState<PhotoEventTagRow[]>([]);
@@ -4707,6 +4719,79 @@ export default function PersonProfilePage() {
     setTagModalSearch("");
     setTagModalResults([]);
     setTagModalTags([]);
+  }
+
+  async function openPhotoSetupForExisting(row: Record<string, unknown>) {
+    const photoId = typeof row.id === "string" ? row.id : "";
+    const thumbCrop = personPhotoCropForRow(row);
+
+    setPhotoSetupModal(row);
+    setPhotoSetupZoom(thumbCrop.zoom);
+    setPhotoSetupDate(typeof row.photo_date === "string" ? row.photo_date : "");
+    setPhotoSetupCaption(typeof row.caption === "string" ? row.caption : "");
+    const linked = photoEventTags.find((t) => t.photo_id === photoId);
+    setPhotoSetupEventId(linked?.event_id ?? null);
+    setPhotoSetupTagSearch("");
+    setPhotoSetupTagResults([]);
+    setPhotoSetupError(null);
+
+    const fallbackTags: PhotoSetupTagPerson[] = person
+      ? [
+          {
+            id: person.id,
+            first_name: person.first_name,
+            last_name: person.last_name,
+            middle_name: person.middle_name ?? null,
+          },
+        ]
+      : [];
+    setPhotoSetupTags(fallbackTags);
+
+    if (!photoId) return;
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: tagRows, error: tagErr } = await supabase
+      .from("photo_tags")
+      .select("person_id")
+      .eq("photo_id", photoId)
+      .eq("user_id", user.id);
+    if (tagErr) {
+      setPhotoSetupError(tagErr.message);
+      return;
+    }
+    const personIds = [...new Set((tagRows ?? []).map((r) => (r as { person_id?: string }).person_id))]
+      .filter((id): id is string => typeof id === "string" && id.trim() !== "");
+    if (personIds.length === 0) return;
+
+    const { data: personsRows, error: personsErr } = await supabase
+      .from("persons")
+      .select("id, first_name, middle_name, last_name")
+      .in("id", personIds)
+      .eq("user_id", user.id);
+    if (personsErr) {
+      setPhotoSetupError(personsErr.message);
+      return;
+    }
+    const tags = (personsRows ?? [])
+      .map((r) => r as { id?: string; first_name?: string; middle_name?: string | null; last_name?: string })
+      .filter((r): r is { id: string; first_name: string; middle_name: string | null; last_name: string } =>
+        typeof r.id === "string" &&
+        typeof r.first_name === "string" &&
+        typeof r.last_name === "string"
+      )
+      .map((r) => ({
+        id: r.id,
+        first_name: r.first_name,
+        middle_name: r.middle_name ?? null,
+        last_name: r.last_name,
+      }));
+    if (tags.length > 0) {
+      setPhotoSetupTags(tags);
+    }
   }
 
   async function savePhotoSetup() {
@@ -9427,8 +9512,7 @@ export default function PersonProfilePage() {
                   if (!url) return null;
                   const thumbCrop = personPhotoCropForRow(row);
                   const openCropModal = () => {
-                    setCropModalPhoto(row);
-                    setCropZoom(thumbCrop.zoom);
+                    void openPhotoSetupForExisting(row);
                   };
                   const openPreviewModal = () => {
                     setPhotoPreviewModal(row);

@@ -417,7 +417,7 @@ export async function POST(request: NextRequest) {
       const { data: row, error: fetchErr } = await supabase
         .from("persons")
         .select(
-          "id, birth_place_id, death_place_id, marital_status, cause_of_death, surviving_spouse"
+          "id, middle_name, death_date, birth_place_id, death_place_id, marital_status, cause_of_death, surviving_spouse"
         )
         .eq("id", existingId)
         .eq("user_id", user.id)
@@ -449,6 +449,14 @@ export async function POST(request: NextRequest) {
 
       const existingBirthPlaceId = (row as { birth_place_id?: string | null })
         .birth_place_id;
+      const existingMiddleName = (row as { middle_name?: string | null }).middle_name;
+      if (isEmptyDbField(existingMiddleName) && !isEmptyDbField(payload.middle_name)) {
+        updates.middle_name = payload.middle_name;
+      }
+      const existingDeathDate = (row as { death_date?: string | null }).death_date;
+      if (isEmptyDbField(existingDeathDate) && !isEmptyDbField(payload.death_date)) {
+        updates.death_date = payload.death_date;
+      }
       if (
         isEmptyDbField(existingBirthPlaceId) &&
         !isEmptyDbField(payload.birth_place_id)
