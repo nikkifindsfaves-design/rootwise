@@ -3,7 +3,12 @@
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_GENDER, normalizeGender } from "@/lib/utils/gender";
-import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
+import {
+  findOrCreatePlace,
+  findOrCreateInReviewPlace,
+  normalizePlaceFields,
+  type PlaceFields,
+} from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type PersonRow = {
@@ -413,7 +418,8 @@ export type CardEventInput = {
 
 async function resolveEventPlaceIdFromCardEvent(
   supabase: SupabaseClient,
-  ev: CardEventInput
+  ev: CardEventInput,
+  _recordId: string
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = ev.event_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
@@ -426,11 +432,24 @@ async function resolveEventPlaceIdFromCardEvent(
   if (fields === null) {
     return { id: null, error: null };
   }
-  const r = await findOrCreatePlace(supabase, fields);
+  const normalizedFields = normalizePlaceFields(fields);
+  const r = await findOrCreatePlace(supabase, normalizedFields, { allowCreate: false });
   if (!r.ok) {
     return { id: null, error: r.message };
   }
-  return { id: r.id, error: null };
+  if (r.id) {
+    return { id: r.id, error: null };
+  }
+  const inReviewRes = await findOrCreateInReviewPlace(supabase, {
+    ...normalizedFields,
+    source_dataset: "manual_review",
+    source_ref:
+      ev.event_place_display?.trim() ||
+      JSON.stringify(ev.event_place_fields ?? {}) ||
+      "(empty)",
+  });
+  if (!inReviewRes.ok) return { id: null, error: inReviewRes.message };
+  return { id: inReviewRes.id, error: null };
 }
 
 function inverseRelationshipType(t: string): string {
@@ -648,7 +667,11 @@ export async function acceptPersonCard(params: {
   }
 
   for (const ev of params.events) {
-    const placeRes = await resolveEventPlaceIdFromCardEvent(supabase, ev);
+    const placeRes = await resolveEventPlaceIdFromCardEvent(
+      supabase,
+      ev,
+      params.recordId
+    );
     if (placeRes.error) {
       return { ok: false, error: placeRes.error };
     }

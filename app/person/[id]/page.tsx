@@ -2946,7 +2946,7 @@ export default function PersonProfilePage() {
       supabase
         .from("persons")
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, tree_id, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, tree_id, birth_place:places!birth_place_id(place_identity_id, township, county, state, country), death_place:places!death_place_id(place_identity_id, township, county, state, country)"
         )
         .eq("id", personId)
         .eq("user_id", user.id)
@@ -2954,7 +2954,7 @@ export default function PersonProfilePage() {
       supabase
         .from("events")
         .select(
-          "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_full, created_at, event_place:places!event_place_id(township, county, state, country)"
+          "id, event_type, event_date, event_place_id, description, record_id, notes, research_notes, story_full, created_at, event_place:places!event_place_id(place_identity_id, township, county, state, country)"
         )
         .eq("person_id", personId)
         .eq("user_id", user.id)
@@ -5194,7 +5194,7 @@ export default function PersonProfilePage() {
       .eq("id", personId)
       .eq("user_id", user.id)
       .select(
-        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, birth_place:places!birth_place_id(township, county, state, country), death_place:places!death_place_id(township, county, state, country)"
+        "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, military_branch, service_number, cause_of_death, marital_status, surviving_spouse, notes, birth_place:places!birth_place_id(place_identity_id, township, county, state, country), death_place:places!death_place_id(place_identity_id, township, county, state, country)"
       )
       .maybeSingle();
 

@@ -2,7 +2,12 @@ import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { createClient } from "@/lib/supabase/server";
 import { MERGE_FIELDS, type MergeField } from "@/lib/person-merge/merge-fields";
 import { normalizeGender } from "@/lib/utils/gender";
-import { findOrCreatePlace, type PlaceFields } from "@/lib/utils/places";
+import {
+  findOrCreatePlace,
+  findOrCreateInReviewPlace,
+  normalizePlaceFields,
+  type PlaceFields,
+} from "@/lib/utils/places";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -106,6 +111,8 @@ function parsePlaceFields(raw: unknown): PlaceFields | null {
 }
 
 function parsePlaceDisplayToFields(display: string): PlaceFields | null {
+  const looksLikeCounty = (value: string): boolean =>
+    /\b(county|co\.?|cnty\.?)\b/i.test(value);
   const parts = display
     .trim()
     .split(",")
@@ -119,9 +126,10 @@ function parsePlaceDisplayToFields(display: string): PlaceFields | null {
     return { township: null, county: null, state: parts[0]!, country: parts[1]! };
   }
   if (parts.length === 3) {
+    const first = parts[0]!;
     return {
-      township: null,
-      county: parts[0]!,
+      township: looksLikeCounty(first) ? null : first,
+      county: looksLikeCounty(first) ? first : null,
       state: parts[1]!,
       country: parts[2]!,
     };
@@ -135,16 +143,14 @@ function parsePlaceDisplayToFields(display: string): PlaceFields | null {
 
 async function resolveBirthPlaceIdFromBody(
   supabase: SupabaseClient,
-  p: PendingPersonBody
+  p: PendingPersonBody,
+  _recordId: string
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = p.birth_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
     return { id: rawId.trim(), error: null };
   }
   let fields = parsePlaceFields(p.birth_place_fields);
-  if (fields != null && fields.country.trim() === "") {
-    fields = null;
-  }
   if (fields === null && typeof p.birth_place_fields === "string") {
     const display = p.birth_place_fields.trim();
     if (display !== "") {
@@ -160,28 +166,36 @@ async function resolveBirthPlaceIdFromBody(
   if (fields === null) {
     return { id: null, error: null };
   }
-  if (fields.country.trim() === "") {
-    return { id: null, error: null };
-  }
-  const r = await findOrCreatePlace(supabase, fields);
+  const normalizedFields = normalizePlaceFields(fields);
+  const r = await findOrCreatePlace(supabase, normalizedFields, { allowCreate: false });
   if (!r.ok) {
     return { id: null, error: r.message };
   }
-  return { id: r.id, error: null };
+  if (r.id) {
+    return { id: r.id, error: null };
+  }
+  const rawInput = String(
+    p.birth_place_display ?? p.birth_place_fields ?? ""
+  ).trim();
+  const inReviewRes = await findOrCreateInReviewPlace(supabase, {
+    ...normalizedFields,
+    source_dataset: "manual_review",
+    source_ref: rawInput || JSON.stringify(p.birth_place_fields ?? {}),
+  });
+  if (!inReviewRes.ok) return { id: null, error: inReviewRes.message };
+  return { id: inReviewRes.id, error: null };
 }
 
 async function resolveEventPlaceIdFromEvent(
   supabase: SupabaseClient,
-  e: Record<string, unknown>
+  e: Record<string, unknown>,
+  _recordId: string
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = e.event_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
     return { id: rawId.trim(), error: null };
   }
   let fields = parsePlaceFields(e.event_place_fields);
-  if (fields != null && fields.country.trim() === "") {
-    fields = null;
-  }
   if (fields === null && typeof e.event_place_display === "string") {
     const display = e.event_place_display.trim();
     if (display !== "") {
@@ -191,28 +205,36 @@ async function resolveEventPlaceIdFromEvent(
   if (fields === null) {
     return { id: null, error: null };
   }
-  if (fields.country.trim() === "") {
-    return { id: null, error: null };
-  }
-  const r = await findOrCreatePlace(supabase, fields);
+  const normalizedFields = normalizePlaceFields(fields);
+  const r = await findOrCreatePlace(supabase, normalizedFields, { allowCreate: false });
   if (!r.ok) {
     return { id: null, error: r.message };
   }
-  return { id: r.id, error: null };
+  if (r.id) {
+    return { id: r.id, error: null };
+  }
+  const rawInput = String(
+    e.event_place_display ?? e.event_place_fields ?? ""
+  ).trim();
+  const inReviewRes = await findOrCreateInReviewPlace(supabase, {
+    ...normalizedFields,
+    source_dataset: "manual_review",
+    source_ref: rawInput || JSON.stringify(e.event_place_fields ?? {}),
+  });
+  if (!inReviewRes.ok) return { id: null, error: inReviewRes.message };
+  return { id: inReviewRes.id, error: null };
 }
 
 async function resolveDeathPlaceIdFromBody(
   supabase: SupabaseClient,
-  p: PendingPersonBody
+  p: PendingPersonBody,
+  _recordId: string
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = p.death_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
     return { id: rawId.trim(), error: null };
   }
   let fields = parsePlaceFields(p.death_place_fields);
-  if (fields != null && fields.country.trim() === "") {
-    fields = null;
-  }
   if (fields === null && typeof p.death_place_fields === "string") {
     const display = p.death_place_fields.trim();
     if (display !== "") {
@@ -228,14 +250,24 @@ async function resolveDeathPlaceIdFromBody(
   if (fields === null) {
     return { id: null, error: null };
   }
-  if (fields.country.trim() === "") {
-    return { id: null, error: null };
-  }
-  const r = await findOrCreatePlace(supabase, fields);
+  const normalizedFields = normalizePlaceFields(fields);
+  const r = await findOrCreatePlace(supabase, normalizedFields, { allowCreate: false });
   if (!r.ok) {
     return { id: null, error: r.message };
   }
-  return { id: r.id, error: null };
+  if (r.id) {
+    return { id: r.id, error: null };
+  }
+  const rawInput = String(
+    p.death_place_display ?? p.death_place_fields ?? ""
+  ).trim();
+  const inReviewRes = await findOrCreateInReviewPlace(supabase, {
+    ...normalizedFields,
+    source_dataset: "manual_review",
+    source_ref: rawInput || JSON.stringify(p.death_place_fields ?? {}),
+  });
+  if (!inReviewRes.ok) return { id: null, error: inReviewRes.message };
+  return { id: inReviewRes.id, error: null };
 }
 
 function toPersonPayload(p: PendingPersonBody) {
@@ -397,12 +429,12 @@ export async function POST(request: NextRequest) {
     const existingId =
       typeof p.existingPersonId === "string" ? p.existingPersonId.trim() : "";
 
-    const birthRes = await resolveBirthPlaceIdFromBody(supabase, p);
+    const birthRes = await resolveBirthPlaceIdFromBody(supabase, p, recordId);
     if (birthRes.error) {
       console.error("[save-review]", "birth-place-resolve", birthRes.error);
       return NextResponse.json({ error: birthRes.error }, { status: 500 });
     }
-    const deathRes = await resolveDeathPlaceIdFromBody(supabase, p);
+    const deathRes = await resolveDeathPlaceIdFromBody(supabase, p, recordId);
     if (deathRes.error) {
       console.error("[save-review]", "death-place-resolve", deathRes.error);
       return NextResponse.json({ error: deathRes.error }, { status: 500 });
@@ -800,7 +832,11 @@ export async function POST(request: NextRequest) {
       const noteText =
         String(e.notes ?? e.description ?? "").trim() || null;
       const storyFull = String(e.story_full ?? "").trim() || null;
-      const evPlaceRes = await resolveEventPlaceIdFromEvent(supabase, e);
+      const evPlaceRes = await resolveEventPlaceIdFromEvent(
+        supabase,
+        e,
+        recordId
+      );
       if (evPlaceRes.error) {
         console.error("[save-review]", "event-place-resolve", evPlaceRes.error);
         return NextResponse.json({ error: evPlaceRes.error }, { status: 500 });

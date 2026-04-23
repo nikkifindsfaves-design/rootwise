@@ -350,7 +350,7 @@ export async function fetchLifeSpineFromDatabase(params: {
   const { data: eventRows, error: evErr } = await supabase
     .from("events")
     .select(
-      "person_id, event_type, event_date, notes, event_place:places!event_place_id(township, county, state, country)"
+      "person_id, event_type, event_date, notes, event_place:places!event_place_id(place_identity_id, township, county, state, country)"
     )
     .eq("user_id", userId)
     .in("person_id", uniqueIds);
@@ -447,7 +447,7 @@ export async function fetchLifeContextForPersonIds(params: {
   let q = supabase
     .from("events")
     .select(
-      "id, person_id, event_type, event_date, notes, event_place:places!event_place_id(township, county, state, country)"
+      "id, person_id, event_type, event_date, notes, event_place:places!event_place_id(place_identity_id, township, county, state, country)"
     )
     .eq("user_id", userId)
     .in("person_id", validIds);

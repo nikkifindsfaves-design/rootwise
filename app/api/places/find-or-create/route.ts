@@ -1,5 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
-import { findOrCreatePlace } from "@/lib/utils/places";
+import {
+  findOrCreatePlace,
+  findOrCreateInReviewPlace,
+  normalizePlaceFields,
+} from "@/lib/utils/places";
 import { NextResponse, type NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -9,12 +13,20 @@ type ParsedPlaceFields = {
   county: string | null;
   state: string | null;
   country: string;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  historical_context?: string | null;
+  is_canonical_current?: boolean;
+  source_dataset?: string | null;
+  source_ref?: string | null;
 };
 
 function parseStructuredPlaceBody(body: unknown): ParsedPlaceFields | null {
   if (body === null || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
-  if (typeof o.country !== "string" || o.country.trim() === "") return null;
+  if (typeof o.country !== "string" && o.country !== null && o.country !== undefined) {
+    return null;
+  }
   const opt = (v: unknown): string | null => {
     if (v === null || v === undefined) return null;
     if (typeof v !== "string") return null;
@@ -25,11 +37,20 @@ function parseStructuredPlaceBody(body: unknown): ParsedPlaceFields | null {
     township: opt(o.township),
     county: opt(o.county),
     state: opt(o.state),
-    country: o.country.trim(),
+    country: typeof o.country === "string" ? o.country.trim() : "",
+    valid_from: opt(o.valid_from),
+    valid_to: opt(o.valid_to),
+    historical_context: opt(o.historical_context),
+    is_canonical_current:
+      typeof o.is_canonical_current === "boolean" ? o.is_canonical_current : undefined,
+    source_dataset: opt(o.source_dataset),
+    source_ref: opt(o.source_ref),
   };
 }
 
 function parseDisplayToFields(display: string): ParsedPlaceFields | null {
+  const looksLikeCounty = (value: string): boolean =>
+    /\b(county|co\.?|cnty\.?)\b/i.test(value);
   const parts = display
     .trim()
     .split(",")
@@ -43,9 +64,10 @@ function parseDisplayToFields(display: string): ParsedPlaceFields | null {
     return { township: null, county: null, state: parts[0]!, country: parts[1]! };
   }
   if (parts.length === 3) {
+    const first = parts[0]!;
     return {
-      township: null,
-      county: parts[0]!,
+      township: looksLikeCounty(first) ? null : first,
+      county: looksLikeCounty(first) ? first : null,
       state: parts[1]!,
       country: parts[2]!,
     };
@@ -97,22 +119,36 @@ export async function POST(request: NextRequest) {
     if (fields === null) {
       fields = parseStructuredPlaceBody(body);
     }
-    if (fields === null || fields.country.trim() === "") {
+    if (fields === null) {
       return NextResponse.json(
         {
-          error:
-            "Provide a non-empty display string, or structured place fields including country.",
+          error: "Provide a non-empty display string, or structured place fields.",
         },
         { status: 400 }
       );
     }
 
-    const placeResult = await findOrCreatePlace(supabase, fields);
+    const normalizedFields = normalizePlaceFields(fields);
+    const placeResult = await findOrCreatePlace(supabase, normalizedFields, {
+      allowCreate: false,
+    });
     if (!placeResult.ok) {
       return NextResponse.json({ error: placeResult.message }, { status: 500 });
     }
+    if (placeResult.id == null) {
+      const rawInput = display || JSON.stringify(body);
+      const inReviewRes = await findOrCreateInReviewPlace(supabase, {
+        ...normalizedFields,
+        source_dataset: "manual_review",
+        source_ref: rawInput,
+      });
+      if (!inReviewRes.ok) {
+        return NextResponse.json({ error: inReviewRes.message }, { status: 500 });
+      }
+      return NextResponse.json({ id: inReviewRes.id, needs_review: true }, { status: 200 });
+    }
 
-    return NextResponse.json({ id: placeResult.id }, { status: 200 });
+    return NextResponse.json({ id: placeResult.id, needs_review: false }, { status: 200 });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });

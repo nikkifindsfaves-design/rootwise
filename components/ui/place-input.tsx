@@ -29,10 +29,12 @@ export type PlaceInputSelection = {
 
 type PlaceRow = {
   id: string;
+  place_identity_id?: string;
   township: string | null;
   county: string | null;
   state: string | null;
   country: string;
+  is_canonical_current?: boolean;
 };
 
 type PlaceInputProps = {
@@ -104,7 +106,8 @@ export function PlaceInput({
       const supabase = createClient();
       const { data, error } = await supabase
         .from("places")
-        .select("id, township, county, state, country")
+        .select("id, place_identity_id, township, county, state, country, is_canonical_current")
+        .eq("is_canonical_current", true)
         .or(buildPlacesOrFilter(term))
         .limit(PLACE_INPUT_RESULT_LIMIT);
 

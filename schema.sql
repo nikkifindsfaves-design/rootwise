@@ -15,15 +15,70 @@
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
--- public.places (shared place rows; no per-user column in app)
+-- public.place_identities (stable identity), public.places (historical versions)
 -- ---------------------------------------------------------------------------
+create table public.place_identities (
+  id uuid primary key default gen_random_uuid(),
+  country text not null default '',
+  canonical_township text,
+  canonical_county text,
+  canonical_state text,
+  canonical_display_name text not null default '',
+  created_at timestamptz not null default now()
+);
+
 create table public.places (
   id uuid primary key default gen_random_uuid(),
+  place_identity_id uuid not null references public.place_identities (id) on delete cascade,
   township text,
   county text,
   state text,
-  country text not null default ''
+  country text not null default '',
+  valid_from date,
+  valid_to date,
+  historical_context text,
+  is_canonical_current boolean not null default false,
+  source_dataset text,
+  source_ref text,
+  created_at timestamptz not null default now(),
+  constraint places_valid_range_chk
+    check (valid_from is null or valid_to is null or valid_from <= valid_to)
 );
+
+create index if not exists places_place_identity_id_idx
+  on public.places (place_identity_id);
+create index if not exists places_location_lookup_idx
+  on public.places (country, state, county, township);
+create index if not exists places_valid_window_idx
+  on public.places (valid_from, valid_to);
+create unique index if not exists places_one_current_canonical_per_identity_idx
+  on public.places (place_identity_id)
+  where is_canonical_current = true;
+
+create or replace function public.resolve_place_version_id(
+  p_place_identity_id uuid,
+  p_event_date date default null
+)
+returns uuid
+language sql
+stable
+as $$
+  select p.id
+  from public.places p
+  where p.place_identity_id = p_place_identity_id
+    and (
+      p_event_date is null
+      or (
+        (p.valid_from is null or p.valid_from <= p_event_date)
+        and (p.valid_to is null or p.valid_to >= p_event_date)
+      )
+    )
+  order by
+    case when p.is_canonical_current then 0 else 1 end,
+    p.valid_from desc nulls last,
+    p.created_at asc
+  limit 1;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- public.trees
@@ -284,6 +339,80 @@ create policy "event_sources_update_own"
 create policy "event_sources_delete_own"
   on public.event_sources for delete
   using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- public.place_review_queue (unmatched/ambiguous places for manual review)
+-- ---------------------------------------------------------------------------
+create table public.place_review_queue (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  record_id uuid references public.records (id) on delete set null,
+  source_type text not null default 'manual'
+    check (source_type in ('birth_place', 'death_place', 'event_place', 'manual')),
+  source_entity_id uuid,
+  raw_input text not null,
+  parsed_township text,
+  parsed_county text,
+  parsed_state text,
+  parsed_country text,
+  normalized_township text,
+  normalized_county text,
+  normalized_state text,
+  normalized_country text,
+  match_strategy text,
+  match_confidence numeric(5,4),
+  status text not null default 'needs_review'
+    check (status in ('needs_review', 'approved', 'rejected')),
+  resolved_place_id uuid references public.places (id) on delete set null,
+  review_notes text,
+  reviewed_by uuid references auth.users (id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists place_review_queue_user_status_idx
+  on public.place_review_queue (user_id, status);
+create index if not exists place_review_queue_status_created_idx
+  on public.place_review_queue (status, created_at desc);
+create index if not exists place_review_queue_record_idx
+  on public.place_review_queue (record_id)
+  where record_id is not null;
+create index if not exists place_review_queue_resolved_place_idx
+  on public.place_review_queue (resolved_place_id)
+  where resolved_place_id is not null;
+
+create or replace function public.set_place_review_queue_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_place_review_queue_updated_at on public.place_review_queue;
+create trigger trg_place_review_queue_updated_at
+before update on public.place_review_queue
+for each row
+execute function public.set_place_review_queue_updated_at();
+
+alter table public.place_review_queue enable row level security;
+
+create policy "place_review_queue_select_own"
+  on public.place_review_queue for select
+  using (auth.uid() = user_id);
+create policy "place_review_queue_insert_own"
+  on public.place_review_queue for insert
+  with check (auth.uid() = user_id);
+create policy "place_review_queue_update_own"
+  on public.place_review_queue for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+create policy "place_review_queue_delete_own"
+  on public.place_review_queue for delete
+  using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets (names used by app: documents, photos)
