@@ -3,7 +3,11 @@
  * Wire pages/components to these exports in follow-up work — do not duplicate strings.
  */
 
-export const CANVAS_THEME_IDS = ["string", "dead_gossip", "roots"] as const;
+export const CANVAS_THEME_IDS = [
+  "evidence_board",
+  "dead_gossip",
+  "heirloom",
+] as const;
 
 export type CanvasThemeId = (typeof CANVAS_THEME_IDS)[number];
 export const DEFAULT_CANVAS_THEME_ID: CanvasThemeId = CANVAS_THEME_IDS[0];
@@ -16,20 +20,20 @@ export const CANVAS_THEME_ID = {
 export const CANVAS_THEME_OPTIONS = [
   {
     id: CANVAS_THEME_ID.STRING,
-    name: "String",
-    description: "Default canvas theme.",
+    name: "Evidence Board",
+    description: "Every connection mapped. Every photo pinned. The case is never closed.",
     example: "Straightforward layout—names and lines stay easy to scan.",
   },
   {
     id: CANVAS_THEME_ID.DEAD_GOSSIP,
     name: "Dead Gossip",
-    description: "Ledger and letterpress tone.",
+    description: "Taped up, marked up, impossible to put down.",
     example: "Ink, margins, and quiet drama fit for a family chronicle.",
   },
   {
     id: CANVAS_THEME_ID.ROOTS,
-    name: "Roots",
-    description: "Grounded, organic palette.",
+    name: "Heirloom",
+    description: "Preserved on parchment, like something worth keeping.",
     example: "Earth tones that feel like soil, bark, and old photographs.",
   },
 ] as const;

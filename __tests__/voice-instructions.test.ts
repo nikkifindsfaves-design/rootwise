@@ -5,7 +5,7 @@ import { getVoiceInstructions } from "@/lib/vibes/voice-instructions";
 const VALID_VIBES = [
   "classic",
   "gossip_girl",
-  "old_timey",
+  "hearthside",
   "southern_gothic",
   "gen_z",
 ] as const;

@@ -107,12 +107,12 @@ function treeCanvasCorkboardSurfaceStyle(isDark: boolean): CSSProperties {
   };
 }
 
-/** Roots theme: full-bleed art from `public/Roots Tree BG.jpg` (light/dark read via gradient only). */
+/** Roots theme: full-bleed art from `public/BG heirloom.png` (light/dark read via gradient only). */
 function treeCanvasRootsSurfaceStyle(isDark: boolean): CSSProperties {
-  const bg = "url(/Roots%20Tree%20BG.jpg)";
+  const bg = "url(/BG%20heirloom.png)";
   const wash = isDark
-    ? "linear-gradient(180deg, rgba(0,0,0,0.38) 0%, rgba(0,0,0,0.52) 100%)"
-    : "linear-gradient(180deg, rgba(255,252,248,0.12) 0%, rgba(42,26,14,0.14) 100%)";
+    ? "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.44) 100%)"
+    : "linear-gradient(180deg, rgba(255,252,248,0.1) 0%, rgba(42,26,14,0.12) 100%)";
   return {
     backgroundColor: isDark ? "#1e1812" : "#c4b4a2",
     backgroundImage: `${wash}, ${bg}`,
@@ -185,19 +185,24 @@ const TREE_LEAF_SURFACE_W = Math.round(LAYOUT_NODE_H * 1.464);
 const TREE_LEAF_SURFACE_H = Math.round(
   Math.max(LAYOUT_NODE_H * 1.35, TREE_LEAF_SURFACE_W * 1.04)
 );
-const TREE_ROOTS_CARD_SCALE = 0.765;
-const TREE_ROOTS_CARD_SURFACE_W = Math.round(
-  TREE_LEAF_SURFACE_W * TREE_ROOTS_CARD_SCALE
-);
-const TREE_ROOTS_CARD_SURFACE_H = Math.round(
-  TREE_LEAF_SURFACE_H * TREE_ROOTS_CARD_SCALE
-);
+const TREE_ROOTS_CARD_SURFACE_W = Math.round(LAYOUT_NODE_W * 1.341);
+const TREE_ROOTS_CARD_SURFACE_H = Math.round(TREE_ROOTS_CARD_SURFACE_W * 1.62);
 /** Roots tree cards: move photo + caption block down within the parchment card. */
 const TREE_LEAF_ROOTS_CONTENT_SHIFT_Y = Math.round(
-  TREE_ROOTS_CARD_SURFACE_H * 0.219
-);
+  TREE_ROOTS_CARD_SURFACE_H * 0.09
+) - 7;
 /** Caption pill text: literal dark brown so it stays readable in app dark mode (`--dg-*` browns often invert). */
 const TREE_ROOTS_CAPTION_INK = "#2a1810";
+const TREE_ROOTS_FRAME_BORDER_LIGHT = "rgba(84, 55, 32, 0.58)";
+const TREE_ROOTS_FRAME_BORDER_DARK = "rgba(240, 222, 188, 0.36)";
+const TREE_ROOTS_CABINET_BG_LIGHT = "#efe2cc";
+const TREE_ROOTS_CABINET_BG_DARK = "#5a4636";
+const TREE_ROOTS_CABINET_INSET_LIGHT = "rgba(108, 72, 41, 0.44)";
+const TREE_ROOTS_CABINET_INSET_DARK = "rgba(236, 214, 184, 0.34)";
+const TREE_ROOTS_PRINT_FILTER_LIGHT =
+  "contrast(1.04) sepia(0.4) saturate(0.72) brightness(1.01)" as const;
+const TREE_ROOTS_PRINT_FILTER_DARK =
+  "contrast(1.08) sepia(0.46) saturate(0.62) brightness(0.92)" as const;
 
 const LAYOUT_BASE_Y = 1200;
 const LAYOUT_GEN_DY = 300;
@@ -250,7 +255,7 @@ const TREE_BRAD_SYMBOL_W = 12;
 const TREE_BRAD_SYMBOL_H = 12;
 const TREE_BRAD_CX = 6;
 const TREE_BRAD_CY = 6;
-const TREE_ROOTS_TOP_TACK_SHIFT_Y = 20;
+const TREE_ROOTS_TOP_TACK_SHIFT_Y = 13;
 const TREE_ROOTS_TOP_TACK_SCALE = 1.15;
 /** Dead Gossip tape: strip is ~75% of photo width and crosses photo bottom edge. */
 const TREE_DEAD_GOSSIP_TAPE_W = Math.round(TREE_DEAD_GOSSIP_IMG_W * 0.75);
@@ -516,12 +521,12 @@ function TreeThreadLine({
       ? TREE_THREAD_MARRIAGE
       : TREE_THREAD_LINEAGE;
   const wBack = rootsBranchVisual
-    ? 3.68
+    ? 2.35
     : markerVisual
       ? TREE_THREAD_STROKE_DARK * 1.85
       : TREE_THREAD_STROKE_DARK;
   const wFront = rootsBranchVisual
-    ? 1.78
+    ? 1.15
     : markerVisual
       ? TREE_THREAD_STROKE_BRIGHT * 1.55
       : TREE_THREAD_STROKE_BRIGHT;
@@ -547,8 +552,8 @@ function TreeThreadLine({
   const startRightY = startBaseY - startNy * (arrowSpreadB - arrowNudge);
 
   if (rootsBranchVisual) {
-    // Pen-like S-curve: depart downward from source, arrive upward into destination.
-    const bend = Math.max(18, Math.min(88, Math.abs(dy) * 0.42 + Math.abs(dx) * 0.1));
+    // Softer heirloom curve: gentler control points and lighter stroke.
+    const bend = Math.max(14, Math.min(54, Math.abs(dy) * 0.34 + Math.abs(dx) * 0.06));
     const c1x = x1 + dx * 0.24;
     const c2x = x1 + dx * 0.76;
     const c1y = y1 + bend;
@@ -563,7 +568,7 @@ function TreeThreadLine({
           strokeWidth={wBack}
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeOpacity={0.79}
+          strokeOpacity={0.66}
         />
         <path
           d={d}
@@ -572,7 +577,7 @@ function TreeThreadLine({
           strokeWidth={wFront}
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeOpacity={0.76}
+          strokeOpacity={0.74}
         />
       </g>
     );
@@ -1772,22 +1777,26 @@ function treePolaroidFrameChrome(
 
 /** Roots theme: `public/Parchment.svg` scaled to cover the node box (same footprint as polaroid); mask matches. */
 function treeLeafInnerSurfaceStyle(isDark: boolean): CSSProperties {
-  const leaf = "url(/Parchment.svg)";
+  const frameEdge = isDark
+    ? TREE_ROOTS_FRAME_BORDER_DARK
+    : TREE_ROOTS_FRAME_BORDER_LIGHT;
   return {
     boxSizing: "border-box",
-    backgroundColor: isDark ? "#1a2418" : "#f0f6ec",
-    backgroundImage: leaf,
-    backgroundSize: "cover",
-    backgroundRepeat: "no-repeat",
-    backgroundPosition: "center",
-    WebkitMaskImage: leaf,
-    maskImage: leaf,
-    WebkitMaskSize: "cover",
-    maskSize: "cover",
-    WebkitMaskRepeat: "no-repeat",
-    maskRepeat: "no-repeat",
-    WebkitMaskPosition: "center",
-    maskPosition: "center",
+    borderRadius: 2,
+    border: `2px solid ${frameEdge}`,
+    backgroundColor: isDark ? TREE_ROOTS_CABINET_BG_DARK : TREE_ROOTS_CABINET_BG_LIGHT,
+    backgroundImage: isDark
+      ? [
+          "radial-gradient(140% 100% at 18% 10%, rgba(238, 212, 176, 0.09) 0%, rgba(0,0,0,0) 56%)",
+          "radial-gradient(130% 88% at 86% 84%, rgba(34, 24, 16, 0.2) 0%, rgba(0,0,0,0) 58%)",
+          "repeating-linear-gradient(31deg, rgba(248, 225, 188, 0.035) 0px, rgba(248, 225, 188, 0.035) 1px, rgba(0,0,0,0) 1px, rgba(0,0,0,0) 6px)",
+        ].join(", ")
+      : [
+          "radial-gradient(138% 96% at 16% 12%, rgba(255, 245, 226, 0.55) 0%, rgba(0,0,0,0) 58%)",
+          "radial-gradient(130% 90% at 84% 86%, rgba(182, 146, 102, 0.18) 0%, rgba(0,0,0,0) 56%)",
+          "repeating-linear-gradient(29deg, rgba(132, 93, 57, 0.03) 0px, rgba(132, 93, 57, 0.03) 1px, rgba(0,0,0,0) 1px, rgba(0,0,0,0) 7px)",
+        ].join(", "),
+    boxShadow: "none",
   };
 }
 
@@ -3043,12 +3052,10 @@ export default function TreeCanvas({
                 inset 0 0 9px rgba(18, 8, 5, 0.4) !important;
             }
             .dg-tree-leaf-light.dg-tree-node-card:hover {
-              filter:
-                drop-shadow(0 7px 20px rgba(42, 26, 16, 0.4))
-                drop-shadow(0 2px 8px rgba(42, 26, 16, 0.28)) !important;
+              filter: none !important;
             }
             .dg-tree-leaf-dark.dg-tree-node-card:hover {
-              filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.58)) !important;
+              filter: none !important;
             }
           `,
         }}
@@ -3282,7 +3289,7 @@ export default function TreeCanvas({
                   className={
                     "absolute left-0 top-0 " +
                     (canvasTheme === CANVAS_THEME_ID.ROOTS
-                      ? "pointer-events-none z-[3]"
+                      ? "pointer-events-none z-[1]"
                       : canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
                         ? "pointer-events-none z-[4]"
                         : "pointer-events-none z-[2]")
@@ -3529,10 +3536,7 @@ export default function TreeCanvas({
                   </defs>
                   {canvasTheme === CANVAS_THEME_ID.ROOTS ? (
                     <>
-                      <g
-                        filter="url(#dg-tree-roots-branch-displace)"
-                        style={{ pointerEvents: "none" }}
-                      >
+                      <g style={{ pointerEvents: "none" }}>
                         {treeThreadSegments.map((s) => (
                           <TreeThreadLine
                             key={s.key}
@@ -3670,14 +3674,18 @@ export default function TreeCanvas({
                     !!(primaryRow?.file_url ?? "").trim() || !!fallback;
                   const yearLine = treeCardYearRange(p);
                   const isDarkPolaroid = theme === "dark";
-                  const printFilter = isDarkPolaroid
-                    ? TREE_POLAROID_PRINT_FILTER_DARK
-                    : TREE_POLAROID_PRINT_FILTER_LIGHT;
+                  const isRootsLeaf = canvasTheme === CANVAS_THEME_ID.ROOTS;
+                  const printFilter = isRootsLeaf
+                    ? isDarkPolaroid
+                      ? TREE_ROOTS_PRINT_FILTER_DARK
+                      : TREE_ROOTS_PRINT_FILTER_LIGHT
+                    : isDarkPolaroid
+                      ? TREE_POLAROID_PRINT_FILTER_DARK
+                      : TREE_POLAROID_PRINT_FILTER_LIGHT;
 
                   const cardTiltDeg = treeCardTiltDegreesFromPersonId(pos.id);
                   const cardNudgeY =
                     treeCardVerticalNudgePxFromPersonId(pos.id);
-                  const isRootsLeaf = canvasTheme === CANVAS_THEME_ID.ROOTS;
                   const isDeadGossipPhotoCard =
                     canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP;
                   const treeCardPhotoW = isRootsLeaf
@@ -3709,9 +3717,11 @@ export default function TreeCanvas({
                     transformOrigin: "center center",
                   };
 
-                  /** Roots profile uses a circular print; square viewport + circle clip matches that crop. */
-                  const treeRootsPhotoDiameter = isRootsLeaf
-                    ? Math.min(treeCardPhotoW, treeCardPhotoH)
+                  const treeRootsPhotoW = isRootsLeaf
+                    ? Math.round(treeCardPhotoW * 1.287)
+                    : 0;
+                  const treeRootsPhotoH = isRootsLeaf
+                    ? Math.round(treeCardPhotoH * 1.375)
                     : 0;
 
                   const cardFace = (
@@ -3752,13 +3762,17 @@ export default function TreeCanvas({
                             : undefined
                         }
                         style={{
-                          width: isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoW,
-                          height: isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoH,
+                          width: isRootsLeaf ? treeRootsPhotoW : treeCardPhotoW,
+                          height: isRootsLeaf ? treeRootsPhotoH : treeCardPhotoH,
                           alignSelf: isDeadGossipPhotoCard ? "center" : undefined,
                           backgroundColor: hasAvatarSrc
                             ? "var(--dg-avatar-bg)"
-                            : POLAROID_NO_PHOTO_BG,
-                          borderRadius: isRootsLeaf ? "50%" : 1,
+                            : isRootsLeaf
+                              ? isDarkPolaroid
+                                ? "rgba(56, 42, 31, 0.85)"
+                                : "rgba(209, 190, 162, 0.7)"
+                              : POLAROID_NO_PHOTO_BG,
+                          borderRadius: isRootsLeaf ? "50% / 44%" : 1,
                           ...(isDeadGossipPhotoCard
                             ? {
                                 boxShadow: `0 0 0 ${TREE_POLAROID_EDGE}px #fff`,
@@ -3769,9 +3783,11 @@ export default function TreeCanvas({
                             : {}),
                           ...(isRootsLeaf
                             ? {
-                                clipPath: "circle(50% at 50% 50%)",
+                                clipPath: "ellipse(50% 44% at 50% 50%)",
                                 isolation: "isolate",
                                 cursor: "pointer",
+                                border: "none",
+                                boxShadow: "none",
                               }
                             : {}),
                         }}
@@ -3781,24 +3797,39 @@ export default function TreeCanvas({
                             primary={primaryRow}
                             fallbackUrl={fallback}
                             viewportW={
-                              isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoW
+                              isRootsLeaf ? treeRootsPhotoW : treeCardPhotoW
                             }
                             viewportH={
-                              isRootsLeaf ? treeRootsPhotoDiameter : treeCardPhotoH
+                              isRootsLeaf ? treeRootsPhotoH : treeCardPhotoH
                             }
                             printFilter={printFilter}
                           />
                         ) : (
                           <div
-                            className="flex h-full w-full items-center justify-center text-sm font-bold"
+                            className="relative h-full w-full"
+                            aria-hidden
                             style={{
-                              fontFamily: serif,
-                              color: POLAROID_NO_PHOTO_INITIALS,
+                              background: isDarkPolaroid
+                                ? [
+                                    "radial-gradient(ellipse 66% 74% at 50% 44%, rgba(196, 164, 126, 0.23) 0%, rgba(140, 108, 78, 0.2) 28%, rgba(79, 59, 44, 0.1) 52%, rgba(44, 32, 24, 0) 72%)",
+                                    "radial-gradient(ellipse 90% 92% at 50% 48%, rgba(28, 20, 15, 0) 56%, rgba(28, 20, 15, 0.32) 100%)",
+                                  ].join(", ")
+                                : [
+                                    "radial-gradient(ellipse 66% 74% at 50% 44%, rgba(182, 141, 96, 0.27) 0%, rgba(169, 130, 87, 0.2) 30%, rgba(145, 109, 74, 0.1) 54%, rgba(113, 83, 57, 0) 74%)",
+                                    "radial-gradient(ellipse 90% 92% at 50% 48%, rgba(74, 50, 32, 0) 56%, rgba(74, 50, 32, 0.2) 100%)",
+                                  ].join(", "),
                             }}
-                          >
-                            {initials(p)}
-                          </div>
+                          />
                         )}
+                        {isRootsLeaf ? (
+                          <div
+                            className="pointer-events-none absolute inset-0"
+                            style={{
+                              background:
+                                "radial-gradient(ellipse 72% 76% at 50% 45%, rgba(0,0,0,0) 58%, rgba(34, 24, 16, 0.24) 100%)",
+                            }}
+                          />
+                        ) : null}
                         {isDeadGossipPhotoCard ? (
                           <div
                             className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center gap-0.5 px-2 pb-1.5 pt-3 text-center"
@@ -3847,23 +3878,20 @@ export default function TreeCanvas({
                                 display: "inline-flex",
                                 flexDirection: "column",
                                 alignItems: "center",
-                                gap: 3,
-                                width: "90%",
+                                gap: 1,
+                                width: "92%",
                                 maxWidth: "100%",
-                                padding: "2px 7px",
-                                borderRadius: 5,
-                                backgroundColor: "rgba(255, 253, 248, 0.3)",
-                                boxShadow:
-                                  "0 0 0 1px rgba(62, 42, 28, 0.05), 0 1px 2px rgba(42, 26, 14, 0.05)",
+                                padding: "5px 3px 0",
                               }}
                             >
                               <p
-                                className="max-w-full text-center text-[12px] font-bold break-words whitespace-normal"
+                                className="max-w-full text-center text-[11px] font-semibold break-words whitespace-normal"
                                 style={{
                                   fontFamily: serif,
-                                  lineHeight: 1.12,
+                                  lineHeight: 1.22,
                                   color: TREE_ROOTS_CAPTION_INK,
                                   overflowWrap: "break-word",
+                                  letterSpacing: "0.02em",
                                 }}
                                 title={displayName(p)}
                               >
@@ -3871,11 +3899,12 @@ export default function TreeCanvas({
                               </p>
                               {yearLine ? (
                                 <p
-                                  className="max-w-full shrink-0 truncate text-center text-[10px] font-semibold leading-tight"
+                                  className="max-w-full shrink-0 truncate text-center text-[9px] font-medium leading-tight"
                                   style={{
-                                    fontFamily: sans,
+                                    fontFamily: serif,
                                     marginTop: 0,
                                     color: TREE_ROOTS_CAPTION_INK,
+                                    letterSpacing: "0.03em",
                                   }}
                                   title={yearLine}
                                 >
@@ -3934,9 +3963,7 @@ export default function TreeCanvas({
                         style={{
                           ...cardPositionStyle,
                           overflow: "visible",
-                          filter: isDarkPolaroid
-                            ? "drop-shadow(0 4px 10px rgba(0,0,0,0.48))"
-                            : "drop-shadow(0 3px 9px rgba(42, 28, 18, 0.26))",
+                          filter: "none",
                         }}
                       >
                         <div
@@ -3948,6 +3975,16 @@ export default function TreeCanvas({
                             ...treeLeafInnerSurfaceStyle(isDarkPolaroid),
                           }}
                         >
+                          <div
+                            className="pointer-events-none absolute inset-[7px]"
+                            style={{
+                              border: `1px solid ${
+                                isDarkPolaroid
+                                  ? TREE_ROOTS_CABINET_INSET_DARK
+                                  : TREE_ROOTS_CABINET_INSET_LIGHT
+                              }`,
+                            }}
+                          />
                           {cardFace}
                         </div>
                       </div>

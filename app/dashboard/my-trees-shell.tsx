@@ -33,66 +33,58 @@ const colors = {
 const VIBES = [
   {
     id: "classic",
-    name: "Classic",
-    description:
-      "Evidence-first true-crime narration with one sharp observational beat.",
-    example:
-      "Case file: Della Mae Hutchins enters the record in Pittsylvania County, March 1887. The filing is routine. The timing is what makes it interesting.",
+    name: "Case File",
+    description: "The record shows what happened. The gaps are more interesting.",
   },
   {
     id: "gossip_girl",
-    name: "Gossip Girl",
-    description:
-      "Socially sharp, theatrical, and reveal-driven. Status always matters.",
-    example:
-      "Our girl Della Mae Hutchins debuts in March 1887, Pittsylvania County, with perfect timing and just enough mystery to keep everyone talking.",
+    name: "Scandal Sheet",
+    description: "Everyone had a reputation. Yours had one too.",
   },
   {
-    id: "old_timey",
-    name: "Old-Timey",
+    id: "hearthside",
+    name: "Hearthside",
     description:
-      "Formal nineteenth-century chronicler voice: stately, precise, and dignified.",
-    example:
-      "It is with due propriety that we record the birth of Miss Della Mae Hutchins, entered at Pittsylvania County in March of 1887, an occasion of clear familial consequence.",
+      "This is the story as it was told, and worth telling again.",
   },
   {
     id: "southern_gothic",
     name: "Southern Gothic",
-    description:
-      "Atmospheric Southern prose: sensory, haunted, and place-soaked.",
-    example:
-      "In Pittsylvania's cold red clay spring of 1887, Della Mae Hutchins arrives while the air still holds winter and the porch boards remember every footstep.",
+    description: "The land remembers what the family forgot.",
   },
   {
     id: "gen_z",
     name: "Gen Z",
-    description:
-      "Unbothered narrator. Casual. Your ancestor is the main character.",
-    example:
-      "della mae hutchins was born march 4, 1887 in pittsylvania county, virginia. her dad roy, a farmer, filed the paperwork. very normal start for someone's whole entire life.",
+    description: "your ancestor had a whole life. let's get into it.",
   },
 ] as const;
 
 type VibeId = (typeof VIBES)[number]["id"];
 
 function vibeDisplayName(vibeId: string): string {
+  if (vibeId === "old_timey") return "Hearthside";
   const v = VIBES.find((x) => x.id === vibeId);
-  return v?.name ?? "Classic";
+  return v?.name ?? "Case File";
 }
 
 function toVibeId(raw: string): VibeId {
+  if (raw === "old_timey") return "hearthside";
   const v = VIBES.find((x) => x.id === raw);
   return v ? v.id : DEFAULT_VIBE;
 }
 
 function toCanvasThemeId(raw: string): CanvasThemeId {
+  if (raw === "string") return "evidence_board";
+  if (raw === "roots") return "heirloom";
   const t = CANVAS_THEME_OPTIONS.find((x) => x.id === raw);
   return t ? t.id : DEFAULT_CANVAS_THEME_ID;
 }
 
 function canvasThemeDisplayName(themeId: string): string {
+  if (themeId === "string") return "Evidence Board";
+  if (themeId === "roots") return "Heirloom";
   const t = CANVAS_THEME_OPTIONS.find((x) => x.id === themeId);
-  return t?.name ?? "String";
+  return t?.name ?? "Evidence Board";
 }
 
 export type TreeWithCount = {
@@ -864,6 +856,15 @@ export default function MyTreesShell({
             >
               Choose your vibe
             </h2>
+            <p
+              className="mt-2 text-sm leading-relaxed"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Your vibe is the narrative voice your stories are written in. It
+              shapes tone, not facts — same ancestor, completely different
+              feeling. You can change it any time, but it only affects new
+              stories and any you choose to regenerate.
+            </p>
             {vibeModalMode === "change" ? (
               <p
                 className="mt-2 text-sm"
@@ -881,7 +882,7 @@ export default function MyTreesShell({
                   <button
                     key={v.id}
                     type="button"
-                    className="rounded-lg border p-3 text-left transition"
+                    className="relative h-14 rounded-lg border px-2.5 py-2 text-left transition-shadow"
                     style={{
                       borderColor: isSelected
                         ? colors.brownOutline
@@ -889,6 +890,9 @@ export default function MyTreesShell({
                       backgroundColor: isSelected
                         ? "var(--dg-parchment-deep)"
                         : colors.cream,
+                      boxShadow: isHovered
+                        ? "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)"
+                        : "none",
                       cursor: "pointer",
                     }}
                     onMouseEnter={() => setHoveredVibe(v.id)}
@@ -896,28 +900,38 @@ export default function MyTreesShell({
                     onClick={() => setSelectedVibe(v.id)}
                   >
                     <p
-                      className="font-bold leading-tight"
+                      className="text-sm font-bold leading-tight"
                       style={{ fontFamily: serif, color: colors.brownDark }}
                     >
                       {v.name}
                     </p>
-                    <p
-                      className="mt-1 text-sm leading-snug"
-                      style={{ fontFamily: sans, color: colors.brownMid }}
-                    >
-                      {v.description}
-                    </p>
                     {isHovered ? (
-                      <p
-                        className="mt-2 text-xs italic leading-snug"
-                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      <div
+                        className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-60 -translate-x-1/2 rounded-md border px-3 py-2 text-xs leading-snug"
+                        style={{
+                          fontFamily: sans,
+                          color: colors.brownDark,
+                          borderColor: colors.brownBorder,
+                          backgroundColor: colors.cream,
+                          boxShadow:
+                            "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)",
+                        }}
                       >
-                        {v.example}
-                      </p>
+                        {v.description}
+                      </div>
                     ) : null}
                   </button>
                 );
               })}
+            </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                className="border-none bg-transparent p-0 text-xs underline-offset-2 hover:underline"
+                style={{ fontFamily: sans, color: colors.brownMuted }}
+              >
+                See all vibes compared →
+              </button>
             </div>
 
             {vibeModalMode === "create" ? (
@@ -930,9 +944,12 @@ export default function MyTreesShell({
                 </h3>
                 <p
                   className="mt-2 text-sm"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                  style={{ fontFamily: sans, color: colors.brownMuted, lineHeight: 1.6 }}
                 >
-                  Choose how your family tree looks on the canvas.
+                  Your canvas theme controls how your family tree looks — the
+                  visual style of the tree itself, plus headers and profile
+                  frames on each person&apos;s page. This is purely cosmetic and
+                  can be changed any time without affecting your data.
                 </p>
                 <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   {CANVAS_THEME_OPTIONS.map((ct) => {
@@ -942,7 +959,7 @@ export default function MyTreesShell({
                       <button
                         key={ct.id}
                         type="button"
-                        className="rounded-lg border p-3 text-left transition"
+                        className="relative h-14 rounded-lg border px-2.5 py-2 text-left transition-shadow"
                         style={{
                           borderColor: isSelected
                             ? colors.brownOutline
@@ -950,6 +967,9 @@ export default function MyTreesShell({
                           backgroundColor: isSelected
                             ? "var(--dg-parchment-deep)"
                             : colors.cream,
+                          boxShadow: isHovered
+                            ? "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)"
+                            : "none",
                           cursor: "pointer",
                         }}
                         onMouseEnter={() => setHoveredCanvasThemePick(ct.id)}
@@ -957,24 +977,25 @@ export default function MyTreesShell({
                         onClick={() => setSelectedCanvasTheme(ct.id)}
                       >
                         <p
-                          className="font-bold leading-tight"
+                          className="text-sm font-bold leading-tight"
                           style={{ fontFamily: serif, color: colors.brownDark }}
                         >
                           {ct.name}
                         </p>
-                        <p
-                          className="mt-1 text-sm leading-snug"
-                          style={{ fontFamily: sans, color: colors.brownMid }}
-                        >
-                          {ct.description}
-                        </p>
                         {isHovered ? (
-                          <p
-                            className="mt-2 text-xs italic leading-snug"
-                            style={{ fontFamily: sans, color: colors.brownMuted }}
+                          <div
+                            className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-60 -translate-x-1/2 rounded-md border px-3 py-2 text-xs leading-snug"
+                            style={{
+                              fontFamily: sans,
+                              color: colors.brownDark,
+                              borderColor: colors.brownBorder,
+                              backgroundColor: colors.cream,
+                              boxShadow:
+                                "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)",
+                            }}
                           >
-                            {ct.example}
-                          </p>
+                            {ct.description}
+                          </div>
                         ) : null}
                       </button>
                     );
@@ -1075,9 +1096,12 @@ export default function MyTreesShell({
             </h2>
             <p
               className="mt-2 text-sm"
-              style={{ fontFamily: sans, color: colors.brownMuted }}
+              style={{ fontFamily: sans, color: colors.brownMuted, lineHeight: 1.6 }}
             >
-              This controls the look of the family tree canvas for this tree.
+              Your canvas theme controls how your family tree looks — the
+              visual style of the tree itself, plus headers and profile frames
+              on each person&apos;s page. This is purely cosmetic and can be
+              changed any time without affecting your data.
             </p>
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1088,7 +1112,7 @@ export default function MyTreesShell({
                   <button
                     key={ct.id}
                     type="button"
-                    className="rounded-lg border p-3 text-left transition"
+                    className="relative h-14 rounded-lg border px-2.5 py-2 text-left transition-shadow"
                     style={{
                       borderColor: isSelected
                         ? colors.brownOutline
@@ -1096,6 +1120,9 @@ export default function MyTreesShell({
                       backgroundColor: isSelected
                         ? "var(--dg-parchment-deep)"
                         : colors.cream,
+                      boxShadow: isHovered
+                        ? "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)"
+                        : "none",
                       cursor: "pointer",
                     }}
                     onMouseEnter={() => setHoveredCanvasThemePick(ct.id)}
@@ -1103,24 +1130,25 @@ export default function MyTreesShell({
                     onClick={() => setSelectedCanvasTheme(ct.id)}
                   >
                     <p
-                      className="font-bold leading-tight"
+                      className="text-sm font-bold leading-tight"
                       style={{ fontFamily: serif, color: colors.brownDark }}
                     >
                       {ct.name}
                     </p>
-                    <p
-                      className="mt-1 text-sm leading-snug"
-                      style={{ fontFamily: sans, color: colors.brownMid }}
-                    >
-                      {ct.description}
-                    </p>
                     {isHovered ? (
-                      <p
-                        className="mt-2 text-xs italic leading-snug"
-                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      <div
+                        className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-60 -translate-x-1/2 rounded-md border px-3 py-2 text-xs leading-snug"
+                        style={{
+                          fontFamily: sans,
+                          color: colors.brownDark,
+                          borderColor: colors.brownBorder,
+                          backgroundColor: colors.cream,
+                          boxShadow:
+                            "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)",
+                        }}
                       >
-                        {ct.example}
-                      </p>
+                        {ct.description}
+                      </div>
                     ) : null}
                   </button>
                 );

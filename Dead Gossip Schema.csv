@@ -1,0 +1,101 @@
+table_name,column_name,data_type,is_nullable
+event_sources,id,uuid,NO
+event_sources,user_id,uuid,NO
+event_sources,event_id,uuid,NO
+event_sources,record_id,uuid,NO
+event_sources,notes,text,YES
+event_sources,created_at,timestamp with time zone,YES
+events,id,uuid,NO
+events,user_id,uuid,NO
+events,person_id,uuid,YES
+events,record_id,uuid,YES
+events,event_type,text,NO
+events,event_date,text,YES
+events,description,text,YES
+events,confirmed,boolean,YES
+events,created_at,timestamp with time zone,YES
+events,notes,text,YES
+events,story_full,text,YES
+events,event_place_id,uuid,YES
+events,research_notes,text,YES
+events,land_data,jsonb,YES
+occupations,id,uuid,NO
+occupations,person_id,uuid,NO
+occupations,job_title,text,NO
+occupations,year_observed,integer,YES
+occupations,notes,text,YES
+occupations,created_at,timestamp with time zone,YES
+occupations,record_id,uuid,YES
+pending_persons,id,uuid,NO
+pending_persons,user_id,uuid,NO
+pending_persons,record_id,uuid,NO
+pending_persons,first_name,text,YES
+pending_persons,middle_name,text,YES
+pending_persons,last_name,text,YES
+pending_persons,birth_date,text,YES
+pending_persons,death_date,text,YES
+pending_persons,gender,text,YES
+pending_persons,notes,text,YES
+pending_persons,status,text,YES
+person_notes,id,uuid,NO
+person_notes,user_id,uuid,NO
+person_notes,person_id,uuid,NO
+person_notes,content,text,YES
+person_notes,updated_at,timestamp with time zone,YES
+persons,id,uuid,NO
+persons,user_id,uuid,NO
+persons,first_name,text,NO
+persons,last_name,text,YES
+persons,birth_year,integer,YES
+persons,death_year,integer,YES
+persons,gender,text,YES
+persons,notes,text,YES
+persons,created_at,timestamp with time zone,YES
+persons,middle_name,text,YES
+persons,birth_date,text,YES
+persons,death_date,text,YES
+persons,photo_url,text,YES
+persons,tree_id,uuid,YES
+persons,birth_place_id,uuid,YES
+persons,death_place_id,uuid,YES
+persons,cause_of_death,text,YES
+persons,marital_status,text,YES
+persons,surviving_spouse,text,YES
+persons,occupation,text,YES
+persons,military_branch,text,YES
+persons,service_number,text,YES
+photo_event_tags,id,uuid,NO
+photo_event_tags,user_id,uuid,NO
+photo_event_tags,photo_id,uuid,NO
+photo_event_tags,event_id,uuid,NO
+photo_event_tags,created_at,timestamp with time zone,NO
+photo_tags,id,uuid,NO
+photo_tags,photo_id,uuid,NO
+photo_tags,person_id,uuid,NO
+photo_tags,user_id,uuid,NO
+photo_tags,created_at,timestamp with time zone,YES
+photo_tags,crop_x,double precision,YES
+photo_tags,crop_y,double precision,YES
+photo_tags,crop_zoom,double precision,YES
+photo_tags,is_primary,boolean,YES
+photos,id,uuid,NO
+photos,user_id,uuid,NO
+photos,file_url,text,NO
+photos,caption,text,YES
+photos,created_at,timestamp with time zone,YES
+photos,crop_x,double precision,YES
+photos,crop_y,double precision,YES
+photos,crop_zoom,double precision,YES
+photos,photo_date,text,YES
+photos,natural_width,integer,YES
+photos,natural_height,integer,YES
+place_containment,id,uuid,NO
+place_containment,child_place_identity_id,uuid,NO
+place_containment,parent_place_identity_id,uuid,NO
+place_containment,valid_from,date,YES
+place_containment,valid_to,date,YES
+place_containment,source_dataset,text,YES
+place_containment,source_ref,text,YES
+place_containment,confidence,numeric,NO
+place_containment,created_at,timestamp with time zone,NO
+place_identities,id,uuid,NO

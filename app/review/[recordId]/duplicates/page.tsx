@@ -167,13 +167,29 @@ function fieldRowNeedsChoice(
 }
 
 function buildFieldChoicesForMatch(
+  pending: PendingPerson,
+  match: DbPerson,
   matchId: string,
   fieldMergeChoices: Record<string, Partial<Record<MergeField, FieldMergePick>>>
 ): Record<string, "existing" | "record"> {
   const chosen = fieldMergeChoices[matchId] ?? {};
   const out: Record<string, "existing" | "record"> = {};
+  const pendingBirthPlace = fieldStr(pending.birth_place_display);
+  const existingBirthPlace = match.birth_place ? formatPlace(match.birth_place).trim() : "";
   for (const field of MERGE_FIELDS) {
-    out[field] = chosen[field] ?? "existing";
+    if (chosen[field]) {
+      out[field] = chosen[field]!;
+      continue;
+    }
+    if (
+      field === "birth_place_id" &&
+      pendingBirthPlace !== "" &&
+      existingBirthPlace === ""
+    ) {
+      out[field] = "record";
+      continue;
+    }
+    out[field] = "existing";
   }
   return out;
 }
@@ -409,9 +425,14 @@ export default function ReviewDuplicatesPage() {
     if (!pendingReview) return [];
     return peopleWithMatches
       .filter(({ match }) => (cardMergeChoice[match.id] ?? "merge") === "merge")
-      .map(({ match }) => ({
+      .map(({ match, pending }) => ({
         existingPersonId: match.id,
-        fieldChoices: buildFieldChoicesForMatch(match.id, fieldMergeChoices),
+        fieldChoices: buildFieldChoicesForMatch(
+          pending,
+          match,
+          match.id,
+          fieldMergeChoices
+        ),
       }));
   }, [pendingReview, peopleWithMatches, cardMergeChoice, fieldMergeChoices]);
 

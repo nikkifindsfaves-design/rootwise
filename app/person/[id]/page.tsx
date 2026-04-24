@@ -18,7 +18,13 @@ import {
   GENDER_VALUES,
   normalizeGender,
 } from "@/lib/utils/gender";
-import { formatPlace } from "@/lib/utils/places";
+import {
+  fetchPlaceVersionRowById,
+  formatPlace,
+  formatPlaceFromVersionRow,
+  normalizePlaceVersionEmbed,
+  type PlaceVersionRow,
+} from "@/lib/utils/places";
 import {
   RootsFramePortrait,
   ROOTS_PROFILE_HEADER_MOUNT_SCALE,
@@ -86,18 +92,8 @@ type PersonRow = {
   surviving_spouse: string | null;
   notes: string | null;
   tree_id?: string | null;
-  birth_place?: {
-    township: string | null;
-    county: string | null;
-    state: string | null;
-    country: string;
-  } | null;
-  death_place?: {
-    township: string | null;
-    county: string | null;
-    state: string | null;
-    country: string;
-  } | null;
+  birth_place?: PlaceVersionRow | null;
+  death_place?: PlaceVersionRow | null;
 };
 
 type FamilyRelationshipChoice = "parent" | "child" | "spouse" | "sibling";
@@ -2974,18 +2970,12 @@ export default function PersonProfilePage() {
       return;
     }
 
-    const raw = personData as PersonRow & {
+    const raw = personData as unknown as PersonRow & {
       birth_place_id?: string | null;
       death_place_id?: string | null;
       tree_id?: string | null;
-      birth_place?:
-        | PersonRow["birth_place"]
-        | NonNullable<PersonRow["birth_place"]>[]
-        | null;
-      death_place?:
-        | PersonRow["death_place"]
-        | NonNullable<PersonRow["death_place"]>[]
-        | null;
+      birth_place?: unknown;
+      death_place?: unknown;
     };
     const personTreeId =
       raw.tree_id != null && String(raw.tree_id).trim() !== ""
@@ -2993,21 +2983,40 @@ export default function PersonProfilePage() {
         : "";
     const effectiveTreeForRels = treeId || personTreeId;
 
-    const bpJoin = raw.birth_place;
-    const birth_place: PersonRow["birth_place"] =
-      bpJoin == null
-        ? null
-        : Array.isArray(bpJoin)
-          ? (bpJoin[0] ?? null)
-          : bpJoin;
+    let birth_place = normalizePlaceVersionEmbed(
+      raw.birth_place as
+        | PlaceVersionRow
+        | PlaceVersionRow[]
+        | null
+        | undefined
+    );
 
-    const dpJoin = raw.death_place;
-    const death_place: PersonRow["death_place"] =
-      dpJoin == null
-        ? null
-        : Array.isArray(dpJoin)
-          ? (dpJoin[0] ?? null)
-          : dpJoin;
+    let death_place = normalizePlaceVersionEmbed(
+      raw.death_place as
+        | PlaceVersionRow
+        | PlaceVersionRow[]
+        | null
+        | undefined
+    );
+
+    const birthPlaceIdRaw = raw.birth_place_id;
+    if (
+      typeof birthPlaceIdRaw === "string" &&
+      birthPlaceIdRaw.trim() !== "" &&
+      !formatPlaceFromVersionRow(birth_place).trim()
+    ) {
+      const hydrated = await fetchPlaceVersionRowById(supabase, birthPlaceIdRaw);
+      if (hydrated) birth_place = hydrated;
+    }
+    const deathPlaceIdRaw = raw.death_place_id;
+    if (
+      typeof deathPlaceIdRaw === "string" &&
+      deathPlaceIdRaw.trim() !== "" &&
+      !formatPlaceFromVersionRow(death_place).trim()
+    ) {
+      const hydrated = await fetchPlaceVersionRowById(supabase, deathPlaceIdRaw);
+      if (hydrated) death_place = hydrated;
+    }
 
     const p: PersonRow = {
       ...raw,
@@ -3060,7 +3069,7 @@ export default function PersonProfilePage() {
     }
 
     const evs: EventRow[] = (eventData ?? []).map((row) => {
-      const e = row as EventRow & {
+      const e = row as unknown as EventRow & {
         created_at?: string | null;
         event_place?:
           | {
@@ -5113,8 +5122,8 @@ export default function PersonProfilePage() {
       birth_date: normalizeDateToMMDDYYYY(person.birth_date),
       death_date: normalizeDateToMMDDYYYY(person.death_date),
       birth_place_id: person.birth_place_id ?? null,
-      birth_place_display: person.birth_place ? formatPlace(person.birth_place) : "",
-      death_place_display: person.death_place ? formatPlace(person.death_place) : "",
+      birth_place_display: formatPlaceFromVersionRow(person.birth_place).trim(),
+      death_place_display: formatPlaceFromVersionRow(person.death_place).trim(),
       death_place_id: person.death_place_id ?? null,
       gender: genderVal,
       marital_status: person.marital_status ?? "",
@@ -5204,16 +5213,36 @@ export default function PersonProfilePage() {
       return;
     }
     if (data) {
-      const row = data as PersonRow & {
+      const row = data as unknown as PersonRow & {
         birth_place_id?: string | null;
         death_place_id?: string | null;
-        birth_place?: { township: string | null; county: string | null; state: string | null; country: string } | { township: string | null; county: string | null; state: string | null; country: string }[] | null;
-        death_place?: { township: string | null; county: string | null; state: string | null; country: string } | { township: string | null; county: string | null; state: string | null; country: string }[] | null;
+        birth_place?: unknown;
+        death_place?: unknown;
       };
-      const bp = row.birth_place;
-      const dp = row.death_place;
-      const normBp = bp == null ? null : Array.isArray(bp) ? (bp[0] ?? null) : bp;
-      const normDp = dp == null ? null : Array.isArray(dp) ? (dp[0] ?? null) : dp;
+      let normBp = normalizePlaceVersionEmbed(
+        row.birth_place as PlaceVersionRow | PlaceVersionRow[] | null | undefined
+      );
+      let normDp = normalizePlaceVersionEmbed(
+        row.death_place as PlaceVersionRow | PlaceVersionRow[] | null | undefined
+      );
+      const bpId = row.birth_place_id;
+      if (
+        typeof bpId === "string" &&
+        bpId.trim() !== "" &&
+        !formatPlaceFromVersionRow(normBp).trim()
+      ) {
+        const h = await fetchPlaceVersionRowById(supabase, bpId);
+        if (h) normBp = h;
+      }
+      const dpId = row.death_place_id;
+      if (
+        typeof dpId === "string" &&
+        dpId.trim() !== "" &&
+        !formatPlaceFromVersionRow(normDp).trim()
+      ) {
+        const h = await fetchPlaceVersionRowById(supabase, dpId);
+        if (h) normDp = h;
+      }
       setPerson({
         ...row,
         birth_place_id: row.birth_place_id ?? null,
@@ -6420,8 +6449,8 @@ export default function PersonProfilePage() {
         out.push({ label: "DATE OF BIRTH", value: formatDateString(raw) });
       }
     }
-    if (person.birth_place) {
-      const place = formatPlace(person.birth_place).trim();
+    {
+      const place = formatPlaceFromVersionRow(person.birth_place).trim();
       if (place) out.push({ label: "PLACE OF BIRTH", value: place });
     }
     add("GENDER", person.gender);
@@ -6431,8 +6460,8 @@ export default function PersonProfilePage() {
         out.push({ label: "DATE OF DEATH", value: formatDateString(raw) });
       }
     }
-    if (person.death_place) {
-      const place = formatPlace(person.death_place).trim();
+    {
+      const place = formatPlaceFromVersionRow(person.death_place).trim();
       if (place) out.push({ label: "PLACE OF DEATH", value: place });
     }
     add("MARITAL STATUS", person.marital_status);

@@ -1091,24 +1091,12 @@ export default function ReviewRecordClient({
                     alt="Uploaded record"
                   />
                 ) : (
-                  <div className="flex flex-col">
-                    <div
-                      className="border-b px-3 py-2 text-xs"
-                      style={{
-                        borderBottomColor: "var(--dg-brown-border)",
-                        backgroundColor: "var(--dg-parchment)",
-                        color: "var(--dg-brown-muted)",
-                      }}
-                    >
-                      Preview (no zoom for this file type)
-                    </div>
-                    <iframe
-                      title="Document preview"
-                      src={signedDocumentUrl}
-                      className="h-[min(70vh,720px)] min-h-[240px] w-full"
-                      style={{ backgroundColor: "var(--dg-cream)" }}
-                    />
-                  </div>
+                  <iframe
+                    title="Document preview"
+                    src={signedDocumentUrl}
+                    className="h-[min(70vh,720px)] min-h-[240px] w-full"
+                    style={{ backgroundColor: "var(--dg-cream)" }}
+                  />
                 )
               ) : (
                 <p className="p-6 text-sm text-amber-900">
@@ -1501,17 +1489,17 @@ export default function ReviewRecordClient({
                             value={item.form.birth_date}
                             onChange={(nextDate) => {
                               setCards((prev) =>
-                                prev.map((c) => ({
-                                  ...c,
-                                  form:
-                                    c.key === item.key
-                                      ? { ...c.form, birth_date: nextDate }
-                                      : c.form,
-                                  events: c.events.map((ev) => ({
-                                    ...ev,
-                                    eventDate: nextDate,
-                                  })),
-                                }))
+                                prev.map((c) => {
+                                  if (c.key !== item.key) return c;
+                                  return {
+                                    ...c,
+                                    form: { ...c.form, birth_date: nextDate },
+                                    events: c.events.map((ev) => ({
+                                      ...ev,
+                                      eventDate: nextDate,
+                                    })),
+                                  };
+                                })
                               );
                               if (isBirthRecord && isBirthRecordChild) {
                                 setSharedEventDetails((s) => ({
@@ -1552,24 +1540,24 @@ export default function ReviewRecordClient({
                             value={item.form.birth_place_display}
                             onChange={(v) => {
                               setCards((prev) =>
-                                prev.map((c) => ({
-                                  ...c,
-                                  form:
-                                    c.key === item.key
-                                      ? {
-                                          ...c.form,
-                                          birth_place_display: v,
-                                          birth_place_id: null,
-                                          birth_place_fields: placeFieldsFromDisplay(v),
-                                        }
-                                      : c.form,
-                                  events: c.events.map((ev) => ({
-                                    ...ev,
-                                    event_place_display: v,
-                                    event_place_id: null,
-                                    event_place_fields: placeFieldsFromDisplay(v),
-                                  })),
-                                }))
+                                prev.map((c) => {
+                                  if (c.key !== item.key) return c;
+                                  return {
+                                    ...c,
+                                    form: {
+                                      ...c.form,
+                                      birth_place_display: v,
+                                      birth_place_id: null,
+                                      birth_place_fields: placeFieldsFromDisplay(v),
+                                    },
+                                    events: c.events.map((ev) => ({
+                                      ...ev,
+                                      event_place_display: v,
+                                      event_place_id: null,
+                                      event_place_fields: placeFieldsFromDisplay(v),
+                                    })),
+                                  };
+                                })
                               );
                               if (isBirthRecord && isBirthRecordChild) {
                                 setSharedEventDetails((s) => ({
@@ -1582,22 +1570,22 @@ export default function ReviewRecordClient({
                             }}
                             onPlaceSelect={(place) => {
                               setCards((prev) =>
-                                prev.map((c) => ({
-                                  ...c,
-                                  form:
-                                    c.key === item.key
-                                      ? {
-                                          ...c.form,
-                                          birth_place_display: place.display,
-                                          birth_place_id: place.id,
-                                        }
-                                      : c.form,
-                                  events: c.events.map((ev) => ({
-                                    ...ev,
-                                    event_place_display: place.display,
-                                    event_place_id: place.id,
-                                  })),
-                                }))
+                                prev.map((c) => {
+                                  if (c.key !== item.key) return c;
+                                  return {
+                                    ...c,
+                                    form: {
+                                      ...c.form,
+                                      birth_place_display: place.display,
+                                      birth_place_id: place.id,
+                                    },
+                                    events: c.events.map((ev) => ({
+                                      ...ev,
+                                      event_place_display: place.display,
+                                      event_place_id: place.id,
+                                    })),
+                                  };
+                                })
                               );
                               if (isBirthRecord && isBirthRecordChild) {
                                 setSharedEventDetails((s) => ({

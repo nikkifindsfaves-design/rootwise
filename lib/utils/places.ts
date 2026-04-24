@@ -7,6 +7,19 @@ export type PlaceObject = {
   country: string;
 };
 
+/** Joined from `places.place_identity_id` → `place_identities` (Supabase embed). */
+export type PlaceIdentityRow = {
+  canonical_township?: string | null;
+  canonical_county?: string | null;
+  canonical_state?: string | null;
+  country?: string | null;
+  canonical_display_name?: string | null;
+};
+
+export type PlaceVersionRow = PlaceObject & {
+  place_identity?: PlaceIdentityRow | PlaceIdentityRow[] | null;
+};
+
 function segment(value: string | null | undefined): string | null {
   if (value == null) return null;
   const t = value.trim();
@@ -21,6 +34,98 @@ export function formatPlace(place: PlaceObject): string {
     segment(place.country),
   ].filter((p): p is string => p != null);
   return parts.join(", ");
+}
+
+function firstPlaceIdentity(
+  pi: PlaceIdentityRow | PlaceIdentityRow[] | null | undefined
+): PlaceIdentityRow | null {
+  if (pi == null) return null;
+  return Array.isArray(pi) ? (pi[0] ?? null) : pi;
+}
+
+/**
+ * Human-readable place for a `places` row, including fallbacks from linked
+ * `place_identities` when the version row has no township/county/state/country text.
+ */
+export function formatPlaceFromVersionRow(
+  row: PlaceVersionRow | PlaceObject | null | undefined
+): string {
+  if (row == null) return "";
+  const base: PlaceObject = {
+    township: row.township ?? null,
+    county: row.county ?? null,
+    state: row.state ?? null,
+    country: row.country ?? "",
+  };
+  const primary = formatPlace(base).trim();
+  if (primary) return primary;
+  const pi =
+    "place_identity" in row ? firstPlaceIdentity(row.place_identity) : null;
+  if (!pi) return "";
+  const fromCanon = formatPlace({
+    township: pi.canonical_township ?? null,
+    county: pi.canonical_county ?? null,
+    state: pi.canonical_state ?? null,
+    country: pi.country ?? "",
+  }).trim();
+  if (fromCanon) return fromCanon;
+  const dn =
+    typeof pi.canonical_display_name === "string"
+      ? pi.canonical_display_name.trim()
+      : "";
+  return dn;
+}
+
+/**
+ * Normalizes Supabase embed shapes (arrays, nested `place_identity` arrays)
+ * into a single {@link PlaceVersionRow} for app state.
+ */
+export function normalizePlaceVersionEmbed(
+  raw: PlaceVersionRow | PlaceObject | PlaceVersionRow[] | null | undefined
+): PlaceVersionRow | null {
+  if (raw == null) return null;
+  const row = Array.isArray(raw) ? (raw[0] ?? null) : raw;
+  if (row == null) return null;
+  const base = row as PlaceVersionRow;
+  if (!("place_identity" in base) || base.place_identity === undefined) {
+    return {
+      township: base.township ?? null,
+      county: base.county ?? null,
+      state: base.state ?? null,
+      country: base.country ?? "",
+    };
+  }
+  return {
+    township: base.township ?? null,
+    county: base.county ?? null,
+    state: base.state ?? null,
+    country: base.country ?? "",
+    place_identity: firstPlaceIdentity(base.place_identity),
+  };
+}
+
+const PLACE_ROW_WITH_IDENTITY_SELECT =
+  "township, county, state, country, place_identity_id, place_identity:place_identities!place_identity_id(canonical_display_name, country, canonical_township, canonical_county, canonical_state)";
+
+/**
+ * Loads a single place row (with identity fallback) by id. Use when
+ * `persons.birth_place_id` / `death_place_id` is set but the parent query embed
+ * returned null or empty display fields.
+ */
+export async function fetchPlaceVersionRowById(
+  supabase: SupabaseClient,
+  placeId: string | null | undefined
+): Promise<PlaceVersionRow | null> {
+  const id =
+    typeof placeId === "string" && placeId.trim() !== "" ? placeId.trim() : "";
+  if (!id) return null;
+  const { data, error } = await supabase
+    .from("places")
+    .select(PLACE_ROW_WITH_IDENTITY_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error || data == null) return null;
+  return normalizePlaceVersionEmbed(data as PlaceVersionRow);
 }
 
 export function placeToSearchString(partial: string): string {
