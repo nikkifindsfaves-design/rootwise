@@ -52,7 +52,7 @@ function LeftPanel() {
         </p>
       </header>
 
-      <div className="flex min-w-0 shrink-0 flex-col gap-8 py-2 sm:-mt-[70px] sm:gap-10 sm:py-4 lg:gap-10 lg:py-6">
+      <div className="-mt-[10px] flex min-w-0 shrink-0 flex-col gap-8 py-2 sm:-mt-[70px] sm:gap-10 sm:py-4 lg:gap-10 lg:py-6">
         <div className="min-w-0">
           <h1
             className="mt-3 max-w-xl text-2xl leading-[1.12] text-balance sm:text-3xl md:text-4xl lg:text-[2.35rem] lg:leading-[1.15]"
