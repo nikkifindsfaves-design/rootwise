@@ -209,15 +209,8 @@ export default function MyTreesShell({
     null | "vibe" | "canvas"
   >(null);
 
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editTreeId, setEditTreeId] = useState<string | null>(null);
-  const [editTreeName, setEditTreeName] = useState("");
-  const [editVibe, setEditVibe] = useState<VibeId>(DEFAULT_VIBE as VibeId);
-  const [editCanvasTheme, setEditCanvasTheme] =
-    useState<CanvasThemeId>(DEFAULT_CANVAS_THEME_ID);
-  const [editHoveredVibe, setEditHoveredVibe] = useState<VibeId | null>(null);
-  const [editHoveredCanvas, setEditHoveredCanvas] =
-    useState<CanvasThemeId | null>(null);
+  /** When set, the create/edit tree modal is saving an existing tree instead of inserting. */
+  const [editingTreeId, setEditingTreeId] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -287,43 +280,41 @@ export default function MyTreesShell({
   };
 
   function closeVibeModal() {
-    if (creating) return;
+    if (creating || editSaving) return;
     setVibeModalOpen(false);
+    setEditingTreeId(null);
     setPendingTreeName("");
     setSelectedVibe(null);
     setHoveredVibe(null);
     setCreateError(null);
+    setEditError(null);
     setSelectedCanvasTheme(null);
     setHoveredCanvasThemePick(null);
     setCreateTreeSectionInfo(null);
   }
 
-  function closeEditModal() {
-    if (editSaving) return;
-    setEditModalOpen(false);
-    setEditTreeId(null);
-    setEditTreeName("");
-    setEditHoveredVibe(null);
-    setEditHoveredCanvas(null);
-    setEditError(null);
-  }
-
   function openEditTree(tree: TreeWithCount) {
-    setEditTreeId(tree.id);
-    setEditTreeName(tree.name);
-    setEditVibe(toVibeId(tree.vibe));
-    setEditCanvasTheme(toCanvasThemeId(tree.canvas_theme));
-    setEditHoveredVibe(null);
-    setEditHoveredCanvas(null);
+    setEditingTreeId(tree.id);
+    setPendingTreeName(tree.name);
+    setSelectedVibe(toVibeId(tree.vibe));
+    setSelectedCanvasTheme(toCanvasThemeId(tree.canvas_theme));
+    setHoveredVibe(null);
+    setHoveredCanvasThemePick(null);
+    setCreateTreeSectionInfo(null);
+    setCreateError(null);
     setEditError(null);
-    setEditModalOpen(true);
+    setVibeModalOpen(true);
   }
 
   async function confirmEditTree() {
-    if (!editTreeId) return;
-    const name = editTreeName.trim();
+    if (!editingTreeId) return;
+    const name = pendingTreeName.trim();
     if (name === "") {
       setEditError("Tree name cannot be empty.");
+      return;
+    }
+    if (!selectedVibe) {
+      setEditError("Choose a vibe for this tree.");
       return;
     }
     setEditSaving(true);
@@ -334,15 +325,15 @@ export default function MyTreesShell({
         .from("trees")
         .update({
           name,
-          vibe: editVibe,
-          canvas_theme: editCanvasTheme,
+          vibe: selectedVibe,
+          canvas_theme: selectedCanvasTheme ?? DEFAULT_CANVAS_THEME_ID,
         })
-        .eq("id", editTreeId);
+        .eq("id", editingTreeId);
       if (error) {
         setEditError(error.message);
         return;
       }
-      closeEditModal();
+      closeVibeModal();
       router.refresh();
     } finally {
       setEditSaving(false);
@@ -350,16 +341,20 @@ export default function MyTreesShell({
   }
 
   function openCreateTreeFromCard() {
+    setEditingTreeId(null);
     setCreateError(null);
+    setEditError(null);
     setPendingTreeName("");
     setSelectedVibe(null);
     setHoveredVibe(null);
     setSelectedCanvasTheme(DEFAULT_CANVAS_THEME_ID);
     setHoveredCanvasThemePick(null);
+    setCreateTreeSectionInfo(null);
     setVibeModalOpen(true);
   }
 
   async function confirmCreateTree() {
+    if (editingTreeId) return;
     if (!selectedVibe) return;
     const name = pendingTreeName.trim();
     if (name === "") {
@@ -368,6 +363,7 @@ export default function MyTreesShell({
     }
     setCreating(true);
     setCreateError(null);
+    setEditError(null);
     try {
       const supabase = createClient();
       const {
@@ -397,11 +393,13 @@ export default function MyTreesShell({
       }
       const id = (data as { id: string }).id;
       setVibeModalOpen(false);
+      setEditingTreeId(null);
       setPendingTreeName("");
       setSelectedVibe(null);
       setHoveredVibe(null);
       setSelectedCanvasTheme(null);
       setHoveredCanvasThemePick(null);
+      setCreateTreeSectionInfo(null);
       router.push(`/dashboard/${id}`);
       router.refresh();
     } finally {
@@ -1017,7 +1015,7 @@ export default function MyTreesShell({
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="create-tree-name-label vibe-modal-title canvas-theme-heading"
+          aria-labelledby="tree-modal-name-label vibe-modal-title canvas-theme-heading"
         >
           <div
             className="my-8 w-full max-w-xl rounded-lg border p-5 shadow-xl"
@@ -1029,8 +1027,8 @@ export default function MyTreesShell({
             onClick={(e) => e.stopPropagation()}
           >
             <label
-              id="create-tree-name-label"
-              htmlFor="create-tree-name"
+              id="tree-modal-name-label"
+              htmlFor="tree-modal-name"
               className="mb-1 block font-bold uppercase tracking-wide"
               style={{
                 fontFamily: sans,
@@ -1041,12 +1039,12 @@ export default function MyTreesShell({
               Tree name
             </label>
             <input
-              id="create-tree-name"
+              id="tree-modal-name"
               type="text"
               value={pendingTreeName}
               onChange={(e) => setPendingTreeName(e.target.value)}
               placeholder="e.g. The Holloway line"
-              disabled={creating}
+              disabled={creating || editSaving}
               autoComplete="off"
               style={{ ...inputStyle, maxWidth: "none" }}
             />
@@ -1062,7 +1060,7 @@ export default function MyTreesShell({
               <div
                 className="relative inline-flex shrink-0"
                 onMouseEnter={() => {
-                  if (!creating) setCreateTreeSectionInfo("vibe");
+                  if (!creating && !editSaving) setCreateTreeSectionInfo("vibe");
                 }}
                 onMouseLeave={() => setCreateTreeSectionInfo(null)}
               >
@@ -1073,9 +1071,10 @@ export default function MyTreesShell({
                     borderColor: colors.brownBorder,
                     backgroundColor: colors.cream,
                     color: colors.brownMuted,
-                    cursor: creating ? "not-allowed" : "default",
+                    cursor:
+                      creating || editSaving ? "not-allowed" : "default",
                   }}
-                  disabled={creating}
+                  disabled={creating || editSaving}
                   aria-label="What is a vibe?"
                 >
                   <svg
@@ -1185,7 +1184,8 @@ export default function MyTreesShell({
                 <div
                   className="relative inline-flex shrink-0"
                   onMouseEnter={() => {
-                    if (!creating) setCreateTreeSectionInfo("canvas");
+                    if (!creating && !editSaving)
+                      setCreateTreeSectionInfo("canvas");
                   }}
                   onMouseLeave={() => setCreateTreeSectionInfo(null)}
                 >
@@ -1196,9 +1196,10 @@ export default function MyTreesShell({
                       borderColor: colors.brownBorder,
                       backgroundColor: colors.cream,
                       color: colors.brownMuted,
-                      cursor: creating ? "not-allowed" : "default",
+                      cursor:
+                        creating || editSaving ? "not-allowed" : "default",
                     }}
-                    disabled={creating}
+                    disabled={creating || editSaving}
                     aria-label="What is a canvas theme?"
                   >
                     <svg
@@ -1293,6 +1294,7 @@ export default function MyTreesShell({
                 disabled={
                   selectedVibe === null ||
                   creating ||
+                  editSaving ||
                   pendingTreeName.trim() === ""
                 }
                 style={{
@@ -1300,249 +1302,46 @@ export default function MyTreesShell({
                   opacity:
                     selectedVibe === null ||
                     creating ||
+                    editSaving ||
                     pendingTreeName.trim() === ""
                       ? 0.65
                       : 1,
                   cursor:
                     selectedVibe === null ||
                     creating ||
+                    editSaving ||
                     pendingTreeName.trim() === ""
                       ? "not-allowed"
                       : "pointer",
                 }}
-                onClick={() => void confirmCreateTree()}
+                onClick={() =>
+                  void (editingTreeId ? confirmEditTree() : confirmCreateTree())
+                }
               >
-                {creating ? "Creating…" : "Create tree"}
+                {editingTreeId
+                  ? editSaving
+                    ? "Saving…"
+                    : "Save changes"
+                  : creating
+                    ? "Creating…"
+                    : "Create tree"}
               </button>
               <button
                 type="button"
                 style={btnOutline}
-                disabled={creating}
+                disabled={creating || editSaving}
                 onClick={closeVibeModal}
               >
                 Cancel
               </button>
             </div>
-            {createError ? (
+            {(editingTreeId ? editError : createError) ? (
               <p
                 className="mt-3 text-sm"
                 style={{ fontFamily: sans, color: "var(--dg-danger)" }}
                 role="alert"
               >
-                {createError}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {editModalOpen ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
-          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="edit-tree-modal-title"
-        >
-          <div
-            className="my-8 w-full max-w-2xl rounded-lg border p-6 shadow-xl"
-            style={{
-              backgroundColor: colors.parchment,
-              borderColor: colors.brownBorder,
-              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              id="edit-tree-modal-title"
-              className="text-2xl font-bold"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              Edit tree
-            </h2>
-            <p
-              className="mt-2 text-sm"
-              style={{ fontFamily: sans, color: colors.brownMuted }}
-            >
-              Update the ledger title, narrative vibe, and tree canvas look.
-              Canvas changes are cosmetic only.
-            </p>
-
-            <label
-              htmlFor="edit-tree-name"
-              className="mb-1 mt-6 block font-bold uppercase tracking-wide"
-              style={{
-                fontFamily: sans,
-                fontSize: "0.85rem",
-                color: colors.brownMuted,
-              }}
-            >
-              Tree name
-            </label>
-            <input
-              id="edit-tree-name"
-              type="text"
-              value={editTreeName}
-              onChange={(e) => setEditTreeName(e.target.value)}
-              disabled={editSaving}
-              autoComplete="off"
-              style={{ ...inputStyle, maxWidth: "none" }}
-            />
-
-            <h3
-              className="mt-8 text-xl font-bold"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              Vibe
-            </h3>
-            <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
-              {VIBES.map((v) => {
-                const isSelected = editVibe === v.id;
-                const isHovered = editHoveredVibe === v.id;
-                return (
-                  <button
-                    key={v.id}
-                    type="button"
-                    className="relative h-14 rounded-lg border px-2.5 py-2 text-left transition-shadow"
-                    style={{
-                      borderColor: isSelected
-                        ? colors.brownOutline
-                        : colors.brownBorder,
-                      backgroundColor: isSelected
-                        ? "var(--dg-parchment-deep)"
-                        : colors.cream,
-                      boxShadow: isHovered
-                        ? "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)"
-                        : "none",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={() => setEditHoveredVibe(v.id)}
-                    onMouseLeave={() => setEditHoveredVibe(null)}
-                    onClick={() => setEditVibe(v.id)}
-                  >
-                    <p
-                      className="text-sm font-bold leading-tight"
-                      style={{ fontFamily: serif, color: colors.brownDark }}
-                    >
-                      {v.name}
-                    </p>
-                    {isHovered ? (
-                      <div
-                        className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-60 -translate-x-1/2 rounded-md border px-3 py-2 text-xs leading-snug"
-                        style={{
-                          fontFamily: sans,
-                          color: colors.brownDark,
-                          borderColor: colors.brownBorder,
-                          backgroundColor: colors.cream,
-                          boxShadow:
-                            "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)",
-                        }}
-                      >
-                        {v.description}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-
-            <h3
-              className="mt-8 text-xl font-bold"
-              style={{ fontFamily: serif, color: colors.brownDark }}
-            >
-              Canvas theme
-            </h3>
-            <p
-              className="mt-2 text-sm"
-              style={{
-                fontFamily: sans,
-                color: colors.brownMuted,
-                lineHeight: 1.6,
-              }}
-            >
-              Matches the background on your family tree canvas and profile
-              frames for this tree.
-            </p>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {CANVAS_THEME_OPTIONS.map((ct) => {
-                const isSelected = editCanvasTheme === ct.id;
-                const isHovered = editHoveredCanvas === ct.id;
-                return (
-                  <button
-                    key={ct.id}
-                    type="button"
-                    className="relative h-14 rounded-lg border px-2.5 py-2 text-left transition-shadow"
-                    style={{
-                      borderColor: isSelected
-                        ? colors.brownOutline
-                        : colors.brownBorder,
-                      backgroundColor: isSelected
-                        ? "var(--dg-parchment-deep)"
-                        : colors.cream,
-                      boxShadow: isHovered
-                        ? "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)"
-                        : "none",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={() => setEditHoveredCanvas(ct.id)}
-                    onMouseLeave={() => setEditHoveredCanvas(null)}
-                    onClick={() => setEditCanvasTheme(ct.id)}
-                  >
-                    <p
-                      className="text-sm font-bold leading-tight"
-                      style={{ fontFamily: serif, color: colors.brownDark }}
-                    >
-                      {ct.name}
-                    </p>
-                    {isHovered ? (
-                      <div
-                        className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-60 -translate-x-1/2 rounded-md border px-3 py-2 text-xs leading-snug"
-                        style={{
-                          fontFamily: sans,
-                          color: colors.brownDark,
-                          borderColor: colors.brownBorder,
-                          backgroundColor: colors.cream,
-                          boxShadow:
-                            "0 10px 24px rgb(var(--dg-shadow-rgb) / 0.18)",
-                        }}
-                      >
-                        {ct.description}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={editSaving}
-                style={{
-                  ...btnPrimaryModal,
-                  opacity: editSaving ? 0.65 : 1,
-                  cursor: editSaving ? "wait" : "pointer",
-                }}
-                onClick={() => void confirmEditTree()}
-              >
-                {editSaving ? "Saving…" : "Save changes"}
-              </button>
-              <button
-                type="button"
-                style={btnOutline}
-                disabled={editSaving}
-                onClick={closeEditModal}
-              >
-                Cancel
-              </button>
-            </div>
-            {editError ? (
-              <p
-                className="mt-3 text-sm"
-                style={{ fontFamily: sans, color: "var(--dg-danger)" }}
-                role="alert"
-              >
-                {editError}
+                {editingTreeId ? editError : createError}
               </p>
             ) : null}
           </div>

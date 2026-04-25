@@ -923,11 +923,49 @@ function assignGenerations(
 
 const LAYOUT_ROOT_X = 1200;
 
+/** Lower = older. Missing or unparseable birth sorts last (right). */
+function birthSortMsForLayout(raw: string | null | undefined): number {
+  if (raw == null) return Number.POSITIVE_INFINITY;
+  const s = String(raw).trim();
+  if (!s) return Number.POSITIVE_INFINITY;
+  const parsed = Date.parse(s);
+  if (!Number.isNaN(parsed)) return parsed;
+  const y4 = /^(\d{4})/.exec(s);
+  if (y4) {
+    const y = Number.parseInt(y4[1]!, 10);
+    if (!Number.isNaN(y)) return Date.UTC(y, 0, 1);
+  }
+  const iso = s.match(/^(\d{4})-/);
+  if (iso) {
+    const y = Number.parseInt(iso[1]!, 10);
+    if (!Number.isNaN(y)) return Date.UTC(y, 0, 1);
+  }
+  const fd = formatDateString(s);
+  const m = /(\d{4})/.exec(fd);
+  if (m) {
+    const y = Number.parseInt(m[1]!, 10);
+    if (!Number.isNaN(y)) return Date.UTC(y, 0, 1);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function compareSiblingsBirthOrder(
+  a: string,
+  b: string,
+  personById: ReadonlyMap<string, { birth_date: string | null }>
+): number {
+  const ta = birthSortMsForLayout(personById.get(a)?.birth_date);
+  const tb = birthSortMsForLayout(personById.get(b)?.birth_date);
+  if (ta !== tb) return ta - tb;
+  return a.localeCompare(b);
+}
+
 /** Group by generation, assign y; x from child/parent inheritance + overlap pass (no row index). */
 function computeExplicitTreeLayout(
   personIds: string[],
   relationships: TreeCanvasRelationship[],
-  rootId: string
+  rootId: string,
+  personById: ReadonlyMap<string, { birth_date: string | null }>
 ): {
   positions: { id: string; x: number; y: number; generation: number }[];
   contentWidth: number;
@@ -989,7 +1027,7 @@ function computeExplicitTreeLayout(
     familyUnits.get(key)!.push(id);
   }
   for (const ids of familyUnits.values()) {
-    ids.sort((a, b) => a.localeCompare(b));
+    ids.sort((a, b) => compareSiblingsBirthOrder(a, b, personById));
   }
 
   // STEP 2 — root, floaters, and true islands (no parents, no children).
@@ -1037,12 +1075,14 @@ function computeExplicitTreeLayout(
     generation: number,
     forceCluster: boolean
   ) => {
-    const inUnit = children.filter(
-      (c) =>
-        reachable.has(c) &&
-        !floaterSet.has(c) &&
-        (gen.get(c) ?? 0) === generation
-    );
+    const inUnit = children
+      .filter(
+        (c) =>
+          reachable.has(c) &&
+          !floaterSet.has(c) &&
+          (gen.get(c) ?? 0) === generation
+      )
+      .sort((a, b) => compareSiblingsBirthOrder(a, b, personById));
     if (inUnit.length === 0) return;
     if (!inUnit.every((c) => (gen.get(c) ?? 0) === generation)) return;
 
@@ -1197,7 +1237,10 @@ function computeExplicitTreeLayout(
 
     for (const { width: clusterW, children } of clusterMeta) {
       let x = startX;
-      for (const cid of children) {
+      const ordered = [...children].sort((a, b) =>
+        compareSiblingsBirthOrder(a, b, personById)
+      );
+      for (const cid of ordered) {
         xById.set(cid, x);
         x += LAYOUT_NODE_W + LAYOUT_MIN_NODE_GAP;
       }
@@ -1264,7 +1307,9 @@ function computeExplicitTreeLayout(
         if (seen.has(id)) continue;
         const sid = spouseOf.get(id);
         if (sid && rowSet.has(sid)) {
-          const [a, b] = id.localeCompare(sid) < 0 ? [id, sid] : [sid, id];
+          const [a, b] = [id, sid].sort((x, y) =>
+            compareSiblingsBirthOrder(x, y, personById)
+          );
           comps.push({ members: [a, b] });
           seen.add(a);
           seen.add(b);
@@ -1280,6 +1325,17 @@ function computeExplicitTreeLayout(
       comps.sort((c1, c2) => {
         const minx = (m: string[]) =>
           Math.min(...m.map((x) => posById.get(x)!.x));
+        const dx = minx(c1.members) - minx(c2.members);
+        if (Math.abs(dx) > 0.5) return dx;
+        const leftBirth = (m: string[]) => {
+          const [left] = [...m].sort(
+            (a, b) => posById.get(a)!.x - posById.get(b)!.x
+          );
+          return birthSortMsForLayout(personById.get(left)?.birth_date);
+        };
+        const b1 = leftBirth(c1.members);
+        const b2 = leftBirth(c2.members);
+        if (b1 !== b2) return b1 - b2;
         return minx(c1.members) - minx(c2.members);
       });
 
@@ -1298,12 +1354,11 @@ function computeExplicitTreeLayout(
         if (m.length === 1) {
           posById.get(m[0]!)!.x = left;
         } else {
-          const [L, R] =
-            m[0]!.localeCompare(m[1]!) < 0
-              ? [m[0]!, m[1]!]
-              : [m[1]!, m[0]!];
-          posById.get(L)!.x = left;
-          posById.get(R)!.x = left + nodeSpan + coupleGap;
+          const [leftPerson, rightPerson] = [...m].sort((a, b) =>
+            compareSiblingsBirthOrder(a, b, personById)
+          );
+          posById.get(leftPerson)!.x = left;
+          posById.get(rightPerson)!.x = left + nodeSpan + coupleGap;
         }
         left += compWidth(m) + (i < nComp - 1 ? coupleGap : 0);
       }
@@ -2072,6 +2127,12 @@ export default function TreeCanvas({
   const initialRootIdRef = useRef(initialRootId);
   initialRootIdRef.current = initialRootId;
 
+  const personById = useMemo(() => {
+    const m = new Map<string, TreeCanvasPerson>();
+    for (const p of mergedPersons) m.set(p.id, p);
+    return m;
+  }, [mergedPersons]);
+
   const layout = useMemo(() => {
     const set = new Set(visiblePersonIds);
     const layoutRootId =
@@ -2086,15 +2147,10 @@ export default function TreeCanvas({
     return computeExplicitTreeLayout(
       visiblePersonIds,
       relationships,
-      layoutRootId
+      layoutRootId,
+      personById
     );
-  }, [visiblePersonIds, relationships, initialRootId]);
-
-  const personById = useMemo(() => {
-    const m = new Map<string, TreeCanvasPerson>();
-    for (const p of mergedPersons) m.set(p.id, p);
-    return m;
-  }, [mergedPersons]);
+  }, [visiblePersonIds, relationships, initialRootId, personById]);
 
   const unlinkedPeople = useMemo(() => {
     const linkedIds = new Set<string>();

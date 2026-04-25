@@ -28,12 +28,12 @@ function GoldDots() {
 function LeftPanel() {
   return (
     <div
-      className="flex min-h-0 flex-col px-8 py-10 text-[color:var(--dg-cream)] lg:overflow-hidden lg:px-12 lg:py-12"
+      className="flex min-w-0 flex-col px-6 py-8 text-[color:var(--dg-cream)] sm:px-8 sm:py-10 lg:min-h-[100dvh] lg:px-12 lg:py-12"
       style={{ backgroundColor: leftBg }}
     >
       <header className="mb-8 shrink-0 sm:mb-10 lg:mb-10">
         <p
-          className="text-[2.25rem] leading-[1.05] tracking-tight sm:text-4xl lg:text-[2.75rem]"
+          className="text-[clamp(1.75rem,5vw+0.5rem,2.75rem)] leading-[1.05] tracking-tight sm:text-4xl"
           style={{ fontFamily: "var(--font-playfair), Georgia, serif" }}
         >
           Dead Gossip
@@ -52,10 +52,10 @@ function LeftPanel() {
         </p>
       </header>
 
-      <div className="mt-0 flex min-h-0 flex-1 flex-col justify-center gap-10 lg:mt-0 lg:py-4">
-        <div>
+      <div className="flex min-w-0 shrink-0 flex-col gap-8 py-2 sm:gap-10 sm:py-4 lg:gap-10 lg:py-6">
+        <div className="min-w-0">
           <h1
-            className="mt-3 max-w-xl text-3xl leading-[1.12] sm:text-4xl lg:text-[2.35rem] lg:leading-[1.15]"
+            className="mt-3 max-w-xl text-2xl leading-[1.12] text-balance sm:text-3xl md:text-4xl lg:text-[2.35rem] lg:leading-[1.15]"
             style={{
               fontFamily: "var(--font-heirloom-body), Georgia, serif",
               color: cream,
@@ -72,8 +72,8 @@ function LeftPanel() {
           </p>
         </div>
 
-        <ol className="max-w-lg space-y-8">
-          <li className="flex gap-4">
+        <ol className="max-w-lg min-w-0 space-y-8">
+          <li className="flex gap-3 sm:gap-4">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
               style={{
@@ -83,7 +83,7 @@ function LeftPanel() {
             >
               1
             </span>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-[color:var(--dg-cream)]">
                 Stories in your voice
               </h2>
@@ -113,7 +113,7 @@ function LeftPanel() {
               </div>
             </div>
           </li>
-          <li className="flex gap-4">
+          <li className="flex gap-3 sm:gap-4">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
               style={{
@@ -123,7 +123,7 @@ function LeftPanel() {
             >
               2
             </span>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-[color:var(--dg-cream)]">
                 Upload any document
               </h2>
@@ -136,7 +136,7 @@ function LeftPanel() {
               </p>
             </div>
           </li>
-          <li className="flex gap-4">
+          <li className="flex gap-3 sm:gap-4">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
               style={{
@@ -146,7 +146,7 @@ function LeftPanel() {
             >
               3
             </span>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-[color:var(--dg-cream)]">
                 A canvas that fits the story
               </h2>
@@ -163,7 +163,7 @@ function LeftPanel() {
       </div>
 
       <p
-        className="mt-10 shrink-0 text-xs italic leading-relaxed lg:mt-6"
+        className="mt-8 shrink-0 text-balance text-xs italic leading-relaxed sm:mt-10 lg:mt-6"
         style={{ color: creamMuted }}
       >
         Built by a genealogist, for people who think family history should be
@@ -243,24 +243,19 @@ function LoginPageContent() {
 
   return (
     <div
-      className="grid min-h-0 grid-cols-1 lg:grid-cols-2"
-      style={{
-        height: "100dvh",
-        maxHeight: "100dvh",
-        backgroundColor: "var(--dg-bg-main)",
-      }}
+      className="grid min-h-[100dvh] min-w-0 grid-cols-1 overflow-x-hidden bg-[var(--dg-bg-main)] lg:grid-cols-2 lg:items-stretch"
     >
       <LeftPanel />
 
       <div
-        className="flex min-h-0 flex-col overflow-y-auto px-8 py-10 lg:overflow-hidden lg:px-12 lg:py-12"
+        className="flex min-w-0 flex-col px-6 py-8 sm:px-8 sm:py-10 lg:min-h-[100dvh] lg:px-12 lg:py-12"
         style={{ backgroundColor: "var(--dg-cream)" }}
       >
         {signInMode ? (
           <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
               <GoldDots />
-              <span className="text-xs font-medium text-[var(--dg-brown-muted)]">
+              <span className="min-w-0 text-pretty text-xs font-medium text-[var(--dg-brown-muted)]">
                 Welcome back
               </span>
             </div>
@@ -357,9 +352,9 @@ function LoginPageContent() {
           </div>
         ) : (
           <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
               <GoldDots />
-              <span className="text-xs font-medium text-[var(--dg-brown-muted)]">
+              <span className="min-w-0 text-pretty text-xs font-medium text-[var(--dg-brown-muted)]">
                 Early access — limited spots available.
               </span>
             </div>
