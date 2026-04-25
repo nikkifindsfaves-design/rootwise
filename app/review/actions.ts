@@ -559,7 +559,9 @@ export async function acceptPersonCard(params: {
         middle_name: isEmptyDbField(ex.middle_name) ? formMid : ex.middle_name,
         birth_date: isEmptyDbField(ex.birth_date) ? formBirth : ex.birth_date,
         death_date: isEmptyDbField(ex.death_date) ? formDeath : ex.death_date,
-        gender: isEmptyDbField(ex.gender) ? formGender : ex.gender ?? DEFAULT_GENDER,
+        gender: isEmptyDbField(ex.gender)
+          ? formGender
+          : normalizeGender(ex.gender),
         notes: isEmptyDbField(ex.notes) ? formNotes : ex.notes,
       };
     } else {

@@ -1252,6 +1252,16 @@ function headerPolaroidLayerVisual(
   };
 }
 
+function headerPolaroidLayerGender(
+  layer: HeaderPolaroidLayer
+): string | null | undefined {
+  if (layer.kind === "row") {
+    const g = layer.row.gender;
+    return typeof g === "string" ? g : null;
+  }
+  return layer.person?.gender ?? null;
+}
+
 /** Persisted crop_x / crop_y (0–100) from pixel offset (cover-fit rendered image). */
 function offsetToCropPercentCover(
   offset: { x: number; y: number },
@@ -7267,7 +7277,7 @@ export default function PersonProfilePage() {
                                       >
                                         <ProfilePhotoSilhouette
                                           photoFrameStyle="scrapbook"
-                                          gender={layer.person?.gender ?? null}
+                                          gender={headerPolaroidLayerGender(layer)}
                                           isDark={theme === "dark"}
                                         />
                                       </div>
@@ -7345,7 +7355,7 @@ export default function PersonProfilePage() {
                                     >
                                       <ProfilePhotoSilhouette
                                         photoFrameStyle="oval"
-                                        gender={layer.person?.gender ?? null}
+                                        gender={headerPolaroidLayerGender(layer)}
                                         isDark={theme === "dark"}
                                       />
                                     </div>
@@ -7406,7 +7416,7 @@ export default function PersonProfilePage() {
                               >
                                 <ProfilePhotoSilhouette
                                   photoFrameStyle="polaroid"
-                                  gender={layer.person?.gender ?? null}
+                                  gender={headerPolaroidLayerGender(layer)}
                                   isDark={theme === "dark"}
                                 />
                               </div>
