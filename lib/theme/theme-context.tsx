@@ -40,6 +40,12 @@ function applyThemeClass(theme: DGTheme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
 
+/** Re-apply `html.dark` from localStorage / system preference (e.g. after leaving a route that forced light). */
+export function syncDocumentThemeFromStorage() {
+  if (typeof document === "undefined") return;
+  applyThemeClass(readTheme());
+}
+
 function subscribe(onChange: () => void) {
   storeListeners.add(onChange);
   const onStorage = (e: StorageEvent) => {

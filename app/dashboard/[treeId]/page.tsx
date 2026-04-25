@@ -53,7 +53,7 @@ export default async function TreeCanvasPage({
   const { data: personsRows, error: personsError } = await supabase
     .from("persons")
     .select(
-      "id, first_name, middle_name, last_name, birth_date, death_date, photo_url"
+      "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender"
     )
     .eq("tree_id", treeId)
     .eq("user_id", user.id);
@@ -93,6 +93,10 @@ export default async function TreeCanvasPage({
         r.photo_url === null || r.photo_url === undefined
           ? null
           : String(r.photo_url),
+      gender:
+        r.gender === null || r.gender === undefined
+          ? null
+          : String(r.gender),
     };
   });
 

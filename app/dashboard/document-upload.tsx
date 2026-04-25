@@ -520,16 +520,11 @@ export default function DocumentUploadSection({
   const multiPersonModal =
     multiPersonModalOpen ? (
       <div
-        className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+        className="fixed inset-0 z-[200] flex items-center justify-center overscroll-y-contain p-4"
         style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="multi-person-modal-title"
-        onClick={(e) => {
-          if (e.target === e.currentTarget && !multiPersonProcessing) {
-            resetMultiPersonModal();
-          }
-        }}
       >
         <div
           className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"

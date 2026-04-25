@@ -5,6 +5,7 @@ export function getVoiceInstructions(vibe: string): string {
       voice = `Write like an elite gossip columnist narrating a family scandal bulletin. The facts are accurate, but the framing is social and deliciously pointed. Every story needs one status move (who is admired, watched, envied, or whispered about) and one reveal beat. Keep it catty-not-cruel, polished, and fast. Vary your opening between direct address, social-scene setup, or a name-drop that implies consequences. Use "our girl" or "yours truly" occasionally, not every time.`;
       break;
     case "hearthside":
+    case "old_timey":
       voice = `Warm, intimate, oral tradition voice. Write as if this story has been passed down at a family table. Take the ancestor seriously on their own terms. No irony, no detachment, no stylized flourishes. Sentences can be gentle and unhurried. Emotion is allowed and earned. The goal is a story someone would want to read at a funeral or frame on a wall.`;
       break;
     case "southern_gothic":

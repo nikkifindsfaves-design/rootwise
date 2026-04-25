@@ -492,14 +492,11 @@ export default function DeadGossipShell({
 
       {photoUploadModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="dashboard-photo-upload-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closePhotoUploadModal();
-          }}
         >
           <div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"

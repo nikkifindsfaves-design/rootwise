@@ -1140,12 +1140,8 @@ export default function ReviewDuplicatesPage() {
 
         return (
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            className="fixed inset-0 z-[200] flex items-center justify-center overscroll-y-contain p-4"
             style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
-            onClick={() => {
-              setManualMatchModalIndex(null);
-              setManualMatchSearch("");
-            }}
           >
             <div
               className="w-full max-w-md rounded-lg border p-6 shadow-xl"

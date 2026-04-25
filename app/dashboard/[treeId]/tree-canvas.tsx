@@ -5,6 +5,11 @@ import {
   CANVAS_THEME_ID,
   type CanvasThemeId,
 } from "@/lib/themes/canvas-themes";
+import {
+  treeCanvasCorkboardSurfaceStyle,
+  treeCanvasDeadGossipSurfaceStyle,
+  treeCanvasRootsSurfaceStyle,
+} from "@/lib/themes/tree-canvas-surface-styles";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
 import { GENDER_OPTIONS, normalizeGender } from "@/lib/utils/gender";
@@ -51,98 +56,6 @@ const colors = {
 /** Default zoom for initial view, search focus, and reset alignment with zoomToElement. */
 const CANVAS_INITIAL_SCALE = 1.2;
 
-/**
- * Bulletin corkboard: repeating cork photo under stacked translucent gradients (no SVG filters).
- */
-function treeCanvasCorkboardSurfaceStyle(isDark: boolean): CSSProperties {
-  const fiberA = isDark ? 0.075 : 0.055;
-  const fiberB = isDark ? 0.065 : 0.048;
-  const fibers: string[] = [
-    `repeating-linear-gradient(46deg, transparent 0, transparent 9px, rgba(45, 28, 14, ${fiberA}) 9px, rgba(45, 28, 14, ${fiberA}) 10px)`,
-    `repeating-linear-gradient(-39deg, transparent 0, transparent 12px, rgba(38, 22, 12, ${fiberB}) 12px, rgba(38, 22, 12, ${fiberB}) 13px)`,
-  ];
-  const vignette = isDark
-    ? "radial-gradient(ellipse 130% 92% at 50% 40%, transparent 38%, rgba(0,0,0,0.42) 100%)"
-    : "radial-gradient(ellipse 125% 90% at 50% 42%, transparent 45%, rgba(48, 30, 18, 0.16) 100%)";
-
-  const specksLight = [
-    "radial-gradient(circle at 9% 14%, rgba(255,250,242,0.58) 0, transparent 0.42%)",
-    "radial-gradient(circle at 24% 71%, rgba(72,42,22,0.22) 0, transparent 0.38%)",
-    "radial-gradient(circle at 43% 28%, rgba(255,255,255,0.42) 0, transparent 0.28%)",
-    "radial-gradient(circle at 58% 82%, rgba(90,52,28,0.18) 0, transparent 0.4%)",
-    "radial-gradient(circle at 73% 19%, rgba(255,248,236,0.38) 0, transparent 0.32%)",
-    "radial-gradient(circle at 88% 64%, rgba(62,36,20,0.2) 0, transparent 0.36%)",
-    "radial-gradient(circle at 31% 48%, rgba(255,255,255,0.28) 0, transparent 0.22%)",
-    "radial-gradient(circle at 67% 51%, rgba(80,48,26,0.15) 0, transparent 0.45%)",
-    "radial-gradient(circle at 15% 88%, rgba(255,252,246,0.32) 0, transparent 0.3%)",
-    "radial-gradient(circle at 92% 38%, rgba(70,40,22,0.16) 0, transparent 0.35%)",
-  ];
-  const specksDark = [
-    "radial-gradient(circle at 10% 16%, rgba(200,168,130,0.16) 0, transparent 0.5%)",
-    "radial-gradient(circle at 26% 74%, rgba(0,0,0,0.22) 0, transparent 0.42%)",
-    "radial-gradient(circle at 44% 30%, rgba(220,190,150,0.12) 0, transparent 0.32%)",
-    "radial-gradient(circle at 61% 85%, rgba(0,0,0,0.18) 0, transparent 0.38%)",
-    "radial-gradient(circle at 76% 21%, rgba(190,155,120,0.14) 0, transparent 0.35%)",
-    "radial-gradient(circle at 89% 58%, rgba(0,0,0,0.2) 0, transparent 0.4%)",
-    "radial-gradient(circle at 33% 50%, rgba(210,175,138,0.1) 0, transparent 0.28%)",
-    "radial-gradient(circle at 69% 48%, rgba(0,0,0,0.14) 0, transparent 0.48%)",
-    "radial-gradient(circle at 17% 90%, rgba(185,150,115,0.12) 0, transparent 0.34%)",
-    "radial-gradient(circle at 94% 36%, rgba(0,0,0,0.16) 0, transparent 0.36%)",
-  ];
-
-  const overlayLayers: string[] = [
-    ...fibers,
-    vignette,
-    ...(isDark ? specksDark : specksLight),
-  ];
-  /** Last in list = back-most layer (under overlays). Public file: `public/small cork.jpg`. */
-  const corkTile = "url(/small%20cork.jpg)";
-
-  return {
-    backgroundColor: isDark ? "#4f3829" : "#b9855c",
-    backgroundImage: [...overlayLayers, corkTile].join(", "),
-    boxShadow: isDark
-      ? "inset 0 0 120px rgba(0,0,0,0.4)"
-      : "inset 0 0 140px rgba(42, 26, 14, 0.11)",
-  };
-}
-
-/** Roots theme: full-bleed art from `public/BG heirloom.png` (light/dark read via gradient only). */
-function treeCanvasRootsSurfaceStyle(isDark: boolean): CSSProperties {
-  const bg = "url(/BG%20heirloom.png)";
-  const wash = isDark
-    ? "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.44) 100%)"
-    : "linear-gradient(180deg, rgba(255,252,248,0.1) 0%, rgba(42,26,14,0.12) 100%)";
-  return {
-    backgroundColor: isDark ? "#1e1812" : "#c4b4a2",
-    backgroundImage: `${wash}, ${bg}`,
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundRepeat: "no-repeat",
-    boxShadow: isDark
-      ? "inset 0 0 120px rgba(0,0,0,0.45)"
-      : "inset 0 0 140px rgba(42, 26, 14, 0.1)",
-  };
-}
-
-/** Dead Gossip theme: full-bleed art from `public/Gossip Tree BG.JPG` (light/dark read via gradient only). */
-function treeCanvasDeadGossipSurfaceStyle(isDark: boolean): CSSProperties {
-  const bg = "url(/Gossip%20Tree%20BG.JPG)";
-  const wash = isDark
-    ? "linear-gradient(180deg, rgba(0,0,0,0.44) 0%, rgba(0,0,0,0.56) 100%)"
-    : "linear-gradient(180deg, rgba(255,252,248,0.14) 0%, rgba(42,26,14,0.18) 100%)";
-  return {
-    backgroundColor: isDark ? "#201711" : "#c7b7a5",
-    backgroundImage: `${wash}, ${bg}`,
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundRepeat: "no-repeat",
-    boxShadow: isDark
-      ? "inset 0 0 120px rgba(0,0,0,0.45)"
-      : "inset 0 0 140px rgba(42, 26, 14, 0.1)",
-  };
-}
-
 /** Explicit pedigree layout (fixed canvas geometry). */
 const LAYOUT_CANVAS_W = 2400;
 
@@ -162,6 +75,19 @@ const TREE_DEAD_GOSSIP_IMG_H = Math.round(
 /** Roots leaf cards only: photo viewport 30% smaller than polaroid tree print. */
 const TREE_ROOTS_LEAF_IMG_W = Math.round(TREE_POLAROID_IMG_W * 0.847);
 const TREE_ROOTS_LEAF_IMG_H = Math.round(TREE_POLAROID_IMG_H * 0.847);
+/** Male heirloom silhouette (oval placeholder): 5% smaller than the default 2.5× scale. */
+const TREE_ROOTS_HEIRLOOM_MALE_SILHOUETTE_SCALE = 2.5 * 0.95;
+/** Dark oval behind silhouette only: lighter sepia field so the figure separates from the aperture. */
+const TREE_ROOTS_OVAL_SILHOUETTE_BACKDROP_DARK = "rgba(82, 60, 42, 0.93)";
+const TREE_ROOTS_SILHOUETTE_FILTER_DARK =
+  "sepia(0.52) saturate(0.46) contrast(1.24) brightness(0.9) drop-shadow(0 0 2px rgba(8, 5, 3, 0.65))";
+const TREE_ROOTS_SILHOUETTE_OPACITY_DARK = 0.9;
+/** Rich vignette on real photos in dark mode (unchanged). */
+const TREE_ROOTS_OVAL_VIGNETTE_DARK_PHOTO =
+  "radial-gradient(ellipse 74% 78% at 50% 44%, rgba(0,0,0,0) 42%, rgba(18, 10, 6, 0.55) 100%), radial-gradient(ellipse 92% 88% at 50% 42%, rgba(120, 78, 44, 0.22) 0%, rgba(0,0,0,0) 62%)";
+/** Softer vignette when showing silhouette so the overlay does not crush midtone contrast. */
+const TREE_ROOTS_OVAL_VIGNETTE_DARK_SILHOUETTE =
+  "radial-gradient(ellipse 78% 80% at 50% 46%, rgba(0,0,0,0) 52%, rgba(20, 12, 8, 0.38) 100%), radial-gradient(ellipse 94% 90% at 50% 42%, rgba(100, 68, 44, 0.1) 0%, rgba(0,0,0,0) 66%)";
 /** Room for two 11px lines at tight leading + gap before dates (avoids line-clamp clip). */
 const TREE_POLAROID_CAPTION_MIN_H = 46;
 const TREE_POLAROID_SET_ROOT_H = 22;
@@ -194,15 +120,17 @@ const TREE_LEAF_ROOTS_CONTENT_SHIFT_Y = Math.round(
 /** Caption pill text: literal dark brown so it stays readable in app dark mode (`--dg-*` browns often invert). */
 const TREE_ROOTS_CAPTION_INK = "#2a1810";
 const TREE_ROOTS_FRAME_BORDER_LIGHT = "rgba(84, 55, 32, 0.58)";
-const TREE_ROOTS_FRAME_BORDER_DARK = "rgba(240, 222, 188, 0.36)";
+/** Dark cabinet: dark brown frame on aged ivory (light tint was invisible on #e8dcc4). */
+const TREE_ROOTS_FRAME_BORDER_DARK = "rgba(56, 38, 24, 0.78)";
 const TREE_ROOTS_CABINET_BG_LIGHT = "#efe2cc";
-const TREE_ROOTS_CABINET_BG_DARK = "#5a4636";
+/** Heirloom dark: warm aged ivory — lighter than prior brown so cards read on dark wood. */
+const TREE_ROOTS_CABINET_BG_DARK = "#e8dcc4";
 const TREE_ROOTS_CABINET_INSET_LIGHT = "rgba(108, 72, 41, 0.44)";
-const TREE_ROOTS_CABINET_INSET_DARK = "rgba(236, 214, 184, 0.34)";
+const TREE_ROOTS_CABINET_INSET_DARK = "rgba(62, 42, 28, 0.52)";
 const TREE_ROOTS_PRINT_FILTER_LIGHT =
-  "contrast(1.04) sepia(0.4) saturate(0.72) brightness(1.01)" as const;
+  "contrast(1.06) sepia(0.52) saturate(0.66) brightness(0.98)" as const;
 const TREE_ROOTS_PRINT_FILTER_DARK =
-  "contrast(1.08) sepia(0.46) saturate(0.62) brightness(0.92)" as const;
+  "contrast(1.1) sepia(0.58) saturate(0.58) brightness(0.88)" as const;
 
 const LAYOUT_BASE_Y = 1200;
 const LAYOUT_GEN_DY = 300;
@@ -255,7 +183,7 @@ const TREE_BRAD_SYMBOL_W = 12;
 const TREE_BRAD_SYMBOL_H = 12;
 const TREE_BRAD_CX = 6;
 const TREE_BRAD_CY = 6;
-const TREE_ROOTS_TOP_TACK_SHIFT_Y = 13;
+const TREE_ROOTS_TOP_TACK_SHIFT_Y = 11;
 const TREE_ROOTS_TOP_TACK_SCALE = 1.15;
 /** Dead Gossip tape: strip is ~75% of photo width and crosses photo bottom edge. */
 const TREE_DEAD_GOSSIP_TAPE_W = Math.round(TREE_DEAD_GOSSIP_IMG_W * 0.75);
@@ -313,8 +241,10 @@ const TREE_THREAD_MARRIAGE = "#a3470f";
 const TREE_THREAD_STROKE_DARK = 3.5;
 const TREE_THREAD_STROKE_BRIGHT = 1.8;
 
-/** Roots tree canvas only: branch strokes + hub fill (same dark brown; dual width for slight edge). */
-const TREE_ROOTS_BRANCH_BROWN = "#3a2416";
+/**
+ * Heirloom tree canvas only: antique brass / aged gold for connector hubs so threads read on dark wood.
+ */
+const TREE_ROOTS_THREAD_HUB_FILL = "#b8893a";
 
 /** Multi-child branch gather point: small hub, smaller than thumbtack head (r≈9 at 22px pin width). */
 const TREE_GATHER_JUNCTION_R = 5.25;
@@ -508,25 +438,25 @@ function TreeThreadLine({
   const arrowNudge = markerVisual ? (seed - 0.5) * 1.2 : 0;
   const strokeDark = rootsBranchVisual
     ? isMarriage
-      ? "#6b1f2a"
-      : "#3b2412"
+      ? "#c9a24a"
+      : "#b8893a"
     : isMarriage
       ? TREE_THREAD_MARRIAGE
       : TREE_THREAD_LINEAGE;
   const strokeBright = rootsBranchVisual
     ? isMarriage
-      ? "#6b1f2a"
-      : "#3b2412"
+      ? "#e6cf8a"
+      : "#d9b56a"
     : isMarriage
       ? TREE_THREAD_MARRIAGE
       : TREE_THREAD_LINEAGE;
   const wBack = rootsBranchVisual
-    ? 2.35
+    ? 2.55
     : markerVisual
       ? TREE_THREAD_STROKE_DARK * 1.85
       : TREE_THREAD_STROKE_DARK;
   const wFront = rootsBranchVisual
-    ? 1.15
+    ? 1.38
     : markerVisual
       ? TREE_THREAD_STROKE_BRIGHT * 1.55
       : TREE_THREAD_STROKE_BRIGHT;
@@ -568,7 +498,7 @@ function TreeThreadLine({
           strokeWidth={wBack}
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeOpacity={0.66}
+          strokeOpacity={0.88}
         />
         <path
           d={d}
@@ -577,7 +507,7 @@ function TreeThreadLine({
           strokeWidth={wFront}
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeOpacity={0.74}
+          strokeOpacity={0.92}
         />
       </g>
     );
@@ -1630,6 +1560,7 @@ export type TreeCanvasPerson = {
   birth_date: string | null;
   death_date: string | null;
   photo_url: string | null;
+  gender: string | null;
 };
 
 export type TreeCanvasRelationship = {
@@ -1780,10 +1711,14 @@ function treeLeafInnerSurfaceStyle(isDark: boolean): CSSProperties {
   const frameEdge = isDark
     ? TREE_ROOTS_FRAME_BORDER_DARK
     : TREE_ROOTS_FRAME_BORDER_LIGHT;
+  const mountInset = isDark
+    ? "inset 0 0 0 1px rgba(32, 20, 12, 0.75), inset 0 1px 0 rgba(255, 248, 236, 0.14)"
+    : "inset 0 0 0 1px rgba(62, 42, 28, 0.42)";
   return {
     boxSizing: "border-box",
     borderRadius: 2,
     border: `2px solid ${frameEdge}`,
+    boxShadow: mountInset,
     backgroundColor: isDark ? TREE_ROOTS_CABINET_BG_DARK : TREE_ROOTS_CABINET_BG_LIGHT,
     backgroundImage: isDark
       ? [
@@ -1796,7 +1731,6 @@ function treeLeafInnerSurfaceStyle(isDark: boolean): CSSProperties {
           "radial-gradient(130% 90% at 84% 86%, rgba(182, 146, 102, 0.18) 0%, rgba(0,0,0,0) 56%)",
           "repeating-linear-gradient(29deg, rgba(132, 93, 57, 0.03) 0px, rgba(132, 93, 57, 0.03) 1px, rgba(0,0,0,0) 1px, rgba(0,0,0,0) 7px)",
         ].join(", "),
-    boxShadow: "none",
   };
 }
 
@@ -2602,7 +2536,7 @@ export default function TreeCanvas({
           photo_url: null,
         })
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, photo_url"
+          "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender"
         )
         .maybeSingle();
 
@@ -2635,6 +2569,10 @@ export default function TreeCanvas({
           row.photo_url === null || row.photo_url === undefined
             ? null
             : String(row.photo_url),
+        gender:
+          row.gender === null || row.gender === undefined
+            ? null
+            : String(row.gender),
       };
       setExtraPersons((prev) => [...prev, newPerson]);
       setAddPersonOpen(false);
@@ -3555,7 +3493,7 @@ export default function TreeCanvas({
                           cx={gp.x}
                           cy={gp.y}
                           r={TREE_GATHER_JUNCTION_R}
-                          fill={TREE_ROOTS_BRANCH_BROWN}
+                          fill={TREE_ROOTS_THREAD_HUB_FILL}
                           filter="url(#dg-tree-gather-junction-shadow)"
                           style={{ pointerEvents: "none" }}
                         />
@@ -3670,6 +3608,8 @@ export default function TreeCanvas({
                   if (!p) return null;
                   const primaryRow = primaryPhotoMap[pos.id];
                   const fallback = p.photo_url?.trim() || null;
+                  const silhouetteGender = normalizeGender(p.gender);
+                  const useFemaleSilhouette = silhouetteGender === "Female";
                   const hasAvatarSrc =
                     !!(primaryRow?.file_url ?? "").trim() || !!fallback;
                   const yearLine = treeCardYearRange(p);
@@ -3728,8 +3668,8 @@ export default function TreeCanvas({
                     <Link
                       href={`/dashboard/${treeId}/person/${pos.id}`}
                       className={
-                        "absolute left-0 right-0 top-0 z-0 flex flex-col no-underline" +
-                        (isRootsLeaf ? " items-center" : "")
+                        "absolute left-0 right-0 top-0 flex flex-col no-underline" +
+                        (isRootsLeaf ? " z-[1] items-center" : " z-0")
                       }
                       style={{
                         color: colors.brownDark,
@@ -3769,8 +3709,8 @@ export default function TreeCanvas({
                             ? "var(--dg-avatar-bg)"
                             : isRootsLeaf
                               ? isDarkPolaroid
-                                ? "rgba(56, 42, 31, 0.85)"
-                                : "rgba(209, 190, 162, 0.7)"
+                                ? TREE_ROOTS_OVAL_SILHOUETTE_BACKDROP_DARK
+                                : "rgba(132, 92, 58, 0.55)"
                               : POLAROID_NO_PHOTO_BG,
                           borderRadius: isRootsLeaf ? "50% / 44%" : 1,
                           ...(isDeadGossipPhotoCard
@@ -3805,28 +3745,70 @@ export default function TreeCanvas({
                             printFilter={printFilter}
                           />
                         ) : (
-                          <div
-                            className="relative h-full w-full"
-                            aria-hidden
-                            style={{
-                              background: isDarkPolaroid
-                                ? [
-                                    "radial-gradient(ellipse 66% 74% at 50% 44%, rgba(196, 164, 126, 0.23) 0%, rgba(140, 108, 78, 0.2) 28%, rgba(79, 59, 44, 0.1) 52%, rgba(44, 32, 24, 0) 72%)",
-                                    "radial-gradient(ellipse 90% 92% at 50% 48%, rgba(28, 20, 15, 0) 56%, rgba(28, 20, 15, 0.32) 100%)",
-                                  ].join(", ")
-                                : [
-                                    "radial-gradient(ellipse 66% 74% at 50% 44%, rgba(182, 141, 96, 0.27) 0%, rgba(169, 130, 87, 0.2) 30%, rgba(145, 109, 74, 0.1) 54%, rgba(113, 83, 57, 0) 74%)",
-                                    "radial-gradient(ellipse 90% 92% at 50% 48%, rgba(74, 50, 32, 0) 56%, rgba(74, 50, 32, 0.2) 100%)",
-                                  ].join(", "),
-                            }}
-                          />
+                          <div className="relative h-full w-full" aria-hidden>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={
+                                isDeadGossipPhotoCard
+                                  ? useFemaleSilhouette
+                                    ? "/female%20gossip%20Silhouette.svg"
+                                    : "/male%20gossip%20Silhouette.svg"
+                                  : isRootsLeaf
+                                    ? useFemaleSilhouette
+                                      ? "/Female%20Heirloom%20Silhouette.svg"
+                                      : "/male%20Heirloom%20Silhouette.svg"
+                                    : "/Crime%20Silhouette.svg"
+                              }
+                              alt=""
+                              className="absolute"
+                              style={{
+                                width: isRootsLeaf ? "84%" : isDeadGossipPhotoCard ? "82%" : "86%",
+                                height: "86%",
+                                left: isRootsLeaf ? "60%" : "50%",
+                                top: isDeadGossipPhotoCard
+                                  ? useFemaleSilhouette
+                                    ? "5%"
+                                    : "0%"
+                                  : isRootsLeaf
+                                    ? "60%"
+                                    : "60%",
+                                transform: isDeadGossipPhotoCard
+                                  ? "translateX(-50%) scale(2.5)"
+                                  : `translate(-50%, -50%) scale(${
+                                      isRootsLeaf && !useFemaleSilhouette
+                                        ? TREE_ROOTS_HEIRLOOM_MALE_SILHOUETTE_SCALE
+                                        : 2.5
+                                    })`,
+                                objectFit: "contain",
+                                ...(isDeadGossipPhotoCard && !isDarkPolaroid
+                                  ? {
+                                      filter:
+                                        "contrast(1.35) brightness(0.42) drop-shadow(0 0 1px rgba(255,255,255,0.55))",
+                                    }
+                                  : {}),
+                                ...(isRootsLeaf
+                                  ? {
+                                      filter: isDarkPolaroid
+                                        ? TREE_ROOTS_SILHOUETTE_FILTER_DARK
+                                        : "sepia(0.72) saturate(0.62) contrast(0.92) brightness(0.95)",
+                                      opacity: isDarkPolaroid
+                                        ? TREE_ROOTS_SILHOUETTE_OPACITY_DARK
+                                        : 0.74,
+                                    }
+                                  : {}),
+                              }}
+                            />
+                          </div>
                         )}
                         {isRootsLeaf ? (
                           <div
                             className="pointer-events-none absolute inset-0"
                             style={{
-                              background:
-                                "radial-gradient(ellipse 72% 76% at 50% 45%, rgba(0,0,0,0) 58%, rgba(34, 24, 16, 0.24) 100%)",
+                              background: isDarkPolaroid
+                                ? hasAvatarSrc
+                                  ? TREE_ROOTS_OVAL_VIGNETTE_DARK_PHOTO
+                                  : TREE_ROOTS_OVAL_VIGNETTE_DARK_SILHOUETTE
+                                : "radial-gradient(ellipse 74% 78% at 50% 44%, rgba(0,0,0,0) 44%, rgba(62, 40, 22, 0.38) 100%), radial-gradient(ellipse 92% 88% at 50% 42%, rgba(132, 92, 58, 0.28) 0%, rgba(0,0,0,0) 64%)",
                             }}
                           />
                         ) : null}
@@ -3842,7 +3824,10 @@ export default function TreeCanvas({
                           >
                             <p
                               className="line-clamp-2 w-full text-[11px] font-bold"
-                              style={{ fontFamily: serif, lineHeight: 1.12 }}
+                              style={{
+                                fontFamily: "var(--font-dead-gossip), var(--font-dg-display), serif",
+                                lineHeight: 1.12,
+                              }}
                               title={displayName(p)}
                             >
                               {displayName(p)}
@@ -3878,17 +3863,18 @@ export default function TreeCanvas({
                                 display: "inline-flex",
                                 flexDirection: "column",
                                 alignItems: "center",
-                                gap: 1,
+                                gap: 0,
                                 width: "92%",
                                 maxWidth: "100%",
-                                padding: "5px 3px 0",
+                                padding: "2px 3px 0",
                               }}
                             >
                               <p
                                 className="max-w-full text-center text-[11px] font-semibold break-words whitespace-normal"
                                 style={{
-                                  fontFamily: serif,
+                                  fontFamily: "var(--font-heirloom), var(--font-dg-display), serif",
                                   lineHeight: 1.22,
+                                  fontStyle: "italic",
                                   color: TREE_ROOTS_CAPTION_INK,
                                   overflowWrap: "break-word",
                                   letterSpacing: "0.02em",
@@ -3899,10 +3885,11 @@ export default function TreeCanvas({
                               </p>
                               {yearLine ? (
                                 <p
-                                  className="max-w-full shrink-0 truncate text-center text-[9px] font-medium leading-tight"
+                                  className="max-w-full shrink-0 truncate text-center text-[13px] font-medium leading-tight"
                                   style={{
-                                    fontFamily: serif,
+                                  fontFamily: "var(--font-heirloom), var(--font-dg-display), serif",
                                     marginTop: 0,
+                                  fontStyle: "normal",
                                     color: TREE_ROOTS_CAPTION_INK,
                                     letterSpacing: "0.03em",
                                   }}
@@ -3917,8 +3904,10 @@ export default function TreeCanvas({
                               <p
                                 className="line-clamp-2 w-full text-[11px] font-bold"
                                 style={{
-                                  fontFamily: serif,
+                                  fontFamily:
+                                    "var(--font-evidence-board), var(--font-dg-display), serif",
                                   lineHeight: 1.12,
+                                  letterSpacing: "0.03em",
                                   color: isDarkPolaroid
                                     ? "color-mix(in srgb, var(--dg-photo-scrim) 88%, black)"
                                     : `color-mix(in srgb, var(--dg-brown-dark) 90%, var(--dg-brown-outline) 10%)`,
@@ -3931,8 +3920,10 @@ export default function TreeCanvas({
                                 <p
                                   className="w-full shrink-0 truncate text-[9px] font-semibold leading-tight"
                                   style={{
-                                    fontFamily: sans,
+                                  fontFamily:
+                                    "var(--font-evidence-board), var(--font-dg-body), serif",
                                     marginTop: 0,
+                                  letterSpacing: "0.025em",
                                     color: isDarkPolaroid
                                       ? "color-mix(in srgb, var(--dg-photo-scrim) 72%, var(--dg-brown-border) 28%)"
                                       : `color-mix(in srgb, var(--dg-brown-dark) 78%, var(--dg-brown-mid) 22%)`,
@@ -3976,7 +3967,7 @@ export default function TreeCanvas({
                           }}
                         >
                           <div
-                            className="pointer-events-none absolute inset-[7px]"
+                            className="pointer-events-none absolute inset-[7px] z-[2]"
                             style={{
                               border: `1px solid ${
                                 isDarkPolaroid
@@ -4174,14 +4165,11 @@ export default function TreeCanvas({
 
       {uploadPanelOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="tree-upload-record-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeUploadModal();
-          }}
         >
           <div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
@@ -4230,14 +4218,11 @@ export default function TreeCanvas({
 
       {photoModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="tree-photo-upload-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closePhotoModal();
-          }}
         >
           <div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
@@ -4538,14 +4523,11 @@ export default function TreeCanvas({
 
       {addPersonOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="tree-add-person-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeAddPersonModal();
-          }}
         >
           <div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"

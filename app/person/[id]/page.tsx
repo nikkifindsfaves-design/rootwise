@@ -53,8 +53,8 @@ import {
 } from "react";
 
 const serif =
-  "var(--font-dg-display), 'Playfair Display', Georgia, serif";
-const sans = "var(--font-dg-body), Lato, sans-serif";
+  "var(--dg-font-heading, var(--font-dg-display), 'Playfair Display', Georgia, serif)";
+const sans = "var(--dg-font-body, var(--font-dg-body), Lato, sans-serif)";
 
 const colors = {
   brownDark: "var(--dg-brown-dark)",
@@ -1285,6 +1285,75 @@ function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
   return "?";
 }
 
+function profilePlaceholderSilhouetteSrc(
+  photoFrameStyle: PhotoFrameStyle,
+  genderRaw: string | null | undefined
+): string {
+  const gender = normalizeGender(genderRaw);
+  if (photoFrameStyle === "scrapbook") {
+    return gender === GENDER_VALUES.FEMALE
+      ? "/female%20gossip%20Silhouette.svg"
+      : "/male%20gossip%20Silhouette.svg";
+  }
+  if (photoFrameStyle === "oval") {
+    return gender === GENDER_VALUES.FEMALE
+      ? "/Female%20Heirloom%20Silhouette.svg"
+      : "/male%20Heirloom%20Silhouette.svg";
+  }
+  return "/Crime%20Silhouette.svg";
+}
+
+function ProfilePhotoSilhouette({
+  photoFrameStyle,
+  gender,
+  isDark,
+}: {
+  photoFrameStyle: PhotoFrameStyle;
+  gender: string | null | undefined;
+  isDark: boolean;
+}) {
+  const g = normalizeGender(gender);
+  const ovalHeirloomMaleScale =
+    photoFrameStyle === "oval" && g !== GENDER_VALUES.FEMALE ? 2.5 * 0.95 : 2.5;
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={profilePlaceholderSilhouetteSrc(photoFrameStyle, gender)}
+      alt=""
+      className="absolute left-1/2 top-1/2"
+      style={{
+        zIndex: 0,
+        width: photoFrameStyle === "oval" ? "84%" : photoFrameStyle === "scrapbook" ? "82%" : "86%",
+        height: "86%",
+        left: photoFrameStyle === "oval" ? "60%" : "50%",
+        top:
+          photoFrameStyle === "oval"
+            ? "60%"
+            : photoFrameStyle === "polaroid"
+              ? "60%"
+              : "50%",
+        transform: `translate(-50%, -50%) scale(${ovalHeirloomMaleScale})`,
+        objectFit: "contain",
+        pointerEvents: "none",
+        ...(photoFrameStyle === "scrapbook" && !isDark
+          ? {
+              filter:
+                "contrast(1.35) brightness(0.42) drop-shadow(0 0 1px rgba(255,255,255,0.55))",
+            }
+          : {}),
+        ...(photoFrameStyle === "oval"
+          ? {
+              filter: isDark
+                ? "sepia(0.7) saturate(0.58) contrast(0.95) brightness(0.9)"
+                : "sepia(0.72) saturate(0.62) contrast(0.92) brightness(0.95)",
+              opacity: isDark ? 0.68 : 0.74,
+            }
+          : {}),
+      }}
+    />
+  );
+}
+
 function IconPencil({ className }: { className?: string }) {
   return (
     <svg
@@ -2231,8 +2300,52 @@ function PersonProfilePageBody({
   canvasTheme,
   children,
 }: PersonProfilePageBodyProps) {
+  const themeFontVars: CSSProperties & Record<string, string> =
+    canvasTheme === CANVAS_THEME_ID.STRING
+      ? {
+          "--dg-font-heading": "var(--font-evidence-board)",
+          "--dg-font-body": "var(--font-evidence-board-body)",
+          "--dg-heading-font-style": "normal",
+        }
+      : canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
+        ? {
+            "--dg-font-heading": "var(--font-dead-gossip)",
+            "--dg-font-body": "var(--font-dead-gossip-body)",
+            "--dg-heading-font-style": "normal",
+          }
+        : canvasTheme === CANVAS_THEME_ID.ROOTS
+          ? {
+              "--dg-font-heading": "var(--font-heirloom)",
+              "--dg-font-body": "var(--font-heirloom-body)",
+              "--dg-heading-font-style": "italic",
+            }
+          : {
+              "--dg-font-heading":
+                "var(--font-dg-display), 'Playfair Display', Georgia, serif",
+              "--dg-font-body": "var(--font-dg-body), Lato, sans-serif",
+              "--dg-heading-font-style": "normal",
+            };
+
   return (
-    <div className="contents" data-person-canvas-theme={canvasTheme}>
+    <div
+      className="contents"
+      data-person-canvas-theme={canvasTheme}
+      style={themeFontVars}
+    >
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            [data-person-canvas-theme] h1,
+            [data-person-canvas-theme] h2,
+            [data-person-canvas-theme] h3,
+            [data-person-canvas-theme] h4,
+            [data-person-canvas-theme] h5,
+            [data-person-canvas-theme] h6 {
+              font-style: var(--dg-heading-font-style, normal);
+            }
+          `,
+        }}
+      />
       {children}
     </div>
   );
@@ -6928,18 +7041,23 @@ export default function PersonProfilePage() {
                             }}
                           >
                             <div
-                              className="flex h-full w-full items-center justify-center text-4xl font-bold"
                               style={{
+                                position: "relative",
+                                width: "100%",
+                                height: "100%",
                                 backgroundColor: POLAROID_NO_PHOTO_BG,
                                 borderRadius: 1,
-                                fontFamily: serif,
-                                color: POLAROID_NO_PHOTO_INITIALS,
+                                overflow: "hidden",
                                 boxShadow: scrapbookPhotoInnerInsetShadow(
                                   theme === "dark"
                                 ),
                               }}
                             >
-                              {person ? initials(person) : "?"}
+                              <ProfilePhotoSilhouette
+                                photoFrameStyle="scrapbook"
+                                gender={person?.gender}
+                                isDark={theme === "dark"}
+                              />
                             </div>
                           </div>
                         </div>
@@ -6961,34 +7079,40 @@ export default function PersonProfilePage() {
                           onClick={openHeaderPortraitsGallery}
                         >
                           <div
-                            className="flex h-full w-full items-center justify-center text-4xl font-bold"
                             style={{
+                              position: "relative",
                               width: HEADER_POLAROID_IMG_W,
                               height: HEADER_POLAROID_IMG_H,
                               backgroundColor: POLAROID_NO_PHOTO_BG,
                               borderRadius: 1,
-                              fontFamily: serif,
-                              color: POLAROID_NO_PHOTO_INITIALS,
+                              overflow: "hidden",
                             }}
                           >
-                            {person ? initials(person) : "?"}
+                            <ProfilePhotoSilhouette
+                              photoFrameStyle="oval"
+                              gender={person?.gender}
+                              isDark={theme === "dark"}
+                            />
                           </div>
                         </button>
                       </RootsFramePortrait>
                     </div>
                   ) : (
                     <div
-                      className="flex items-center justify-center text-4xl font-bold"
                       style={{
+                        position: "relative",
                         width: HEADER_POLAROID_IMG_W,
                         height: HEADER_POLAROID_IMG_H,
                         backgroundColor: POLAROID_NO_PHOTO_BG,
                         borderRadius: 1,
-                        fontFamily: serif,
-                        color: POLAROID_NO_PHOTO_INITIALS,
+                        overflow: "hidden",
                       }}
                     >
-                      {person ? initials(person) : "?"}
+                      <ProfilePhotoSilhouette
+                        photoFrameStyle="polaroid"
+                        gender={person?.gender}
+                        isDark={theme === "dark"}
+                      />
                     </div>
                   )}
                 </div>
@@ -7134,13 +7258,18 @@ export default function PersonProfilePage() {
                                       />
                                     ) : (
                                       <div
-                                        className="flex h-full w-full items-center justify-center text-4xl font-bold"
                                         style={{
-                                          fontFamily: serif,
-                                          color: POLAROID_NO_PHOTO_INITIALS,
+                                          position: "relative",
+                                          width: "100%",
+                                          height: "100%",
+                                          overflow: "hidden",
                                         }}
                                       >
-                                        {polaroidInitialsFromLayer(layer)}
+                                        <ProfilePhotoSilhouette
+                                          photoFrameStyle="scrapbook"
+                                          gender={layer.person?.gender ?? null}
+                                          isDark={theme === "dark"}
+                                        />
                                       </div>
                                     )}
                                   </div>
@@ -7207,13 +7336,18 @@ export default function PersonProfilePage() {
                                     />
                                   ) : (
                                     <div
-                                      className="flex h-full w-full items-center justify-center text-4xl font-bold"
                                       style={{
-                                        fontFamily: serif,
-                                        color: POLAROID_NO_PHOTO_INITIALS,
+                                        position: "relative",
+                                        width: "100%",
+                                        height: "100%",
+                                        overflow: "hidden",
                                       }}
                                     >
-                                      {polaroidInitialsFromLayer(layer)}
+                                      <ProfilePhotoSilhouette
+                                        photoFrameStyle="oval"
+                                        gender={layer.person?.gender ?? null}
+                                        isDark={theme === "dark"}
+                                      />
                                     </div>
                                   )}
                                 </div>
@@ -7263,13 +7397,18 @@ export default function PersonProfilePage() {
                               />
                             ) : (
                               <div
-                                className="flex h-full w-full items-center justify-center text-4xl font-bold"
                                 style={{
-                                  fontFamily: serif,
-                                  color: POLAROID_NO_PHOTO_INITIALS,
+                                  position: "relative",
+                                  width: "100%",
+                                  height: "100%",
+                                  overflow: "hidden",
                                 }}
                               >
-                                {polaroidInitialsFromLayer(layer)}
+                                <ProfilePhotoSilhouette
+                                  photoFrameStyle="polaroid"
+                                  gender={layer.person?.gender ?? null}
+                                  isDark={theme === "dark"}
+                                />
                               </div>
                             )}
                           </div>
@@ -9696,14 +9835,11 @@ export default function PersonProfilePage() {
 
       {portraitsGalleryOpen ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="portraits-gallery-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setPortraitsGalleryOpen(false);
-          }}
         >
           <div
             className="my-4 w-full max-w-3xl rounded-lg border p-6 shadow-xl"
@@ -9967,14 +10103,11 @@ export default function PersonProfilePage() {
 
       {eventPhotoGalleryEventId ? (
         <div
-          className="fixed inset-0 z-[220] overflow-y-auto"
+          className="fixed inset-0 z-[220] overflow-y-auto overscroll-y-contain"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="event-photo-gallery-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEventPhotoGalleryEventId(null);
-          }}
         >
           <div
             className="mx-auto my-8 w-full max-w-5xl rounded-lg border p-6 shadow-xl"
@@ -10110,14 +10243,11 @@ export default function PersonProfilePage() {
 
       {photoPreviewModal ? (
         <div
-          className="fixed inset-0 z-[230] flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-[230] flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="photo-preview-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setPhotoPreviewModal(null);
-          }}
         >
           <div
             className="my-4 w-full max-w-5xl rounded-lg border p-4 shadow-xl sm:p-6"
@@ -10195,14 +10325,11 @@ export default function PersonProfilePage() {
 
       {editPersonOpen && editPersonDraft ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-person-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeEditPersonModal();
-          }}
         >
           <div
             className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border p-6 shadow-xl"
@@ -10585,16 +10712,11 @@ export default function PersonProfilePage() {
 
       {deletePersonOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-person-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !deletePersonBusy) {
-              setDeletePersonOpen(false);
-            }
-          }}
         >
           <div
             className="w-full max-w-md rounded-lg border p-6 shadow-xl"
@@ -10658,18 +10780,11 @@ export default function PersonProfilePage() {
 
       {editRelModal ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-relationship-modal-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !editRelBusy) {
-              setEditRelModal(null);
-              setEditRelType("");
-              setEditRelError(null);
-            }
-          }}
         >
           <div
             className="w-full max-w-md rounded-lg border p-6 shadow-xl"
@@ -10768,20 +10883,11 @@ export default function PersonProfilePage() {
 
       {addFamilyModalOpen && person ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="add-family-modal-title"
-          onClick={(e) => {
-            if (
-              e.target === e.currentTarget &&
-              !addFamilyFindBusy &&
-              !addFamilyCreateBusy
-            ) {
-              closeAddFamilyModal();
-            }
-          }}
         >
           <div
             className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
@@ -11229,14 +11335,11 @@ export default function PersonProfilePage() {
 
       {recordUploadModalOpen && person ? (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="person-upload-record-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setRecordUploadModalOpen(false);
-          }}
         >
           <div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border p-6 shadow-xl"
@@ -11298,16 +11401,11 @@ export default function PersonProfilePage() {
 
       {mergeModalOpen && person ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="merge-modal-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !mergeSaving) {
-              closeMergeModal();
-            }
-          }}
         >
           <div
             className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border p-6 shadow-xl"
@@ -11656,14 +11754,11 @@ export default function PersonProfilePage() {
 
       {cropModalPhoto ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="crop-photo-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setCropModalPhoto(null);
-          }}
         >
           <div
             className="my-4 w-full max-w-md rounded-lg border p-6 shadow-xl"
@@ -11913,16 +12008,11 @@ export default function PersonProfilePage() {
 
       {photoSetupModal ? (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="photo-setup-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !photoSetupSaving) {
-              skipPhotoSetup();
-            }
-          }}
         >
           <div
             className="my-4 w-full max-w-4xl rounded-lg border p-6 shadow-xl"
@@ -12260,16 +12350,11 @@ export default function PersonProfilePage() {
 
       {tagModalPhoto ? (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="tag-modal-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !tagModalSaving) {
-              closeTagModal();
-            }
-          }}
         >
           <div
             className="my-4 w-full max-w-lg rounded-lg border p-6 shadow-xl"
@@ -12435,7 +12520,7 @@ export default function PersonProfilePage() {
       ) : null}
       {addEventOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
         >
           <div

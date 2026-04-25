@@ -94,6 +94,18 @@ create table public.trees (
 
 create index if not exists trees_user_id_idx on public.trees (user_id);
 
+alter table public.trees
+  add constraint trees_vibe_check check (
+    vibe in (
+      'classic',
+      'gossip_girl',
+      'hearthside',
+      'southern_gothic',
+      'gen_z',
+      'old_timey'
+    )
+  );
+
 -- ---------------------------------------------------------------------------
 -- public.persons
 -- ---------------------------------------------------------------------------
