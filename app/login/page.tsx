@@ -28,7 +28,7 @@ function GoldDots() {
 function LeftPanel() {
   return (
     <div
-      className="hidden min-w-0 flex-col px-6 py-8 text-[color:var(--dg-cream)] sm:px-8 sm:py-10 lg:flex lg:min-h-[100dvh] lg:px-12 lg:py-12"
+      className="dg-login-left-panel flex min-w-0 flex-col px-6 py-8 text-[color:var(--dg-cream)] sm:px-8 sm:py-10 lg:min-h-[100dvh] lg:px-12 lg:py-12"
       style={{ backgroundColor: leftBg }}
     >
       <header className="mb-8 shrink-0 sm:mb-10 lg:mb-10">
@@ -507,7 +507,7 @@ function LoginPageFallback() {
       className="grid min-h-0 animate-pulse grid-cols-1 lg:grid-cols-2"
       style={{ height: "100dvh", maxHeight: "100dvh" }}
     >
-      <div className="hidden lg:block" style={{ backgroundColor: leftBg }} />
+      <div style={{ backgroundColor: leftBg }} />
       <div style={{ backgroundColor: "var(--dg-cream)" }} />
     </div>
   );

@@ -48,6 +48,12 @@
   );
 }
 
+/** Login marketing column: light ink on dark bg even when `html` is `.dark` (e.g. mobile OS theme). */
+.dg-login-left-panel {
+  --dg-cream: #fffcf7;
+  --dg-paper-border: #c4a882;
+}
+
 .dark {
   --background: #1a1714;
   --foreground: #e8d5b0;
