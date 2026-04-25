@@ -28,7 +28,7 @@ function GoldDots() {
 function LeftPanel() {
   return (
     <div
-      className="flex min-w-0 flex-col px-6 py-8 text-[color:var(--dg-cream)] sm:px-8 sm:py-10 lg:min-h-[100dvh] lg:px-12 lg:py-12"
+      className="hidden min-w-0 flex-col px-6 py-8 text-[color:var(--dg-cream)] sm:px-8 sm:py-10 lg:flex lg:min-h-[100dvh] lg:px-12 lg:py-12"
       style={{ backgroundColor: leftBg }}
     >
       <header className="mb-8 shrink-0 sm:mb-10 lg:mb-10">
@@ -52,7 +52,7 @@ function LeftPanel() {
         </p>
       </header>
 
-      <div className="flex min-w-0 shrink-0 flex-col gap-8 py-2 sm:gap-10 sm:py-4 lg:gap-10 lg:py-6">
+      <div className="flex min-w-0 shrink-0 flex-col gap-8 py-2 sm:-mt-[70px] sm:gap-10 sm:py-4 lg:gap-10 lg:py-6">
         <div className="min-w-0">
           <h1
             className="mt-3 max-w-xl text-2xl leading-[1.12] text-balance sm:text-3xl md:text-4xl lg:text-[2.35rem] lg:leading-[1.15]"
@@ -163,7 +163,7 @@ function LeftPanel() {
       </div>
 
       <p
-        className="mt-8 shrink-0 text-balance text-xs italic leading-relaxed sm:mt-10 lg:mt-6"
+        className="mt-[2px] shrink-0 text-balance text-xs italic leading-relaxed sm:mt-[10px] lg:-mt-[6px]"
         style={{ color: creamMuted }}
       >
         Built by a genealogist, for people who think family history should be
@@ -507,7 +507,7 @@ function LoginPageFallback() {
       className="grid min-h-0 animate-pulse grid-cols-1 lg:grid-cols-2"
       style={{ height: "100dvh", maxHeight: "100dvh" }}
     >
-      <div style={{ backgroundColor: leftBg }} />
+      <div className="hidden lg:block" style={{ backgroundColor: leftBg }} />
       <div style={{ backgroundColor: "var(--dg-cream)" }} />
     </div>
   );
