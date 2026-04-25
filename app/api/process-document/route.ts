@@ -419,7 +419,17 @@ function buildSystemPrompt(
   return buildBirthRecordPrompt(vibe, anchorPersonName);
 }
 
-const MODEL = "claude-opus-4-5";
+const EXTRACTION_MODELS = {
+  opus: "claude-opus-4-5",
+  sonnet: "claude-sonnet-4-20250514",
+} as const;
+
+function resolveExtractionModel(raw: FormDataEntryValue | null): string {
+  if (typeof raw !== "string") return EXTRACTION_MODELS.opus;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "sonnet") return EXTRACTION_MODELS.sonnet;
+  return EXTRACTION_MODELS.opus;
+}
 
 function inferImageMediaType(file: File): string {
   const t = file.type.toLowerCase();
@@ -535,6 +545,9 @@ export async function POST(request: NextRequest) {
 
   const skipExtraction = formTruthySkipExtraction(
     formData.get("skip_extraction")
+  );
+  const selectedExtractionModel = resolveExtractionModel(
+    formData.get("extraction_model")
   );
 
   const UUID_RE =
@@ -771,7 +784,7 @@ export async function POST(request: NextRequest) {
   let message: Anthropic.Messages.Message;
   try {
     message = await anthropic.messages.create({
-      model: MODEL,
+      model: selectedExtractionModel,
       max_tokens: 16000,
       system: buildSystemPrompt(
         resolvedVibe,
@@ -781,7 +794,7 @@ export async function POST(request: NextRequest) {
       ),
       messages: [{ role: "user", content: userContent }],
     });
-    console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens, MODEL));
+    console.log("[DG] Extraction tokens — input:", message.usage.input_tokens, "| output:", message.usage.output_tokens, "| est. cost $:", estimateCost(message.usage.input_tokens, message.usage.output_tokens, selectedExtractionModel));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Anthropic request failed";
     return NextResponse.json({ error: msg }, { status: 502 });

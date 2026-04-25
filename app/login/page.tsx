@@ -504,10 +504,24 @@ function LoginPageContent() {
         )}
         <p className="mt-6 text-center text-[0.75rem] text-[var(--dg-brown-muted)]">
           <Link
-            href="/privacy"
+            href="/terms"
             className="underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
           >
             Terms of Service
+          </Link>
+          {" · "}
+          <Link
+            href="/privacy"
+            className="underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
+          >
+            Privacy Policy
+          </Link>
+          {" · "}
+          <Link
+            href="/cookies"
+            className="underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
+          >
+            Cookie Policy
           </Link>
         </p>
       </div>

@@ -114,6 +114,7 @@ export default function DocumentUploadSection({
   anchorPersonId,
   embedded = false,
 }: DocumentUploadSectionProps) {
+  type ExtractionModelChoice = "opus" | "sonnet";
   const router = useRouter();
   const pathname = usePathname();
   const [file, setFile] = useState<File | null>(null);
@@ -127,6 +128,8 @@ export default function DocumentUploadSection({
   );
   const [error, setError] = useState<string | null>(null);
   const [isAdjustingImage, setIsAdjustingImage] = useState(false);
+  const [extractionModel, setExtractionModel] =
+    useState<ExtractionModelChoice>("opus");
 
   const [multiPersonModalOpen, setMultiPersonModalOpen] = useState(false);
   const [multiPersonNameQuery, setMultiPersonNameQuery] = useState("");
@@ -137,7 +140,11 @@ export default function DocumentUploadSection({
   const buildFormData = useCallback(
     (
       f: File,
-      options?: { skipExtraction?: boolean; anchorPersonNameOverride?: string }
+      options?: {
+        skipExtraction?: boolean;
+        anchorPersonNameOverride?: string;
+        extractionModel?: ExtractionModelChoice;
+      }
     ) => {
       const formData = new FormData();
       formData.append("file", f);
@@ -155,6 +162,8 @@ export default function DocumentUploadSection({
       }
       if (options?.skipExtraction === true) {
         formData.append("skip_extraction", "true");
+      } else if (options?.extractionModel) {
+        formData.append("extraction_model", options.extractionModel);
       }
       const anchorName = (options?.anchorPersonNameOverride ?? "").trim();
       if (anchorName !== "") {
@@ -226,6 +235,7 @@ export default function DocumentUploadSection({
       const formData = buildFormData(uploadFile, {
         skipExtraction: options.skipExtraction,
         anchorPersonNameOverride: typedAnchorName || undefined,
+        extractionModel,
       });
 
       const response = await fetch("/api/process-document", {
@@ -306,6 +316,7 @@ export default function DocumentUploadSection({
       const formData = buildFormData(uploadFile, {
         skipExtraction: false,
         anchorPersonNameOverride: selectedName,
+        extractionModel,
       });
 
       const response = await fetch("/api/process-document", {
@@ -473,6 +484,68 @@ export default function DocumentUploadSection({
         >
           Upload
         </button>
+      </div>
+      <div>
+        <p
+          className="mb-1 block text-sm font-medium"
+          style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}
+        >
+          Extraction model
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            title="High Accuracy even on old cursive writing"
+            onClick={() => setExtractionModel("opus")}
+            disabled={isLoading}
+            aria-pressed={extractionModel === "opus"}
+            className="rounded-full px-3 py-1.5 text-xs font-medium transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+            style={{
+              fontFamily: sans,
+              borderWidth: 1,
+              borderStyle: "solid",
+              borderColor:
+                extractionModel === "opus"
+                  ? "var(--dg-primary-bg)"
+                  : "var(--dg-brown-border)",
+              backgroundColor:
+                extractionModel === "opus" ? "var(--dg-primary-bg)" : "transparent",
+              color:
+                extractionModel === "opus"
+                  ? "var(--dg-primary-fg)"
+                  : "var(--dg-brown-dark)",
+            }}
+          >
+            Opus - 5 credits
+          </button>
+          <button
+            type="button"
+            title="Less acurate for handwritten documentation"
+            onClick={() => setExtractionModel("sonnet")}
+            disabled={isLoading}
+            aria-pressed={extractionModel === "sonnet"}
+            className="rounded-full px-3 py-1.5 text-xs font-medium transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+            style={{
+              fontFamily: sans,
+              borderWidth: 1,
+              borderStyle: "solid",
+              borderColor:
+                extractionModel === "sonnet"
+                  ? "var(--dg-primary-bg)"
+                  : "var(--dg-brown-border)",
+              backgroundColor:
+                extractionModel === "sonnet"
+                  ? "var(--dg-primary-bg)"
+                  : "transparent",
+              color:
+                extractionModel === "sonnet"
+                  ? "var(--dg-primary-fg)"
+                  : "var(--dg-brown-dark)",
+            }}
+          >
+            Sonnet - 3 credits
+          </button>
+        </div>
       </div>
 
       {isLoading && loadingMode === "analyze" ? (
