@@ -224,7 +224,7 @@ export default function DeadGossipShell({
       const tagRows = [
         {
         photo_id: photoId,
-        person_id: firstTagId,
+        person_id: photoUploadTags[0].id,
         user_id: user.id,
         is_primary: false,
         crop_x: 50,
