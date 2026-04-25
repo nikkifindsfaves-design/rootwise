@@ -502,6 +502,14 @@ function LoginPageContent() {
             </p>
           </div>
         )}
+        <p className="mt-6 text-center text-[0.75rem] text-[var(--dg-brown-muted)]">
+          <Link
+            href="/privacy"
+            className="underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
+          >
+            Terms of Service
+          </Link>
+        </p>
       </div>
     </div>
   );
