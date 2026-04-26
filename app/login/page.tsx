@@ -184,11 +184,13 @@ function LoginPageContent() {
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const signInMode = searchParams.get("signin") === "1";
+  const signUpMode = searchParams.get("signup") === "1";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
 
   const [wlName, setWlName] = useState("");
   const [wlEmail, setWlEmail] = useState("");
@@ -200,6 +202,7 @@ function LoginPageContent() {
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthError(null);
+    setAuthSuccess(null);
     setIsAuthLoading(true);
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -215,6 +218,28 @@ function LoginPageContent() {
     }
 
     router.push("/dashboard");
+  }
+
+  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    setIsAuthLoading(true);
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    setIsAuthLoading(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+
+    setAuthSuccess(
+      "Account created. Check your email for verification, then sign in."
+    );
   }
 
   async function handleWaitlist(event: FormEvent<HTMLFormElement>) {
@@ -257,7 +282,7 @@ function LoginPageContent() {
         className="flex min-w-0 flex-col px-6 py-8 sm:px-8 sm:py-10 lg:min-h-[100dvh] lg:px-12 lg:py-12"
         style={{ backgroundColor: "var(--dg-cream)" }}
       >
-        {signInMode ? (
+        {signInMode || signUpMode ? (
           <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
               <GoldDots />
@@ -269,13 +294,18 @@ function LoginPageContent() {
               className="mt-6 text-2xl font-semibold text-[var(--dg-brown-dark)]"
               style={{ fontFamily: "var(--font-heirloom-body), Georgia, serif" }}
             >
-              Sign in
+              {signUpMode ? "Create account" : "Sign in"}
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-[var(--dg-brown-muted)]">
-              Use the email and password for your Dead Gossip account.
+              {signUpMode
+                ? "Create your Dead Gossip account to start your trial."
+                : "Use the email and password for your Dead Gossip account."}
             </p>
 
-            <form onSubmit={handleSignIn} className="mt-8 flex flex-1 flex-col">
+            <form
+              onSubmit={signUpMode ? handleSignUp : handleSignIn}
+              className="mt-8 flex flex-1 flex-col"
+            >
               <div className="space-y-4">
                 <div>
                   <label
@@ -320,6 +350,11 @@ function LoginPageContent() {
                   {authError}
                 </p>
               ) : null}
+              {authSuccess ? (
+                <p className="mt-4 text-sm text-[var(--dg-brown-dark)]">
+                  {authSuccess}
+                </p>
+              ) : null}
 
               <div className="mt-6">
                 <button
@@ -328,7 +363,11 @@ function LoginPageContent() {
                   className="w-full rounded-md px-4 py-2.5 text-sm font-medium text-[var(--dg-primary-fg)] transition disabled:cursor-not-allowed disabled:opacity-70"
                   style={{ backgroundColor: "var(--dg-primary-bg)" }}
                 >
-                  {isAuthLoading ? "Please wait…" : "Sign in"}
+                  {isAuthLoading
+                    ? "Please wait…"
+                    : signUpMode
+                      ? "Create account"
+                      : "Sign in"}
                 </button>
               </div>
             </form>
@@ -349,10 +388,10 @@ function LoginPageContent() {
 
             <p className="text-center text-sm">
               <Link
-                href="/login"
+                href={signUpMode ? "/login?signin=1" : "/login?signup=1"}
                 className="font-medium text-[var(--dg-brown-outline)] underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
               >
-                Request early access
+                {signUpMode ? "Sign in to your account" : "Create an account"}
               </Link>
             </p>
           </div>

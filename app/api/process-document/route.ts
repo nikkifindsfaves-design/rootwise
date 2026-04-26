@@ -4,6 +4,11 @@ import {
   MANUAL_ENTRY_DOCUMENT_SUBTYPE,
 } from "@/lib/constants/shared-values";
 import { createClient } from "@/lib/supabase/server";
+import {
+  debitCreditsForAction,
+  getCreditSnapshotForUser,
+  validateActionAllowedByTier,
+} from "@/lib/billing/credits";
 import { estimateCost } from "@/lib/utils/anthropic-cost";
 import { parseJsonFromText } from "@/lib/utils/parse-json-from-text";
 import { NextResponse, type NextRequest } from "next/server";
@@ -549,6 +554,48 @@ export async function POST(request: NextRequest) {
   const selectedExtractionModel = resolveExtractionModel(
     formData.get("extraction_model")
   );
+  const actionType =
+    selectedExtractionModel === EXTRACTION_MODELS.sonnet
+      ? "extraction_sonnet"
+      : "extraction_opus";
+
+  if (!skipExtraction) {
+    const snapshot = await getCreditSnapshotForUser(user.id);
+    const allowedByTier = validateActionAllowedByTier(snapshot.tier, actionType);
+    if (!allowedByTier.allowed) {
+      return NextResponse.json(
+        {
+          error: allowedByTier.reason ?? "Your current plan does not allow this action.",
+          code: "forbidden_plan_action",
+          billing: snapshot,
+        },
+        { status: 403 }
+      );
+    }
+
+    const debit = await debitCreditsForAction({
+      userId: user.id,
+      action: actionType,
+      idempotencyKey: `process-document:${user.id}:${crypto.randomUUID()}`,
+      metadata: {
+        record_type: String(formData.get("record_type") ?? ""),
+        model: selectedExtractionModel,
+      },
+    });
+
+    if (!debit.ok) {
+      return NextResponse.json(
+        {
+          error:
+            debit.errorCode === "insufficient_credits"
+              ? "You are out of credits for this month. Upgrade, buy add-on credits, or wait for refresh."
+              : "Credit debit failed. Please retry.",
+          code: debit.errorCode,
+        },
+        { status: debit.errorCode === "insufficient_credits" ? 402 : 500 }
+      );
+    }
+  }
 
   const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

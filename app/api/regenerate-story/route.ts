@@ -3,6 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
 import { createClient } from "@/lib/supabase/server";
 import {
+  debitCreditsForAction,
+  getCreditSnapshotForUser,
+} from "@/lib/billing/credits";
+import {
   getIsCensusRecord,
   getIsLandRecord,
 } from "@/lib/utils/review-visibility";
@@ -110,6 +114,28 @@ export async function POST(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const snapshot = await getCreditSnapshotForUser(user.id);
+  const debit = await debitCreditsForAction({
+    userId: user.id,
+    action: "story_regenerate",
+    idempotencyKey: `regenerate-story:${user.id}:${crypto.randomUUID()}`,
+    metadata: { route: "regenerate-story" },
+  });
+
+  if (!debit.ok) {
+    return NextResponse.json(
+      {
+        error:
+          debit.errorCode === "insufficient_credits"
+            ? "You are out of credits for this month. Upgrade, buy add-on credits, or wait for refresh."
+            : "Unable to charge credits for story regeneration.",
+        code: debit.errorCode,
+        billing: snapshot,
+      },
+      { status: debit.errorCode === "insufficient_credits" ? 402 : 500 }
+    );
   }
 
   let body: RequestBody;

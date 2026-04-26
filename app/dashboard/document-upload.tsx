@@ -2,7 +2,7 @@
 
 import { RECORD_TYPES } from "@/lib/records/record-types";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const sans = "var(--font-dg-body), Lato, sans-serif";
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
@@ -130,6 +130,16 @@ export default function DocumentUploadSection({
   const [isAdjustingImage, setIsAdjustingImage] = useState(false);
   const [extractionModel, setExtractionModel] =
     useState<ExtractionModelChoice>("opus");
+  const [billingLoading, setBillingLoading] = useState(true);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [billing, setBilling] = useState<{
+    tier: "basic" | "pro" | "max" | "possessed";
+    subscriptionCredits: number;
+    addonCredits: number;
+    totalCredits: number;
+    canUseExtraction: boolean;
+    monthlyResetAt: string | null;
+  } | null>(null);
 
   const [multiPersonModalOpen, setMultiPersonModalOpen] = useState(false);
   const [multiPersonNameQuery, setMultiPersonNameQuery] = useState("");
@@ -185,6 +195,38 @@ export default function DocumentUploadSection({
       return tokens.every((t) => lower.includes(t.toLowerCase()));
     });
   }, [multiPersonModalOpen, multiPersonNameQuery, pendingPeople]);
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const response = await fetch("/api/billing/status", { method: "GET" });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            typeof data?.error === "string"
+              ? data.error
+              : "Could not load credit status."
+          );
+        }
+        if (mounted) {
+          setBilling(data.snapshot ?? null);
+          setBillingError(null);
+        }
+      } catch (error) {
+        if (mounted) {
+          setBillingError(
+            error instanceof Error ? error.message : "Could not load credit status."
+          );
+        }
+      } finally {
+        if (mounted) setBillingLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   function resetMultiPersonModal() {
     setError(null);
@@ -371,6 +413,14 @@ export default function DocumentUploadSection({
     }
   }
 
+  const creditsDepleted = (billing?.totalCredits ?? 0) <= 0;
+  const extractionBlockedByPlan = billing != null && !billing.canUseExtraction;
+  const extractionActionDisabled =
+    isLoading ||
+    billingLoading ||
+    creditsDepleted ||
+    extractionBlockedByPlan;
+
   const fields = (
     <div className={embedded ? "space-y-4" : "mt-4 space-y-4"}>
       <div>
@@ -460,7 +510,7 @@ export default function DocumentUploadSection({
         <button
           type="button"
           onClick={() => void handleUpload({ skipExtraction: false })}
-          disabled={isLoading}
+          disabled={extractionActionDisabled}
           className="rounded-md px-4 py-2 text-sm font-semibold transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
           style={{
             fontFamily: sans,
@@ -485,6 +535,37 @@ export default function DocumentUploadSection({
           Upload
         </button>
       </div>
+      {billing ? (
+        <div
+          className="rounded-md border px-3 py-2 text-sm"
+          style={{
+            fontFamily: sans,
+            borderColor: "var(--dg-paper-border)",
+            backgroundColor: "var(--dg-parchment)",
+            color: "var(--dg-brown-dark)",
+          }}
+        >
+          {`Credits: ${billing.subscriptionCredits} monthly + ${billing.addonCredits} add-on`}
+          {billing.monthlyResetAt
+            ? ` · Refreshes ${new Date(billing.monthlyResetAt).toLocaleDateString()}`
+            : ""}
+        </div>
+      ) : null}
+      {billingError ? (
+        <p className="text-sm" style={{ fontFamily: sans, color: "var(--dg-error-text)" }}>
+          {billingError}
+        </p>
+      ) : null}
+      {creditsDepleted ? (
+        <p className="text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}>
+          You are out of credits. Upload and analyze is disabled until credits are restored.
+        </p>
+      ) : null}
+      {extractionBlockedByPlan ? (
+        <p className="text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}>
+          Your current plan does not include extraction. Upgrade to Pro or Max to use Analyze.
+        </p>
+      ) : null}
       <div>
         <p
           className="mb-1 block text-sm font-medium"

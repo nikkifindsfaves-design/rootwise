@@ -2,6 +2,10 @@
 
 import { useTheme } from "@/lib/theme/theme-context";
 import { createClient } from "@/lib/supabase/client";
+import {
+  ADDON_PACKS,
+  getTierDisplayName,
+} from "@/lib/billing/config";
 import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
 import {
   CANVAS_THEME_ID,
@@ -12,7 +16,7 @@ import {
 import { treeCanvasSurfaceStyleForTheme } from "@/lib/themes/tree-canvas-surface-styles";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 const sans = "var(--font-dg-body), Lato, sans-serif";
@@ -62,6 +66,49 @@ const CREATE_TREE_VIBE_SECTION_HELP =
 const CREATE_TREE_CANVAS_SECTION_HELP =
   "Your canvas theme controls how your family tree looks — the visual style of the tree itself, plus headers and profile frames on each person's page. This is purely cosmetic and can be changed any time without affecting your data.";
 
+type TodayHistoryItem = {
+  id: string;
+  personName: string;
+  eventType: string;
+  eventDateLabel: string;
+  storyFull: string | null;
+  description: string | null;
+  notes: string | null;
+};
+
+const DUMMY_TODAY_HISTORY: TodayHistoryItem[] = [
+  {
+    id: "dummy-1",
+    personName: "Eliza Holloway",
+    eventType: "Birth",
+    eventDateLabel: "Apr 25, 1882",
+    storyFull:
+      "Eliza Holloway arrived just before dawn while spring rain tapped the roofline, and the parish entry fixed her beginning in careful ink.",
+    description: null,
+    notes: null,
+  },
+  {
+    id: "dummy-2",
+    personName: "Thomas Garrett",
+    eventType: "Land Deed",
+    eventDateLabel: "Apr 24, 1819",
+    storyFull: null,
+    description:
+      "Purchased 34.5 acres along the eastern ridge near Randolph County.",
+    notes: null,
+  },
+  {
+    id: "dummy-3",
+    personName: "Mary Anne Ford",
+    eventType: "Residence",
+    eventDateLabel: "Apr 28, 1900",
+    storyFull: null,
+    description: null,
+    notes:
+      "Listed with husband John Ford and two children in the census household.",
+  },
+];
+
 type VibeId = (typeof VIBES)[number]["id"];
 
 function toVibeId(raw: string): VibeId {
@@ -75,6 +122,15 @@ function toCanvasThemeId(raw: string): CanvasThemeId {
   if (raw === "roots") return "heirloom";
   const t = CANVAS_THEME_OPTIONS.find((x) => x.id === raw);
   return t ? t.id : DEFAULT_CANVAS_THEME_ID;
+}
+
+function teaserFromHistoryItem(item: TodayHistoryItem): string {
+  const first =
+    item.storyFull?.trim() ?? item.description?.trim() ?? item.notes?.trim() ?? "";
+  if (first !== "") {
+    return first.length > 128 ? `${first.slice(0, 125)}…` : first;
+  }
+  return `${item.personName} — ${item.eventType} (${item.eventDateLabel}).`;
 }
 
 /**
@@ -222,6 +278,22 @@ export default function MyTreesShell({
   const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [billingLoading, setBillingLoading] = useState(true);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [billingSnapshot, setBillingSnapshot] = useState<{
+    tier: "basic" | "pro" | "max" | "possessed";
+    subscriptionCredits: number;
+    addonCredits: number;
+    totalCredits: number;
+    canUseExtraction: boolean;
+    monthlyResetAt: string | null;
+  } | null>(null);
+  const [billingWorking, setBillingWorking] = useState<null | "addon">(
+    null
+  );
+  const [addonModalOpen, setAddonModalOpen] = useState(false);
+  const [selectedAddonPack, setSelectedAddonPack] =
+    useState<keyof typeof ADDON_PACKS>("credits_250");
 
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
@@ -229,6 +301,53 @@ export default function MyTreesShell({
     router.push("/login");
     router.refresh();
   }, [router]);
+
+  const refreshBilling = useCallback(async () => {
+    setBillingLoading(true);
+    try {
+      const response = await fetch("/api/billing/status", { method: "GET" });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error === "string" ? data.error : "Could not load billing status."
+        );
+      }
+      setBillingSnapshot(data.snapshot ?? null);
+      setBillingError(null);
+    } catch (error) {
+      setBillingError(
+        error instanceof Error ? error.message : "Could not load billing status."
+      );
+    } finally {
+      setBillingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBilling();
+  }, [refreshBilling]);
+
+  async function openCheckout(mode: "subscription" | "addon") {
+    setBillingWorking("addon");
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, addon_pack: selectedAddonPack }),
+      });
+      const data = await response.json();
+      if (!response.ok || typeof data.url !== "string") {
+        throw new Error(data?.error ?? "Could not create checkout session.");
+      }
+      window.location.href = data.url;
+    } catch (error) {
+      setBillingError(
+        error instanceof Error ? error.message : "Could not create checkout session."
+      );
+    } finally {
+      setBillingWorking(null);
+    }
+  }
 
   const heroBtnBase: CSSProperties = {
     fontFamily: sans,
@@ -476,6 +595,14 @@ export default function MyTreesShell({
               background-color: var(--dg-parchment) !important;
               border-color: var(--dg-brown-border) !important;
             }
+            .dg-settings-btn {
+              transition: transform 0.2s ease, color 0.2s ease, filter 0.2s ease;
+            }
+            .dg-settings-btn:hover {
+              color: var(--dg-brown-dark) !important;
+              transform: translateY(-1px);
+              filter: drop-shadow(0 2px 6px rgb(var(--dg-shadow-rgb) / 0.22));
+            }
             .dg-delete-tree-btn:hover {
               color: var(--dg-danger) !important;
             }
@@ -499,6 +626,22 @@ export default function MyTreesShell({
             }
             .dark .dg-tree-list-card-wrap:hover,
             .dark .dg-tree-list-card-wrap:focus-within {
+              box-shadow:
+                0 22px 52px rgba(0, 0, 0, 0.42),
+                0 10px 26px rgba(0, 0, 0, 0.28);
+            }
+            .dg-history-card {
+              transition: transform 0.22s ease, box-shadow 0.22s ease;
+            }
+            .dg-history-card:hover,
+            .dg-history-card:focus-within {
+              transform: translateY(-3px);
+              box-shadow:
+                0 18px 44px rgb(var(--dg-shadow-rgb) / 0.28),
+                0 8px 22px rgb(var(--dg-shadow-rgb) / 0.16);
+            }
+            .dark .dg-history-card:hover,
+            .dark .dg-history-card:focus-within {
               box-shadow:
                 0 22px 52px rgba(0, 0, 0, 0.42),
                 0 10px 26px rgba(0, 0, 0, 0.28);
@@ -566,10 +709,220 @@ export default function MyTreesShell({
           >
             Sign out
           </button>
+          <Link
+            href="/dashboard/account"
+            className="dg-settings-btn ml-1 inline-flex h-8 w-8 shrink-0 items-center justify-center"
+            style={{
+              fontFamily: sans,
+              color: colors.brownMid,
+            }}
+            aria-label="Account settings"
+            title="Account settings"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </Link>
         </div>
       </nav>
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <section
+          className="mb-6 rounded-lg border p-4 sm:p-5"
+          style={{
+            borderColor: colors.brownBorder,
+            backgroundColor: colors.parchment,
+            boxShadow: "0 6px 20px rgb(var(--dg-shadow-rgb) / 0.07)",
+          }}
+        >
+          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="self-center space-y-3">
+              <div
+                className="rounded-md border p-3"
+                style={{
+                  borderColor: colors.brownBorder,
+                  backgroundColor: colors.cream,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: sans,
+                    fontSize: "0.75rem",
+                    color: colors.brownMuted,
+                  }}
+                >
+                  Monthly credits
+                </p>
+                <p
+                  style={{
+                    fontFamily: serif,
+                    fontSize: "1.05rem",
+                    color: colors.brownDark,
+                  }}
+                >
+                  {billingSnapshot?.subscriptionCredits ?? "—"}
+                </p>
+              </div>
+
+              <div
+                className="relative rounded-md border p-3"
+                style={{
+                  borderColor: colors.brownBorder,
+                  backgroundColor: colors.cream,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: sans,
+                    fontSize: "0.75rem",
+                    color: colors.brownMuted,
+                  }}
+                >
+                  Add-on credits
+                </p>
+                <p
+                  style={{
+                    fontFamily: serif,
+                    fontSize: "1.05rem",
+                    color: colors.brownDark,
+                  }}
+                >
+                  {billingSnapshot?.addonCredits ?? "—"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAddonModalOpen(true)}
+                  className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border text-base font-semibold"
+                  style={{
+                    fontFamily: sans,
+                    borderColor: colors.brownBorder,
+                    color: colors.brownDark,
+                    backgroundColor: colors.parchment,
+                  }}
+                  aria-label="Buy add-on credits"
+                  title="Buy add-on credits"
+                >
+                  +
+                </button>
+              </div>
+
+              <p
+                className="px-0.5 text-xs"
+                style={{ fontFamily: sans, color: colors.brownMuted }}
+              >
+                Plan:{" "}
+                {billingSnapshot ? getTierDisplayName(billingSnapshot.tier) : "—"}
+              </p>
+            </div>
+
+            <div
+              className="rounded-md border p-3"
+              style={{
+                borderColor: colors.brownBorder,
+                backgroundColor: colors.cream,
+              }}
+            >
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3
+                  className="text-base font-bold sm:text-lg"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Today in Your History
+                </h3>
+              </div>
+
+              {DUMMY_TODAY_HISTORY.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {DUMMY_TODAY_HISTORY.slice(0, 3).map((item) => (
+                    <article
+                      key={item.id}
+                      className="dg-history-card rounded-md border p-2.5"
+                      style={{
+                        borderColor: colors.brownBorder,
+                        backgroundColor: "var(--dg-parchment)",
+                      }}
+                    >
+                      <p
+                        className="text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      >
+                        {item.eventDateLabel}
+                      </p>
+                      <p
+                        className="mt-1 text-sm font-bold"
+                        style={{ fontFamily: serif, color: colors.brownDark }}
+                      >
+                        {item.personName}
+                      </p>
+                      <p
+                        className="text-xs"
+                        style={{ fontFamily: sans, color: colors.brownMid }}
+                      >
+                        {item.eventType}
+                      </p>
+                      <p
+                        className="mt-1 text-xs leading-relaxed"
+                        style={{ fontFamily: sans, color: colors.brownDark }}
+                      >
+                        {teaserFromHistoryItem(item)}
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-2 text-xs underline underline-offset-2"
+                        style={{ fontFamily: sans, color: colors.brownOutline }}
+                      >
+                        View story
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="rounded-md border p-3 text-sm"
+                  style={{
+                    fontFamily: sans,
+                    borderColor: colors.brownBorder,
+                    color: colors.brownMuted,
+                    backgroundColor: "var(--dg-parchment)",
+                  }}
+                >
+                  Nothing in range yet. We check nearby dates across past years and
+                  will surface events when they are available.
+                </div>
+              )}
+
+              {billingLoading ? (
+                <p
+                  className="mt-2 text-xs"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Refreshing credit balances…
+                </p>
+              ) : null}
+              {billingError ? (
+                <p
+                  className="mt-2 text-sm"
+                  style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                >
+                  {billingError}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
         {treesErrorMessage ? (
           <p
             className="mb-6 rounded-lg border px-4 py-3 text-sm"
@@ -1008,6 +1361,93 @@ export default function MyTreesShell({
           </section>
         </div>
       </div>
+
+      {addonModalOpen ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto overscroll-y-contain p-4"
+          style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="addon-modal-title"
+        >
+          <div
+            className="my-8 w-full max-w-lg rounded-lg border p-5 shadow-xl"
+            style={{
+              backgroundColor: colors.parchment,
+              borderColor: colors.brownBorder,
+              boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="addon-modal-title"
+              className="text-xl font-bold sm:text-2xl"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Buy add-on credits
+            </h2>
+            <p
+              className="mt-2 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Choose a credit pack, then continue to Stripe checkout.
+            </p>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {Object.entries(ADDON_PACKS).map(([packId, pack]) => {
+                const isSelected = selectedAddonPack === packId;
+                return (
+                  <button
+                    key={packId}
+                    type="button"
+                    onClick={() =>
+                      setSelectedAddonPack(packId as keyof typeof ADDON_PACKS)
+                    }
+                    className="rounded-md border px-3 py-2 text-left"
+                    style={{
+                      borderColor: isSelected
+                        ? colors.brownOutline
+                        : colors.brownBorder,
+                      backgroundColor: isSelected
+                        ? "var(--dg-parchment-deep)"
+                        : colors.cream,
+                      color: colors.brownDark,
+                    }}
+                  >
+                    <p style={{ fontFamily: serif, fontWeight: 700 }}>
+                      {pack.label}
+                    </p>
+                    <p style={{ fontFamily: sans, fontSize: "0.85rem" }}>
+                      ${pack.price.toFixed(2)}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                style={btnPrimaryModal}
+                disabled={billingWorking !== null}
+                onClick={() => void openCheckout("addon")}
+              >
+                {billingWorking === "addon"
+                  ? "Opening checkout…"
+                  : "Checkout"}
+              </button>
+              <button
+                type="button"
+                style={btnOutline}
+                disabled={billingWorking !== null}
+                onClick={() => setAddonModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {vibeModalOpen ? (
         <div
