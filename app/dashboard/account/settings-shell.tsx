@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
-  ADDON_PACKS,
   getTierDisplayName,
   MEMBERSHIP_TIER_ORDER,
   TIER_DEFINITIONS,
@@ -16,6 +16,7 @@ const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 const sans = "var(--font-dg-body), Lato, sans-serif";
 
 export default function AccountSettingsShell() {
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const [billingLoading, setBillingLoading] = useState(true);
   const [billingError, setBillingError] = useState<string | null>(null);
@@ -26,15 +27,16 @@ export default function AccountSettingsShell() {
     totalCredits: number;
     canUseExtraction: boolean;
     monthlyResetAt: string | null;
+    hasPaidAccess: boolean;
+    subscriptionStatus: string;
+    currentPeriodEnd: string | null;
   } | null>(null);
   const [billingWorking, setBillingWorking] = useState<
-    null | "subscription" | "addon" | "portal" | "pilot_grant" | "delete_account"
+    null | "subscription" | "portal" | "pilot_grant" | "delete_account"
   >(null);
   const [selectedTier, setSelectedTier] = useState<MembershipTier>("pro");
   const [selectedInterval, setSelectedInterval] =
     useState<BillingInterval>("monthly");
-  const [selectedAddonPack, setSelectedAddonPack] =
-    useState<keyof typeof ADDON_PACKS>("credits_250");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [identityLoading, setIdentityLoading] = useState(true);
@@ -73,6 +75,21 @@ export default function AccountSettingsShell() {
   useEffect(() => {
     void refreshBilling();
   }, []);
+  const billingReturn = searchParams.get("billing");
+  useEffect(() => {
+    if (billingReturn === "success" || billingReturn === "cancel") {
+      void refreshBilling();
+    }
+  }, [billingReturn]);
+  useEffect(() => {
+    const onFocus = () => {
+      void refreshBilling();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -86,8 +103,18 @@ export default function AccountSettingsShell() {
         if (error) throw error;
         if (!mounted) return;
         setEmail(user?.email ?? "");
-        const raw = user?.user_metadata?.full_name;
-        setFullName(typeof raw === "string" ? raw : "");
+        const rawFullName = user?.user_metadata?.full_name;
+        const rawFirst = user?.user_metadata?.first_name;
+        const rawLast = user?.user_metadata?.last_name;
+        const synthesized =
+          typeof rawFirst === "string" || typeof rawLast === "string"
+            ? `${typeof rawFirst === "string" ? rawFirst : ""} ${typeof rawLast === "string" ? rawLast : ""}`.trim()
+            : "";
+        if (typeof rawFullName === "string" && rawFullName.trim() !== "") {
+          setFullName(rawFullName);
+        } else {
+          setFullName(synthesized);
+        }
       } catch (err) {
         if (!mounted) return;
         setIdentityError(
@@ -106,9 +133,16 @@ export default function AccountSettingsShell() {
     setIdentityWorking("profile");
     setIdentityError(null);
     setIdentityMessage(null);
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    const firstName = parts[0] ?? "";
+    const lastName = parts.slice(1).join(" ");
     try {
       const { error } = await supabase.auth.updateUser({
-        data: { full_name: fullName.trim() },
+        data: {
+          full_name: fullName.trim(),
+          first_name: firstName,
+          last_name: lastName,
+        },
       });
       if (error) throw error;
       setIdentityMessage("Name updated.");
@@ -219,17 +253,17 @@ export default function AccountSettingsShell() {
         ? "bug@deadgossip.app"
         : "support@deadgossip.app";
 
-  async function openCheckout(mode: "subscription" | "addon") {
-    setBillingWorking(mode);
+  async function openCheckout() {
+    setBillingWorking("subscription");
     try {
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          mode === "subscription"
-            ? { mode, tier: selectedTier, interval: selectedInterval }
-            : { mode, addon_pack: selectedAddonPack }
-        ),
+        body: JSON.stringify({
+          mode: "subscription",
+          tier: selectedTier,
+          interval: selectedInterval,
+        }),
       });
       const data = await response.json();
       if (!response.ok || typeof data.url !== "string") {
@@ -311,6 +345,31 @@ export default function AccountSettingsShell() {
   }
 
   const tierPrices = TIER_DEFINITIONS[selectedTier].prices;
+  const activeTier = billingSnapshot?.tier ?? "basic";
+  const activeMonthlyCredits =
+    TIER_DEFINITIONS[activeTier as MembershipTier].monthlyCredits;
+  const selectedMonthlyCredits = TIER_DEFINITIONS[selectedTier].monthlyCredits;
+  const upgradeDeltaMonthly = Math.max(
+    0,
+    selectedMonthlyCredits - activeMonthlyCredits
+  );
+  const currentPeriodEndMs = billingSnapshot?.currentPeriodEnd
+    ? Date.parse(billingSnapshot.currentPeriodEnd)
+    : NaN;
+  const remainingFraction =
+    Number.isFinite(currentPeriodEndMs) && currentPeriodEndMs > Date.now()
+      ? Math.min(
+          1,
+          Math.max(
+            0,
+            (currentPeriodEndMs - Date.now()) /
+              (selectedInterval === "annual"
+                ? 365 * 24 * 60 * 60 * 1000
+                : 30 * 24 * 60 * 60 * 1000)
+          )
+        )
+      : 0;
+  const proratedUpgradePreview = Math.floor(upgradeDeltaMonthly * remainingFraction);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
@@ -338,9 +397,8 @@ export default function AccountSettingsShell() {
         }}
       >
         <p className="text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
-          Manage membership, buy add-on credits, and update billing details.
+          Manage your membership, payment details, and account settings.
         </p>
-
         {billingLoading ? (
           <p className="mt-3 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}>
             Loading billing status…
@@ -362,6 +420,16 @@ export default function AccountSettingsShell() {
               <p style={{ fontFamily: serif, fontSize: "1.05rem", color: "var(--dg-brown-dark)" }}>{billingSnapshot.addonCredits}</p>
             </div>
           </div>
+        ) : null}
+        {billingReturn === "success" ? (
+          <p className="mt-3 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-dark)" }}>
+            Checkout completed. Billing status has been refreshed.
+          </p>
+        ) : null}
+        {billingReturn === "cancel" ? (
+          <p className="mt-3 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}>
+            Checkout was canceled, so no billing changes were applied.
+          </p>
         ) : null}
 
         {billingError ? (
@@ -408,43 +476,18 @@ export default function AccountSettingsShell() {
           <button
             type="button"
             disabled={billingWorking !== null}
-            onClick={() => void openCheckout("subscription")}
+            onClick={() => void openCheckout()}
             className="rounded-md border px-4 py-2 text-sm font-semibold"
             style={{ fontFamily: sans, borderColor: "var(--dg-brown-outline)", color: "var(--dg-brown-dark)" }}
           >
             {billingWorking === "subscription" ? "Opening checkout…" : "Upgrade membership"}
           </button>
-        </div>
-
-        <div className="mt-5">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
-            Add-on credits
-          </p>
-          <select
-            value={selectedAddonPack}
-            onChange={(e) =>
-              setSelectedAddonPack(e.target.value as keyof typeof ADDON_PACKS)
-            }
-            className="w-full rounded-md px-3 py-2 sm:max-w-xs"
-            style={{ fontFamily: sans, border: "1px solid var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}
-          >
-            {Object.entries(ADDON_PACKS).map(([packId, pack]) => (
-              <option key={packId} value={packId}>
-                {pack.label} (${pack.price.toFixed(2)})
-              </option>
-            ))}
-          </select>
-          <div className="mt-2">
-            <button
-              type="button"
-              disabled={billingWorking !== null}
-              onClick={() => void openCheckout("addon")}
-              className="rounded-md border px-4 py-2 text-sm font-semibold"
-              style={{ fontFamily: sans, borderColor: "var(--dg-brown-outline)", color: "var(--dg-brown-dark)" }}
-            >
-              {billingWorking === "addon" ? "Opening checkout…" : "Buy add-on credits"}
-            </button>
-          </div>
+          {billingSnapshot?.hasPaidAccess && upgradeDeltaMonthly > 0 ? (
+            <p className="mt-2 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}>
+              Upgrade preview: about {proratedUpgradePreview} non-expiring add-on credits now, then{" "}
+              {selectedMonthlyCredits} monthly credits at your next billing reset.
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">

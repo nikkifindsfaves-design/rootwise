@@ -563,7 +563,7 @@ export default function DocumentUploadSection({
       ) : null}
       {extractionBlockedByPlan ? (
         <p className="text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-mid)" }}>
-          Your current plan does not include extraction. Upgrade to Pro or Max to use Analyze.
+          Your current plan does not include extraction. Upgrade to Pro, Max, or Possessed to use Analyze.
         </p>
       ) : null}
       <div>

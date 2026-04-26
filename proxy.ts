@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({
+  const response = NextResponse.next({
     request: {
       headers: request.headers,
     },
@@ -33,11 +33,46 @@ export async function proxy(request: NextRequest) {
   if (
     !user &&
     (request.nextUrl.pathname.startsWith("/dashboard") ||
-      request.nextUrl.pathname.startsWith("/review"))
+      request.nextUrl.pathname.startsWith("/review") ||
+      request.nextUrl.pathname.startsWith("/onboarding"))
   ) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
+    redirectUrl.searchParams.set("reason", "auth_required");
     return NextResponse.redirect(redirectUrl);
+  }
+
+  if (
+    user &&
+    (request.nextUrl.pathname.startsWith("/dashboard") ||
+      request.nextUrl.pathname.startsWith("/review")) &&
+    !request.nextUrl.pathname.startsWith("/dashboard/account")
+  ) {
+    const { data: subscription } = await supabase
+      .from("subscriptions")
+      .select("status, current_period_end")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const status = (subscription?.status ?? "inactive") as string;
+    const currentPeriodEnd = subscription?.current_period_end
+      ? Date.parse(subscription.current_period_end)
+      : NaN;
+    const hasAccess =
+      status === "active" ||
+      (status === "canceled" &&
+        Number.isFinite(currentPeriodEnd) &&
+        currentPeriodEnd > Date.now());
+
+    if (!hasAccess) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/onboarding";
+      if (!hasAccess) {
+        redirectUrl.searchParams.set("paywall", "1");
+        redirectUrl.searchParams.set("reason", "subscription_required");
+      }
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return response;

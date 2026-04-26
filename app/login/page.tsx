@@ -9,6 +9,10 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import {
+  classifySignupOutcome,
+  type SignupOutcomeState,
+} from "@/lib/auth/signup-outcome";
 
 const leftBg = "#100d0b";
 const goldMuted = "#a08060";
@@ -188,9 +192,13 @@ function LoginPageContent() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
+  const [signupState, setSignupState] =
+    useState<SignupOutcomeState>("signup_idle");
 
   const [wlName, setWlName] = useState("");
   const [wlEmail, setWlEmail] = useState("");
@@ -220,26 +228,99 @@ function LoginPageContent() {
     router.push("/dashboard");
   }
 
+  async function resendVerificationForSignup() {
+    setAuthError(null);
+    setAuthSuccess(null);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim().toLowerCase(),
+      options: {
+        emailRedirectTo: `${window.location.origin}/onboarding`,
+      },
+    });
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setAuthSuccess("Verification email sent. Use the link, then continue.");
+  }
+
+  async function sendMagicLinkForSignup() {
+    setAuthError(null);
+    setAuthSuccess(null);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim().toLowerCase(),
+      options: {
+        emailRedirectTo: `${window.location.origin}/onboarding`,
+      },
+    });
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setAuthSuccess("Magic link sent. Open it to continue onboarding.");
+  }
+
   async function handleSignUp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthError(null);
     setAuthSuccess(null);
     setIsAuthLoading(true);
+    setSignupState("signup_submitting");
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        },
+        emailRedirectTo: `${window.location.origin}/onboarding`,
+      },
+    });
+
+    const outcome = classifySignupOutcome({
+      hasSession: Boolean(data.session),
+      hasUser: Boolean(data.user),
+      error,
+      confirmEmailFallback: false,
+    });
+    console.info("[auth] signup_outcome", {
+      outcome,
+      hasSession: Boolean(data.session),
+      hasUser: Boolean(data.user),
+      code: error?.code ?? null,
+      message: error?.message ?? null,
     });
 
     setIsAuthLoading(false);
+    setSignupState(outcome);
     if (error) {
       setAuthError(error.message);
       return;
     }
 
-    setAuthSuccess(
-      "Account created. Check your email for verification, then sign in."
-    );
+    if (outcome === "signup_success_with_session") {
+      router.push("/onboarding?signup_state=session");
+      return;
+    }
+
+    if (outcome === "signup_requires_verification") {
+      setAuthSuccess("Account created. Verify your email to continue.");
+      return;
+    }
+    if (outcome === "signup_rate_limited") {
+      setAuthError("Too many attempts right now. Please wait a minute and retry.");
+      return;
+    }
+    if (outcome === "signup_recoverable_no_session") {
+      setAuthError("Your account exists, but we could not start your session.");
+      return;
+    }
+
+    setAuthError("Signup could not complete. Please retry.");
   }
 
   async function handleWaitlist(event: FormEvent<HTMLFormElement>) {
@@ -298,7 +379,7 @@ function LoginPageContent() {
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-[var(--dg-brown-muted)]">
               {signUpMode
-                ? "Create your Dead Gossip account to start your trial."
+                ? "Create your Dead Gossip account, then choose a membership plan."
                 : "Use the email and password for your Dead Gossip account."}
             </p>
 
@@ -307,6 +388,46 @@ function LoginPageContent() {
               className="mt-8 flex flex-1 flex-col"
             >
               <div className="space-y-4">
+                {signUpMode ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="auth-first-name"
+                        className="mb-1 block text-sm font-medium text-[var(--dg-brown-dark)]"
+                      >
+                        First name
+                      </label>
+                      <input
+                        id="auth-first-name"
+                        type="text"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        required
+                        autoComplete="given-name"
+                        className="w-full rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-[var(--dg-brown-dark)] outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
+                        placeholder="First"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="auth-last-name"
+                        className="mb-1 block text-sm font-medium text-[var(--dg-brown-dark)]"
+                      >
+                        Last name
+                      </label>
+                      <input
+                        id="auth-last-name"
+                        type="text"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        required
+                        autoComplete="family-name"
+                        className="w-full rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-[var(--dg-brown-dark)] outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
+                        placeholder="Last"
+                      />
+                    </div>
+                  </div>
+                ) : null}
                 <div>
                   <label
                     htmlFor="auth-email"
@@ -354,6 +475,45 @@ function LoginPageContent() {
                 <p className="mt-4 text-sm text-[var(--dg-brown-dark)]">
                   {authSuccess}
                 </p>
+              ) : null}
+              {(signupState === "signup_requires_verification" ||
+                signupState === "signup_recoverable_no_session") &&
+              !isAuthLoading ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void resendVerificationForSignup()}
+                    className="rounded-md border px-3 py-1.5 text-xs font-semibold"
+                    style={{
+                      borderColor: "var(--dg-brown-border)",
+                      color: "var(--dg-brown-dark)",
+                    }}
+                  >
+                    Resend verification
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void sendMagicLinkForSignup()}
+                    className="rounded-md border px-3 py-1.5 text-xs font-semibold"
+                    style={{
+                      borderColor: "var(--dg-brown-border)",
+                      color: "var(--dg-brown-dark)",
+                    }}
+                  >
+                    Send magic link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/login?signin=1")}
+                    className="rounded-md border px-3 py-1.5 text-xs font-semibold"
+                    style={{
+                      borderColor: "var(--dg-brown-border)",
+                      color: "var(--dg-brown-dark)",
+                    }}
+                  >
+                    Sign in now
+                  </button>
+                </div>
               ) : null}
 
               <div className="mt-6">
@@ -532,6 +692,14 @@ function LoginPageContent() {
                 className="font-medium text-[var(--dg-brown-outline)] underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
               >
                 Sign in to your account
+              </Link>
+            </p>
+            <p className="mt-3 text-center text-sm">
+              <Link
+                href="/login?signup=1"
+                className="font-medium text-[var(--dg-brown-outline)] underline decoration-[var(--dg-paper-border)] underline-offset-4 hover:text-[var(--dg-brown-dark)]"
+              >
+                Create an account
               </Link>
             </p>
 

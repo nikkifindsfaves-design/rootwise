@@ -15,7 +15,7 @@ import {
 } from "@/lib/themes/canvas-themes";
 import { treeCanvasSurfaceStyleForTheme } from "@/lib/themes/tree-canvas-surface-styles";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
@@ -247,6 +247,7 @@ export default function MyTreesShell({
   personsErrorMessage: string | null;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { theme, toggleTheme } = useTheme();
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -325,6 +326,19 @@ export default function MyTreesShell({
 
   useEffect(() => {
     void refreshBilling();
+  }, [refreshBilling]);
+  useEffect(() => {
+    const billingReturn = searchParams.get("billing");
+    if (billingReturn === "success" || billingReturn === "cancel") {
+      void refreshBilling();
+    }
+  }, [refreshBilling, searchParams]);
+  useEffect(() => {
+    const onFocus = () => {
+      void refreshBilling();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refreshBilling]);
 
   async function openCheckout(mode: "subscription" | "addon") {

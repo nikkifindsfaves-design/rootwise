@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   debitCreditsForAction,
   getCreditSnapshotForUser,
+  getSubscriptionAccessStateForUser,
 } from "@/lib/billing/credits";
 import {
   getIsCensusRecord,
@@ -114,6 +115,16 @@ export async function POST(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const access = await getSubscriptionAccessStateForUser(user.id);
+  if (!access.hasAccess) {
+    return NextResponse.json(
+      {
+        error: "An active membership is required to generate stories.",
+        code: "membership_required",
+      },
+      { status: 402 }
+    );
   }
 
   const snapshot = await getCreditSnapshotForUser(user.id);

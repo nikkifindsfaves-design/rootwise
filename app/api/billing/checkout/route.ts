@@ -12,6 +12,7 @@ type RequestBody = {
   tier?: string;
   interval?: "monthly" | "annual";
   addon_pack?: keyof typeof ADDON_PACKS;
+  return_to?: "dashboard" | "onboarding";
 };
 
 export async function POST(request: NextRequest) {
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
 
   const stripe = getStripeServerClient();
   const origin = request.nextUrl.origin;
+  const returnTo = body.return_to === "onboarding" ? "onboarding" : "dashboard";
 
   const lineItems =
     mode === "subscription"
@@ -61,10 +63,11 @@ export async function POST(request: NextRequest) {
 
   const session = await stripe.checkout.sessions.create({
     mode: mode === "subscription" ? "subscription" : "payment",
+    payment_method_types: ["card"],
     client_reference_id: user.id,
     customer_email: user.email ?? undefined,
-    success_url: `${origin}/dashboard?billing=success`,
-    cancel_url: `${origin}/dashboard?billing=cancel`,
+    success_url: `${origin}/${returnTo}?billing=success`,
+    cancel_url: `${origin}/${returnTo}?billing=cancel`,
     line_items: lineItems,
     metadata: {
       user_id: user.id,

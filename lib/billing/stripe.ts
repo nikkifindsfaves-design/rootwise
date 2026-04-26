@@ -32,3 +32,21 @@ export function getStripePriceIdForAddon(pack: keyof typeof ADDON_PACKS): string
   }
   return value;
 }
+
+export function getTierIntervalFromPriceId(priceId: string): {
+  tier: MembershipTier;
+  interval: BillingInterval;
+} | null {
+  const tiers: MembershipTier[] = ["basic", "pro", "max", "possessed"];
+  const intervals: BillingInterval[] = ["monthly", "annual"];
+  for (const tier of tiers) {
+    for (const interval of intervals) {
+      const envKey = `STRIPE_PRICE_${tier.toUpperCase()}_${interval.toUpperCase()}`;
+      const configuredPriceId = process.env[envKey];
+      if (configuredPriceId && configuredPriceId === priceId) {
+        return { tier, interval };
+      }
+    }
+  }
+  return null;
+}

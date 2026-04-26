@@ -16,6 +16,7 @@ type BalanceRow = {
 type SubscriptionRow = {
   tier: MembershipTier;
   status: string;
+  current_period_end?: string | null;
 };
 
 export type CreditSnapshot = {
@@ -25,7 +26,58 @@ export type CreditSnapshot = {
   totalCredits: number;
   canUseExtraction: boolean;
   monthlyResetAt: string | null;
+  hasPaidAccess: boolean;
+  subscriptionStatus: string;
+  currentPeriodEnd: string | null;
 };
+
+export type SubscriptionAccessState = {
+  hasAccess: boolean;
+  status: string;
+  currentPeriodEnd: string | null;
+  tier: MembershipTier;
+};
+
+function isFutureIsoDate(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
+export function hasPaidAccessFromSubscription(
+  subscription: Pick<SubscriptionRow, "status" | "current_period_end"> | null | undefined
+): boolean {
+  if (!subscription) return false;
+  if (subscription.status === "active") return true;
+  if (subscription.status === "canceled") {
+    return isFutureIsoDate(subscription.current_period_end ?? null);
+  }
+  return false;
+}
+
+export async function getSubscriptionAccessStateForUser(
+  userId: string
+): Promise<SubscriptionAccessState> {
+  const supabase = await createClient();
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("tier, status, current_period_end")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const row = (subscription ?? {
+    tier: "basic",
+    status: "inactive",
+    current_period_end: null,
+  }) as SubscriptionRow;
+
+  return {
+    hasAccess: hasPaidAccessFromSubscription(row),
+    status: row.status,
+    currentPeriodEnd: row.current_period_end ?? null,
+    tier: row.tier,
+  };
+}
 
 export async function getCreditSnapshotForUser(userId: string): Promise<CreditSnapshot> {
   const supabase = await createClient();
@@ -38,7 +90,7 @@ export async function getCreditSnapshotForUser(userId: string): Promise<CreditSn
       .maybeSingle(),
     supabase
       .from("subscriptions")
-      .select("tier, status")
+      .select("tier, status, current_period_end")
       .eq("user_id", userId)
       .maybeSingle(),
   ]);
@@ -52,10 +104,10 @@ export async function getCreditSnapshotForUser(userId: string): Promise<CreditSn
   const subscriptionRow = (subscription ?? {
     tier: "basic",
     status: "inactive",
+    current_period_end: null,
   }) as SubscriptionRow;
 
-  const isPaid =
-    subscriptionRow.status === "active" || subscriptionRow.status === "trialing";
+  const isPaid = hasPaidAccessFromSubscription(subscriptionRow);
   const tier = isPaid ? subscriptionRow.tier : "basic";
   const canUseExtraction = tier !== "basic";
   const totalCredits = balanceRow.subscription_credits + balanceRow.addon_credits;
@@ -67,6 +119,9 @@ export async function getCreditSnapshotForUser(userId: string): Promise<CreditSn
     totalCredits,
     canUseExtraction,
     monthlyResetAt: balanceRow.monthly_reset_at,
+    hasPaidAccess: isPaid,
+    subscriptionStatus: subscriptionRow.status,
+    currentPeriodEnd: subscriptionRow.current_period_end ?? null,
   };
 }
 
@@ -83,7 +138,7 @@ export function validateActionAllowedByTier(
   if (tier === "basic" && extractionAction) {
     return {
       allowed: false,
-      reason: "Extraction is available on Pro and Max plans only.",
+      reason: "Extraction is available on Pro, Max, and Possessed plans only.",
     };
   }
   return { allowed: true, reason: null };
