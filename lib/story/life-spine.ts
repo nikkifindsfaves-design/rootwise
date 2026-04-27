@@ -140,6 +140,27 @@ const REL_TYPES_INCLUDE_PEER: Set<LifeSpineEntry["relationship_to_anchor"]> =
     "niece/nephew",
   ]);
 
+const ALLOWED_RELATIONSHIP_TO_ANCHOR: Set<LifeSpineEntry["relationship_to_anchor"]> =
+  new Set([
+    "self",
+    "child",
+    "spouse",
+    "parent",
+    "sibling",
+    "grandparent",
+    "grandchild",
+    "aunt/uncle",
+    "niece/nephew",
+    "other",
+  ]);
+
+function finalizeSpineEntries(entries: LifeSpineEntry[]): LifeSpineEntry[] {
+  const sorted = sortSpineEntries(entries);
+  return sorted.length > SPINE_MAX_ROWS
+    ? sorted.slice(sorted.length - SPINE_MAX_ROWS)
+    : sorted;
+}
+
 type ReviewCardForSpine = {
   key: string;
   form: {
@@ -194,6 +215,7 @@ export function buildReviewLifeSpineForCard(params: {
 
   const out: LifeSpineEntry[] = [];
   const peerKeyToRel = new Map<string, LifeSpineEntry["relationship_to_anchor"]>();
+  const cardByKey = new Map(cards.map((card) => [card.key, card]));
 
   for (const rel of anchor.relationships) {
     if (rel.relatedPeerIndex == null) continue;
@@ -239,15 +261,12 @@ export function buildReviewLifeSpineForCard(params: {
 
   appendCardEvents(anchor, "self");
   for (const [peerKey, relOut] of peerKeyToRel) {
-    const peer = cards.find((c) => c.key === peerKey);
+    const peer = cardByKey.get(peerKey);
     if (!peer) continue;
     appendCardEvents(peer, relOut);
   }
 
-  const sorted = sortSpineEntries(out);
-  return sorted.length > SPINE_MAX_ROWS
-    ? sorted.slice(sorted.length - SPINE_MAX_ROWS)
-    : sorted;
+  return finalizeSpineEntries(out);
 }
 
 function normalizeJoinedPlace(
@@ -350,7 +369,7 @@ export async function fetchLifeSpineFromDatabase(params: {
   const { data: eventRows, error: evErr } = await supabase
     .from("events")
     .select(
-      "person_id, event_type, event_date, notes, event_place:places!event_place_id(place_identity_id, township, county, state, country)"
+      "person_id, event_type, event_date, notes, event_place:places!event_place_id(township, county, state, country)"
     )
     .eq("user_id", userId)
     .in("person_id", uniqueIds);
@@ -366,7 +385,6 @@ export async function fetchLifeSpineFromDatabase(params: {
       notes: string | null;
       event_place?: unknown;
     };
-    const et0 = String(row.event_type ?? "");
     const subjectName = nameById.get(row.person_id);
     if (!subjectName) continue;
     const relToAnchor =
@@ -386,10 +404,7 @@ export async function fetchLifeSpineFromDatabase(params: {
     });
   }
 
-  const sorted = sortSpineEntries(out);
-  return sorted.length > SPINE_MAX_ROWS
-    ? sorted.slice(sorted.length - SPINE_MAX_ROWS)
-    : sorted;
+  return finalizeSpineEntries(out);
 }
 
 /**
@@ -447,7 +462,7 @@ export async function fetchLifeContextForPersonIds(params: {
   let q = supabase
     .from("events")
     .select(
-      "id, person_id, event_type, event_date, notes, event_place:places!event_place_id(place_identity_id, township, county, state, country)"
+      "id, person_id, event_type, event_date, notes, event_place:places!event_place_id(township, county, state, country)"
     )
     .eq("user_id", userId)
     .in("person_id", validIds);
@@ -488,10 +503,7 @@ export async function fetchLifeContextForPersonIds(params: {
     });
   }
 
-  const sorted = sortSpineEntries(out);
-  return sorted.length > SPINE_MAX_ROWS
-    ? sorted.slice(sorted.length - SPINE_MAX_ROWS)
-    : sorted;
+  return finalizeSpineEntries(out);
 }
 
 export function parseLifeSpineFromRequestBody(raw: unknown): LifeSpineEntry[] | null {
@@ -509,19 +521,9 @@ export function parseLifeSpineFromRequestBody(raw: unknown): LifeSpineEntry[] | 
     const event_type =
       typeof o.event_type === "string" ? o.event_type.trim() : "";
     if (!subject_name || !relationship_to_anchor || !event_type) continue;
-    const allowed = new Set([
-      "self",
-      "child",
-      "spouse",
-      "parent",
-      "sibling",
-      "grandparent",
-      "grandchild",
-      "aunt/uncle",
-      "niece/nephew",
-      "other",
-    ]);
-    const rel = allowed.has(relationship_to_anchor)
+    const rel = ALLOWED_RELATIONSHIP_TO_ANCHOR.has(
+      relationship_to_anchor as LifeSpineEntry["relationship_to_anchor"]
+    )
       ? (relationship_to_anchor as LifeSpineEntry["relationship_to_anchor"])
       : ("other" as const);
     const event_date =

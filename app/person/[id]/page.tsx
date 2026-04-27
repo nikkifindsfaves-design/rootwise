@@ -2311,7 +2311,7 @@ function PersonProfilePageBody({
   children,
 }: PersonProfilePageBodyProps) {
   const themeFontVars: CSSProperties & Record<string, string> =
-    canvasTheme === CANVAS_THEME_ID.STRING
+    canvasTheme === CANVAS_THEME_ID.EVIDENCE_BOARD
       ? {
           "--dg-font-heading": "var(--font-evidence-board)",
           "--dg-font-body": "var(--font-evidence-board-body)",

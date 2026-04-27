@@ -131,39 +131,44 @@ export function eventSignatureForSharedCluster(ev: MergeEventRow): string {
 export function migrateExtractedEventsToShared<T extends MergePersonCard>(
   cards: T[]
 ): { cards: T[]; shared: SharedEventDetailsState } {
-  const flat: MergeEventRow[] = [];
-  for (const c of cards) {
-    for (const ev of c.events) {
+  type SignatureStats = {
+    count: number;
+    firstEvent: MergeEventRow;
+    keys: string[];
+  };
+  const bySignature = new Map<string, SignatureStats>();
+  let best: SignatureStats | null = null;
+
+  for (const card of cards) {
+    for (const ev of card.events) {
       if (ev.eventType === "land") continue;
-      flat.push(ev);
+      const signature = eventSignatureForSharedCluster(ev);
+      const existing = bySignature.get(signature);
+      if (existing) {
+        existing.count += 1;
+        existing.keys.push(ev.key);
+        if (best == null || existing.count > best.count) {
+          best = existing;
+        }
+      } else {
+        const created: SignatureStats = {
+          count: 1,
+          firstEvent: ev,
+          keys: [ev.key],
+        };
+        bySignature.set(signature, created);
+        if (best == null) {
+          best = created;
+        }
+      }
     }
   }
 
-  if (flat.length === 0) {
+  if (best == null) {
     return { cards, shared: emptySharedEventDetails() };
   }
 
-  const sigOrder: string[] = [];
-  const bySig = new Map<string, MergeEventRow[]>();
-
-  for (const ev of flat) {
-    const s = eventSignatureForSharedCluster(ev);
-    if (!bySig.has(s)) {
-      bySig.set(s, []);
-      sigOrder.push(s);
-    }
-    bySig.get(s)!.push(ev);
-  }
-
-  let bestList = bySig.get(sigOrder[0]!)!;
-  for (const s of sigOrder) {
-    const list = bySig.get(s)!;
-    if (list.length > bestList.length) {
-      bestList = list;
-    }
-  }
-
-  const template = bestList[0]!;
+  const template = best.firstEvent;
   const shared: SharedEventDetailsState = {
     eventDate: template.eventDate,
     event_place_display: template.event_place_display,
@@ -172,7 +177,7 @@ export function migrateExtractedEventsToShared<T extends MergePersonCard>(
     eventNotes: "",
   };
 
-  const linkKeys = new Set(bestList.map((e) => e.key));
+  const linkKeys = new Set(best.keys);
   const nextCards = linkMatchingEventsToShared(
     cards,
     (ev) => linkKeys.has(ev.key),

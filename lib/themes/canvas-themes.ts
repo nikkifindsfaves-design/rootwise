@@ -12,31 +12,10 @@ export const CANVAS_THEME_IDS = [
 export type CanvasThemeId = (typeof CANVAS_THEME_IDS)[number];
 export const DEFAULT_CANVAS_THEME_ID: CanvasThemeId = CANVAS_THEME_IDS[0];
 export const CANVAS_THEME_ID = {
-  STRING: CANVAS_THEME_IDS[0],
+  EVIDENCE_BOARD: CANVAS_THEME_IDS[0],
   DEAD_GOSSIP: CANVAS_THEME_IDS[1],
   ROOTS: CANVAS_THEME_IDS[2],
 } as const;
-
-export const CANVAS_THEME_OPTIONS = [
-  {
-    id: CANVAS_THEME_ID.STRING,
-    name: "Evidence Board",
-    description: "Every connection mapped. Every photo pinned. The case is never closed.",
-    example: "Straightforward layout—names and lines stay easy to scan.",
-  },
-  {
-    id: CANVAS_THEME_ID.DEAD_GOSSIP,
-    name: "Dead Gossip",
-    description: "Taped up, marked up, impossible to put down.",
-    example: "Ink, margins, and quiet drama fit for a family chronicle.",
-  },
-  {
-    id: CANVAS_THEME_ID.ROOTS,
-    name: "Heirloom",
-    description: "Preserved on parchment, like something worth keeping.",
-    example: "Earth tones that feel like soil, bark, and old photographs.",
-  },
-] as const;
 
 export type PhotoFrameStyle = "polaroid" | "scrapbook" | "oval";
 
@@ -57,11 +36,17 @@ export type CanvasThemeProperties = {
 
 export type CanvasThemeDefinition = CanvasThemeProperties & {
   id: CanvasThemeId;
+  name: string;
+  description: string;
+  example: string;
 };
 
-export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
-  [CANVAS_THEME_ID.STRING]: {
-    id: CANVAS_THEME_ID.STRING,
+const CANVAS_THEME_DEFINITIONS = [
+  {
+    id: CANVAS_THEME_ID.EVIDENCE_BOARD,
+    name: "Evidence Board",
+    description: "Every connection mapped. Every photo pinned. The case is never closed.",
+    example: "Straightforward layout—names and lines stay easy to scan.",
     familyPanelTitle: "The Usual Suspects",
     timelineHeader: "The Case File",
     newEventButton: "+ New Intel",
@@ -69,8 +54,11 @@ export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
     diedLabel: "CASE CLOSED",
     photoFrameStyle: "polaroid",
   },
-  [CANVAS_THEME_ID.DEAD_GOSSIP]: {
+  {
     id: CANVAS_THEME_ID.DEAD_GOSSIP,
+    name: "Dead Gossip",
+    description: "Taped up, marked up, impossible to put down.",
+    example: "Ink, margins, and quiet drama fit for a family chronicle.",
     familyPanelTitle: "The Inner Circle",
     timelineHeader: "The Tea",
     newEventButton: "+ Spill",
@@ -78,8 +66,11 @@ export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
     diedLabel: "CHECKED OUT",
     photoFrameStyle: "scrapbook",
   },
-  [CANVAS_THEME_ID.ROOTS]: {
+  {
     id: CANVAS_THEME_ID.ROOTS,
+    name: "Heirloom",
+    description: "Preserved on parchment, like something worth keeping.",
+    example: "Earth tones that feel like soil, bark, and old photographs.",
     familyPanelTitle: "The Branch",
     timelineHeader: "The Chronicle",
     newEventButton: "+ Record It",
@@ -87,7 +78,26 @@ export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> = {
     diedLabel: "LAST LIGHT",
     photoFrameStyle: "oval",
   },
-};
+] as const satisfies readonly CanvasThemeDefinition[];
+
+export const CANVAS_THEME_OPTIONS = CANVAS_THEME_DEFINITIONS.map(
+  ({ id, name, description, example }) => ({
+    id,
+    name,
+    description,
+    example,
+  })
+) as readonly {
+  id: CanvasThemeId;
+  name: string;
+  description: string;
+  example: string;
+}[];
+
+export const CANVAS_THEMES: Record<CanvasThemeId, CanvasThemeDefinition> =
+  Object.fromEntries(
+    CANVAS_THEME_DEFINITIONS.map((definition) => [definition.id, definition])
+  ) as Record<CanvasThemeId, CanvasThemeDefinition>;
 
 export function isCanvasThemeId(value: string | null | undefined): value is CanvasThemeId {
   return !!value && (CANVAS_THEME_IDS as readonly string[]).includes(value);

@@ -4,11 +4,17 @@ import {
   type CanvasThemeId,
 } from "@/lib/themes/canvas-themes";
 
+const treeCanvasSurfaceStyleCache = new Map<string, CSSProperties>();
+
 /**
  * Bulletin corkboard: repeating cork photo under stacked translucent gradients.
  * Kept in sync with `TreeCanvas` so listing cards match the live tree surface.
  */
 export function treeCanvasCorkboardSurfaceStyle(isDark: boolean): CSSProperties {
+  const cacheKey = `corkboard:${isDark ? "dark" : "light"}`;
+  const cached = treeCanvasSurfaceStyleCache.get(cacheKey);
+  if (cached) return cached;
+
   const fiberA = isDark ? 0.075 : 0.055;
   const fiberB = isDark ? 0.065 : 0.048;
   const fibers: string[] = [
@@ -51,47 +57,66 @@ export function treeCanvasCorkboardSurfaceStyle(isDark: boolean): CSSProperties 
   ];
   const corkTile = "url(/small%20cork.jpg)";
 
-  return {
+  const style: CSSProperties = {
     backgroundColor: isDark ? "#4f3829" : "#b9855c",
     backgroundImage: [...overlayLayers, corkTile].join(", "),
     boxShadow: isDark
       ? "inset 0 0 120px rgba(0,0,0,0.4)"
       : "inset 0 0 140px rgba(42, 26, 14, 0.11)",
   };
+  treeCanvasSurfaceStyleCache.set(cacheKey, style);
+  return style;
+}
+
+function treeCanvasImageSurfaceStyle(
+  cacheKey: string,
+  isDark: boolean,
+  config: {
+    image: string;
+    darkBackground: string;
+    lightBackground: string;
+    darkWash: string;
+    lightWash: string;
+  }
+): CSSProperties {
+  const fullKey = `${cacheKey}:${isDark ? "dark" : "light"}`;
+  const cached = treeCanvasSurfaceStyleCache.get(fullKey);
+  if (cached) return cached;
+
+  const style: CSSProperties = {
+    backgroundColor: isDark ? config.darkBackground : config.lightBackground,
+    backgroundImage: `${isDark ? config.darkWash : config.lightWash}, ${config.image}`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+    boxShadow: isDark
+      ? "inset 0 0 120px rgba(0,0,0,0.45)"
+      : "inset 0 0 140px rgba(42, 26, 14, 0.1)",
+  };
+  treeCanvasSurfaceStyleCache.set(fullKey, style);
+  return style;
 }
 
 export function treeCanvasRootsSurfaceStyle(isDark: boolean): CSSProperties {
-  const bg = "url(/Wood%20Heir.png)";
-  const wash = isDark
-    ? "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.44) 100%)"
-    : "linear-gradient(180deg, rgba(255,252,248,0.1) 0%, rgba(42,26,14,0.12) 100%)";
-  return {
-    backgroundColor: isDark ? "#1e1812" : "#c4b4a2",
-    backgroundImage: `${wash}, ${bg}`,
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundRepeat: "no-repeat",
-    boxShadow: isDark
-      ? "inset 0 0 120px rgba(0,0,0,0.45)"
-      : "inset 0 0 140px rgba(42, 26, 14, 0.1)",
-  };
+  return treeCanvasImageSurfaceStyle("roots", isDark, {
+    image: "url(/Wood%20Heir.png)",
+    darkBackground: "#1e1812",
+    lightBackground: "#c4b4a2",
+    darkWash: "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.44) 100%)",
+    lightWash:
+      "linear-gradient(180deg, rgba(255,252,248,0.1) 0%, rgba(42,26,14,0.12) 100%)",
+  });
 }
 
 export function treeCanvasDeadGossipSurfaceStyle(isDark: boolean): CSSProperties {
-  const bg = "url(/Goss.jpg)";
-  const wash = isDark
-    ? "linear-gradient(180deg, rgba(0,0,0,0.44) 0%, rgba(0,0,0,0.56) 100%)"
-    : "linear-gradient(180deg, rgba(255,252,248,0.14) 0%, rgba(42,26,14,0.18) 100%)";
-  return {
-    backgroundColor: isDark ? "#201711" : "#c7b7a5",
-    backgroundImage: `${wash}, ${bg}`,
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundRepeat: "no-repeat",
-    boxShadow: isDark
-      ? "inset 0 0 120px rgba(0,0,0,0.45)"
-      : "inset 0 0 140px rgba(42, 26, 14, 0.1)",
-  };
+  return treeCanvasImageSurfaceStyle("dead-gossip", isDark, {
+    image: "url(/Goss.jpg)",
+    darkBackground: "#201711",
+    lightBackground: "#c7b7a5",
+    darkWash: "linear-gradient(180deg, rgba(0,0,0,0.44) 0%, rgba(0,0,0,0.56) 100%)",
+    lightWash:
+      "linear-gradient(180deg, rgba(255,252,248,0.14) 0%, rgba(42,26,14,0.18) 100%)",
+  });
 }
 
 export function treeCanvasSurfaceStyleForTheme(

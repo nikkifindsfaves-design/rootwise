@@ -6,9 +6,7 @@ import {
   type CanvasThemeId,
 } from "@/lib/themes/canvas-themes";
 import {
-  treeCanvasCorkboardSurfaceStyle,
-  treeCanvasDeadGossipSurfaceStyle,
-  treeCanvasRootsSurfaceStyle,
+  treeCanvasSurfaceStyleForTheme,
 } from "@/lib/themes/tree-canvas-surface-styles";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateString } from "@/lib/utils/dates";
@@ -1994,12 +1992,7 @@ export default function TreeCanvas({
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const treeSurfaceStyle = useMemo(() => {
-    const isDark = theme === "dark";
-    return canvasTheme === CANVAS_THEME_ID.ROOTS
-      ? treeCanvasRootsSurfaceStyle(isDark)
-      : canvasTheme === CANVAS_THEME_ID.DEAD_GOSSIP
-        ? treeCanvasDeadGossipSurfaceStyle(isDark)
-        : treeCanvasCorkboardSurfaceStyle(isDark);
+    return treeCanvasSurfaceStyleForTheme(canvasTheme, theme === "dark");
   }, [canvasTheme, theme]);
   const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
   const centeredRef = useRef(false);

@@ -249,6 +249,8 @@ export default function MyTreesShell({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { theme, toggleTheme } = useTheme();
+  const isAppDark = theme === "dark";
+  const treeCardInk = treeListingCardInk(isAppDark);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -1011,22 +1013,20 @@ export default function MyTreesShell({
           >
             {trees.map((tree) => {
               const canvasResolved = toCanvasThemeId(tree.canvas_theme);
-              const isAppDark = theme === "dark";
               const surface = treeCanvasSurfaceStyleForTheme(
                 canvasResolved,
                 isAppDark
               );
-              const ink = treeListingCardInk(isAppDark);
               const fonts = treeListingCardFonts(canvasResolved, isAppDark);
               const titleShadow = isAppDark
                 ? "0 1px 3px rgba(0,0,0,0.85), 0 0 1px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.35)"
-                : ink.titleShadowLight;
+                : treeCardInk.titleShadowLight;
               const metaShadow = isAppDark
                 ? "0 1px 2px rgba(0,0,0,0.75)"
-                : ink.metaShadowLight;
+                : treeCardInk.metaShadowLight;
               const iconShadow = isAppDark
                 ? "drop-shadow(0 1px 2px rgba(0,0,0,0.85))"
-                : ink.iconFilterLight;
+                : treeCardInk.iconFilterLight;
               return (
                 <div
                   key={tree.id}
@@ -1054,7 +1054,7 @@ export default function MyTreesShell({
                       role="button"
                       tabIndex={0}
                       className="dg-edit-tree-btn inline-flex cursor-pointer p-1.5"
-                      style={{ color: ink.icon, filter: iconShadow }}
+                      style={{ color: treeCardInk.icon, filter: iconShadow }}
                       aria-label="Edit tree name, vibe, and canvas"
                       onClick={() => openEditTree(tree)}
                       onKeyDown={(e) => {
@@ -1090,7 +1090,7 @@ export default function MyTreesShell({
                       role="button"
                       tabIndex={0}
                       className="dg-delete-tree-btn inline-flex cursor-pointer p-1.5"
-                      style={{ color: ink.icon, filter: iconShadow }}
+                      style={{ color: treeCardInk.icon, filter: iconShadow }}
                       aria-label="Delete tree"
                       onClick={() => handleDeleteTree(tree.id, tree.name)}
                       onKeyDown={(e) => {
@@ -1127,9 +1127,9 @@ export default function MyTreesShell({
                         fontWeight: fonts.headingWeight,
                         fontSize: "clamp(1.05rem, 2.5vw, 1.28rem)",
                         letterSpacing: fonts.headingItalic ? "0.02em" : "0.03em",
-                        color: ink.title,
+                        color: treeCardInk.title,
                         textShadow: titleShadow,
-                        filter: ink.titleDropFilter,
+                        filter: treeCardInk.titleDropFilter,
                       }}
                     >
                       {tree.name}
@@ -1140,7 +1140,7 @@ export default function MyTreesShell({
                         fontFamily: fonts.body,
                         fontSize: `calc(${fonts.metaFontSize} * 0.88)`,
                         fontWeight: fonts.metaFontWeight,
-                        color: ink.meta,
+                        color: treeCardInk.meta,
                         textShadow: metaShadow,
                         lineHeight: 1.35,
                       }}

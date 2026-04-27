@@ -1,6 +1,6 @@
 "use client";
 
-import { RECORD_TYPES } from "@/lib/records/record-types";
+import { RECORD_TYPES, type RecordType } from "@/lib/records/record-types";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -118,9 +118,7 @@ export default function DocumentUploadSection({
   const router = useRouter();
   const pathname = usePathname();
   const [file, setFile] = useState<File | null>(null);
-  const [recordType, setRecordType] = useState<(typeof RECORD_TYPES)[number]>(
-    "Birth Record"
-  );
+  const [recordType, setRecordType] = useState<RecordType>("Birth Record");
   const [censusSurname, setCensusSurname] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<null | "analyze" | "upload">(
@@ -460,7 +458,7 @@ export default function DocumentUploadSection({
           id="record_type"
           value={recordType}
           onChange={(event) =>
-            setRecordType(event.target.value as (typeof RECORD_TYPES)[number])
+            setRecordType(event.target.value as RecordType)
           }
           className="w-full rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--dg-forest)_35%,transparent)] sm:max-w-xs"
           style={{
