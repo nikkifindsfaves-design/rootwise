@@ -10,6 +10,12 @@ The developer is a non-technical Product Manager. She understands systems logica
 - Never make more changes than were asked for
 - If completing the request would require touching something outside its stated scope, stop and ask first
 
+### Communication Protocol (Always On)
+- Give exactly one instruction/action per reply.
+- Do not include a second step, optional next step, or extra suggestions in the same reply.
+- Wait for the user's response before giving the next instruction/action.
+- If you violate this, apologize in one sentence and restate only one instruction/action.
+
 ## Tech Stack
 - **Framework:** Next.js (App Router) with TypeScript (strict mode)
 - **UI:** React + Tailwind CSS

@@ -38,10 +38,17 @@ export type SubscriptionAccessState = {
   tier: MembershipTier;
 };
 
-function isFutureIsoDate(value: string | null | undefined): boolean {
+function isTodayOrFutureIsoDate(value: string | null | undefined): boolean {
   if (!value) return false;
   const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) && timestamp > Date.now();
+  if (!Number.isFinite(timestamp)) return false;
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  ).getTime();
+  return timestamp >= startOfToday;
 }
 
 export function hasPaidAccessFromSubscription(
@@ -49,10 +56,7 @@ export function hasPaidAccessFromSubscription(
 ): boolean {
   if (!subscription) return false;
   if (subscription.status === "active") return true;
-  if (subscription.status === "canceled") {
-    return isFutureIsoDate(subscription.current_period_end ?? null);
-  }
-  return false;
+  return isTodayOrFutureIsoDate(subscription.current_period_end ?? null);
 }
 
 export async function getSubscriptionAccessStateForUser(

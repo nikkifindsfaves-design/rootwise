@@ -55,14 +55,19 @@ export async function proxy(request: NextRequest) {
       .maybeSingle();
 
     const status = (subscription?.status ?? "inactive") as string;
-    const currentPeriodEnd = subscription?.current_period_end
-      ? Date.parse(subscription.current_period_end)
-      : NaN;
+    const currentPeriodEnd =
+      typeof subscription?.current_period_end === "string"
+        ? Date.parse(subscription.current_period_end)
+        : NaN;
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    ).getTime();
     const hasAccess =
       status === "active" ||
-      (status === "canceled" &&
-        Number.isFinite(currentPeriodEnd) &&
-        currentPeriodEnd > Date.now());
+      (Number.isFinite(currentPeriodEnd) && currentPeriodEnd >= startOfToday);
 
     if (!hasAccess) {
       const redirectUrl = request.nextUrl.clone();

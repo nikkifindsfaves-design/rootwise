@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
   if (!access.hasAccess) {
     return NextResponse.json(
       {
-        error: "An active membership is required to generate stories.",
+        error: "An active subscription is required to generate stories.",
         code: "membership_required",
       },
       { status: 402 }

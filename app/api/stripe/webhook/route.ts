@@ -180,6 +180,62 @@ export async function POST(request: Request) {
 
       if (meta.checkout_mode === "subscription") {
         const tier = meta.tier ?? "basic";
+        let checkoutPeriodStart: string | null = null;
+        let checkoutPeriodEnd: string | null = null;
+        let checkoutSubscriptionStatus: string = "active";
+        if (typeof session.subscription !== "string" || session.subscription === "") {
+          return NextResponse.json(
+            { error: "Checkout did not include a subscription id." },
+            { status: 500 }
+          );
+        }
+        try {
+          const stripeSubscription = await stripe.subscriptions.retrieve(
+            session.subscription
+          );
+          const firstSubscriptionItem =
+            Array.isArray(stripeSubscription.items?.data) &&
+            stripeSubscription.items.data.length > 0
+              ? stripeSubscription.items.data[0]
+              : null;
+          const periodStartUnix =
+            stripeSubscription.current_period_start ??
+            firstSubscriptionItem?.current_period_start ??
+            null;
+          const periodEndUnix =
+            stripeSubscription.current_period_end ??
+            firstSubscriptionItem?.current_period_end ??
+            null;
+          checkoutPeriodStart = periodStartUnix
+            ? new Date(periodStartUnix * 1000).toISOString()
+            : null;
+          checkoutPeriodEnd = periodEndUnix
+            ? new Date(periodEndUnix * 1000).toISOString()
+            : null;
+          checkoutSubscriptionStatus = stripeSubscription.status ?? "active";
+        } catch (subscriptionFetchError) {
+          const message =
+            subscriptionFetchError instanceof Error
+              ? subscriptionFetchError.message
+              : "Unknown error while retrieving Stripe subscription.";
+          return NextResponse.json(
+            { error: `Could not read Stripe subscription period: ${message}` },
+            { status: 500 }
+          );
+        }
+        if (!checkoutPeriodStart || !checkoutPeriodEnd) {
+          const now = new Date();
+          const periodStart = now;
+          const periodEnd = new Date(now);
+          if (meta.interval === "annual") {
+            periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+          } else {
+            periodEnd.setMonth(periodEnd.getMonth() + 1);
+          }
+          checkoutPeriodStart = checkoutPeriodStart ?? periodStart.toISOString();
+          checkoutPeriodEnd = checkoutPeriodEnd ?? periodEnd.toISOString();
+        }
+
         const prior = (existingSubscription ?? null) as
           | {
               tier?: MembershipTier | null;
@@ -208,11 +264,20 @@ export async function POST(request: Request) {
 
         const { error: subscriptionUpsertError } = await admin.from("subscriptions").upsert({
           user_id: userId,
-          stripe_subscription_id: session.subscription ?? null,
+          stripe_subscription_id: session.subscription,
           stripe_price_id: null,
           tier,
           billing_interval: meta.interval ?? "monthly",
-          status: "active",
+          status:
+            checkoutSubscriptionStatus === "active"
+              ? "active"
+              : checkoutSubscriptionStatus === "canceled"
+                ? "canceled"
+                : checkoutSubscriptionStatus === "unpaid"
+                  ? "unpaid"
+                  : "past_due",
+          current_period_start: checkoutPeriodStart,
+          current_period_end: checkoutPeriodEnd,
           pending_upgrade_from_tier: pendingUpgradeCredits > 0 ? oldTier : null,
           pending_upgrade_to_tier: pendingUpgradeCredits > 0 ? tier : null,
           pending_upgrade_credits: pendingUpgradeCredits,
@@ -297,6 +362,13 @@ export async function POST(request: Request) {
       metadata?: StripeMeta;
       current_period_start?: number;
       current_period_end?: number;
+      items?: {
+        data?: Array<{
+          current_period_start?: number;
+          current_period_end?: number;
+          price?: { id?: string };
+        }>;
+      };
     };
 
     const { data: row } = await admin
@@ -316,6 +388,19 @@ export async function POST(request: Request) {
       const intervalFromStripe = firstPriceId
         ? getTierIntervalFromPriceId(firstPriceId)?.interval
         : null;
+      const firstSubscriptionItem =
+        Array.isArray(subscription.items?.data) &&
+        subscription.items.data.length > 0
+          ? subscription.items.data[0]
+          : null;
+      const periodStartUnix =
+        subscription.current_period_start ??
+        firstSubscriptionItem?.current_period_start ??
+        null;
+      const periodEndUnix =
+        subscription.current_period_end ??
+        firstSubscriptionItem?.current_period_end ??
+        null;
 
       await admin
         .from("subscriptions")
@@ -332,11 +417,11 @@ export async function POST(request: Request) {
           ...(tierFromStripe ? { tier: tierFromStripe } : {}),
           ...(intervalFromStripe ? { billing_interval: intervalFromStripe } : {}),
           ...(firstPriceId ? { stripe_price_id: firstPriceId } : {}),
-          current_period_start: subscription.current_period_start
-            ? new Date(subscription.current_period_start * 1000).toISOString()
+          current_period_start: periodStartUnix
+            ? new Date(periodStartUnix * 1000).toISOString()
             : null,
-          current_period_end: subscription.current_period_end
-            ? new Date(subscription.current_period_end * 1000).toISOString()
+          current_period_end: periodEndUnix
+            ? new Date(periodEndUnix * 1000).toISOString()
             : null,
         })
         .eq("user_id", row.user_id);

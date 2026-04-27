@@ -585,7 +585,7 @@ function blankPersonCard(recordTypeLabel: string): PersonCardState {
     form: toForm({}),
     relationships: [],
     events: [blankEventRow(t, linkShared)],
-    generateStory: false,
+    generateStory: true,
   };
 }
 
