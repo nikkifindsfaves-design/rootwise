@@ -1,7 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import {
-  ACTION_CREDIT_COST,
-  BILLING_FLAGS,
   type CreditActionType,
   type MembershipTier,
 } from "@/lib/billing/config";
@@ -10,13 +8,35 @@ type BalanceRow = {
   subscription_credits: number;
   addon_credits: number;
   monthly_reset_at: string | null;
-  pilot_mode_enabled: boolean;
 };
+
+type SubscriptionStatus =
+  | "active"
+  | "inactive"
+  | "trialing"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "incomplete"
+  | "incomplete_expired"
+  | (string & {});
 
 type SubscriptionRow = {
   tier: MembershipTier;
-  status: string;
+  status: SubscriptionStatus;
   current_period_end?: string | null;
+};
+
+const DEFAULT_BALANCE_ROW: BalanceRow = {
+  subscription_credits: 0,
+  addon_credits: 0,
+  monthly_reset_at: null,
+};
+
+const DEFAULT_SUBSCRIPTION_ROW: SubscriptionRow = {
+  tier: "basic",
+  status: "inactive",
+  current_period_end: null,
 };
 
 export type CreditSnapshot = {
@@ -33,9 +53,14 @@ export type CreditSnapshot = {
 
 export type SubscriptionAccessState = {
   hasAccess: boolean;
-  status: string;
+  status: SubscriptionStatus;
   currentPeriodEnd: string | null;
   tier: MembershipTier;
+};
+
+type BillingSnapshotAccess = {
+  access: SubscriptionAccessState;
+  snapshot: CreditSnapshot;
 };
 
 function isTodayOrFutureIsoDate(value: string | null | undefined): boolean {
@@ -69,11 +94,7 @@ export async function getSubscriptionAccessStateForUser(
     .eq("user_id", userId)
     .maybeSingle();
 
-  const row = (subscription ?? {
-    tier: "basic",
-    status: "inactive",
-    current_period_end: null,
-  }) as SubscriptionRow;
+  const row = (subscription ?? DEFAULT_SUBSCRIPTION_ROW) as SubscriptionRow;
 
   return {
     hasAccess: hasPaidAccessFromSubscription(row),
@@ -83,13 +104,15 @@ export async function getSubscriptionAccessStateForUser(
   };
 }
 
-export async function getCreditSnapshotForUser(userId: string): Promise<CreditSnapshot> {
+export async function getBillingSnapshotAccessForUser(
+  userId: string
+): Promise<BillingSnapshotAccess> {
   const supabase = await createClient();
 
   const [{ data: balance }, { data: subscription }] = await Promise.all([
     supabase
       .from("credit_balances")
-      .select("subscription_credits, addon_credits, monthly_reset_at, pilot_mode_enabled")
+      .select("subscription_credits, addon_credits, monthly_reset_at")
       .eq("user_id", userId)
       .maybeSingle(),
     supabase
@@ -99,17 +122,8 @@ export async function getCreditSnapshotForUser(userId: string): Promise<CreditSn
       .maybeSingle(),
   ]);
 
-  const balanceRow = (balance ?? {
-    subscription_credits: 0,
-    addon_credits: 0,
-    monthly_reset_at: null,
-    pilot_mode_enabled: BILLING_FLAGS.pilotModeEnabled,
-  }) as BalanceRow;
-  const subscriptionRow = (subscription ?? {
-    tier: "basic",
-    status: "inactive",
-    current_period_end: null,
-  }) as SubscriptionRow;
+  const balanceRow = (balance ?? DEFAULT_BALANCE_ROW) as BalanceRow;
+  const subscriptionRow = (subscription ?? DEFAULT_SUBSCRIPTION_ROW) as SubscriptionRow;
 
   const isPaid = hasPaidAccessFromSubscription(subscriptionRow);
   const tier = isPaid ? subscriptionRow.tier : "basic";
@@ -117,20 +131,29 @@ export async function getCreditSnapshotForUser(userId: string): Promise<CreditSn
   const totalCredits = balanceRow.subscription_credits + balanceRow.addon_credits;
 
   return {
-    tier,
-    subscriptionCredits: balanceRow.subscription_credits,
-    addonCredits: balanceRow.addon_credits,
-    totalCredits,
-    canUseExtraction,
-    monthlyResetAt: balanceRow.monthly_reset_at,
-    hasPaidAccess: isPaid,
-    subscriptionStatus: subscriptionRow.status,
-    currentPeriodEnd: subscriptionRow.current_period_end ?? null,
+    access: {
+      hasAccess: isPaid,
+      status: subscriptionRow.status,
+      currentPeriodEnd: subscriptionRow.current_period_end ?? null,
+      tier: subscriptionRow.tier,
+    },
+    snapshot: {
+      tier,
+      subscriptionCredits: balanceRow.subscription_credits,
+      addonCredits: balanceRow.addon_credits,
+      totalCredits,
+      canUseExtraction,
+      monthlyResetAt: balanceRow.monthly_reset_at,
+      hasPaidAccess: isPaid,
+      subscriptionStatus: subscriptionRow.status,
+      currentPeriodEnd: subscriptionRow.current_period_end ?? null,
+    },
   };
 }
 
-export function resolveActionCost(action: CreditActionType): number {
-  return ACTION_CREDIT_COST[action];
+export async function getCreditSnapshotForUser(userId: string): Promise<CreditSnapshot> {
+  const { snapshot } = await getBillingSnapshotAccessForUser(userId);
+  return snapshot;
 }
 
 export function validateActionAllowedByTier(

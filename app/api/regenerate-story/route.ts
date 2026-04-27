@@ -4,8 +4,7 @@ import { DEFAULT_VIBE } from "@/lib/constants/shared-values";
 import { createClient } from "@/lib/supabase/server";
 import {
   debitCreditsForAction,
-  getCreditSnapshotForUser,
-  getSubscriptionAccessStateForUser,
+  getBillingSnapshotAccessForUser,
 } from "@/lib/billing/credits";
 import {
   getIsCensusRecord,
@@ -116,7 +115,8 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const access = await getSubscriptionAccessStateForUser(user.id);
+  const billing = await getBillingSnapshotAccessForUser(user.id);
+  const access = billing.access;
   if (!access.hasAccess) {
     return NextResponse.json(
       {
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const snapshot = await getCreditSnapshotForUser(user.id);
+  const snapshot = billing.snapshot;
   const debit = await debitCreditsForAction({
     userId: user.id,
     action: "story_regenerate",

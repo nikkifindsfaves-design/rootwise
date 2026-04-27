@@ -32,7 +32,7 @@ export default function AccountSettingsShell() {
     currentPeriodEnd: string | null;
   } | null>(null);
   const [billingWorking, setBillingWorking] = useState<
-    null | "subscription" | "portal" | "pilot_grant" | "delete_account"
+    null | "subscription" | "portal" | "delete_account"
   >(null);
   const [selectedTier, setSelectedTier] = useState<MembershipTier>("pro");
   const [selectedInterval, setSelectedInterval] =
@@ -297,28 +297,6 @@ export default function AccountSettingsShell() {
     }
   }
 
-  async function requestPilotGrant() {
-    setBillingWorking("pilot_grant");
-    try {
-      const response = await fetch("/api/pilot/grant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ grant_credits: 350 }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error ?? "Could not apply pilot credits.");
-      }
-      await refreshBilling();
-    } catch (error) {
-      setBillingError(
-        error instanceof Error ? error.message : "Could not apply pilot credits."
-      );
-    } finally {
-      setBillingWorking(null);
-    }
-  }
-
   async function requestAccountDeletion() {
     setBillingWorking("delete_account");
     try {
@@ -499,15 +477,6 @@ export default function AccountSettingsShell() {
             style={{ fontFamily: sans, borderColor: "var(--dg-brown-border)", color: "var(--dg-brown-dark)" }}
           >
             {billingWorking === "portal" ? "Opening portal…" : "Update payment info"}
-          </button>
-          <button
-            type="button"
-            disabled={billingWorking !== null}
-            onClick={() => void requestPilotGrant()}
-            className="rounded-md border px-4 py-2 text-sm font-semibold"
-            style={{ fontFamily: sans, borderColor: "var(--dg-brown-border)", color: "var(--dg-brown-dark)" }}
-          >
-            {billingWorking === "pilot_grant" ? "Applying…" : "Apply pilot credits"}
           </button>
           <button
             type="button"

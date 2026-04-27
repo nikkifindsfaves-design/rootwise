@@ -6,7 +6,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import {
   debitCreditsForAction,
-  getCreditSnapshotForUser,
+  getBillingSnapshotAccessForUser,
   getSubscriptionAccessStateForUser,
   validateActionAllowedByTier,
 } from "@/lib/billing/credits";
@@ -530,17 +530,6 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const access = await getSubscriptionAccessStateForUser(user.id);
-  if (!access.hasAccess) {
-    return NextResponse.json(
-      {
-        error: "An active membership is required to use document uploads.",
-        code: "membership_required",
-      },
-      { status: 402 }
-    );
-  }
-
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -569,9 +558,25 @@ export async function POST(request: NextRequest) {
     selectedExtractionModel === EXTRACTION_MODELS.sonnet
       ? "extraction_sonnet"
       : "extraction_opus";
+  const billingContext = skipExtraction
+    ? null
+    : await getBillingSnapshotAccessForUser(user.id);
+  const access = skipExtraction
+    ? await getSubscriptionAccessStateForUser(user.id)
+    : billingContext!.access;
+
+  if (!access.hasAccess) {
+    return NextResponse.json(
+      {
+        error: "An active membership is required to use document uploads.",
+        code: "membership_required",
+      },
+      { status: 402 }
+    );
+  }
 
   if (!skipExtraction) {
-    const snapshot = await getCreditSnapshotForUser(user.id);
+    const snapshot = billingContext!.snapshot;
     const allowedByTier = validateActionAllowedByTier(snapshot.tier, actionType);
     if (!allowedByTier.allowed) {
       return NextResponse.json(

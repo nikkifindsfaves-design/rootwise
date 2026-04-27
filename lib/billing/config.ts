@@ -55,6 +55,11 @@ export const MEMBERSHIP_TIER_ORDER: MembershipTier[] = [
   "possessed",
 ];
 
+export const BILLING_INTERVAL_ORDER: BillingInterval[] = [
+  "monthly",
+  "annual",
+];
+
 export const ADDON_PACKS = {
   credits_250: { label: "250 Credits", credits: 250, price: 2.99 },
   credits_450: { label: "450 Credits", credits: 450, price: 5.99 },
