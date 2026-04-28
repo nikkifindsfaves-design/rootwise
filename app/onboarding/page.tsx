@@ -3,12 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import {
-  MEMBERSHIP_TIER_ORDER,
-  TIER_DEFINITIONS,
-  type BillingInterval,
-  type MembershipTier,
-} from "@/lib/billing/config";
+import { TIER_DEFINITIONS, type BillingInterval, type MembershipTier } from "@/lib/billing/config";
 
 type BillingSnapshot = {
   hasPaidAccess: boolean;
@@ -25,9 +20,8 @@ export default function OnboardingPage() {
 
   const [loading, setLoading] = useState(true);
   const [billing, setBilling] = useState<BillingSnapshot | null>(null);
-  const [selectedTier, setSelectedTier] = useState<MembershipTier>("pro");
   const [selectedInterval, setSelectedInterval] = useState<BillingInterval>("monthly");
-  const [working, setWorking] = useState<null | "checkout">(null);
+  const [checkoutTier, setCheckoutTier] = useState<MembershipTier | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -89,9 +83,9 @@ export default function OnboardingPage() {
   }, [refreshState, searchParams]);
 
   const hasPlan = Boolean(billing?.hasPaidAccess);
-  const tierPrices = TIER_DEFINITIONS[selectedTier].prices;
-  async function openCheckout() {
-    setWorking("checkout");
+
+  async function openCheckout(tier: MembershipTier) {
+    setCheckoutTier(tier);
     setError(null);
     setMessage(null);
     try {
@@ -100,7 +94,7 @@ export default function OnboardingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "subscription",
-          tier: selectedTier,
+          tier,
           interval: selectedInterval,
           return_to: "dashboard",
         }),
@@ -112,8 +106,12 @@ export default function OnboardingPage() {
       window.location.href = data.url;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start checkout.");
-      setWorking(null);
+      setCheckoutTier(null);
     }
+  }
+
+  function formatCredits(n: number) {
+    return n.toLocaleString("en-US");
   }
 
   if (loading) {
@@ -130,7 +128,7 @@ export default function OnboardingPage() {
   const showDoneStep = hasPlan;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className={`mx-auto px-6 py-10 ${showPlanStep ? "max-w-7xl" : "max-w-3xl"}`}>
       <p
         className="text-xs font-semibold uppercase tracking-[0.18em]"
         style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
@@ -151,44 +149,292 @@ export default function OnboardingPage() {
 
         {showPlanStep ? (
           <>
-            <h2 className="mt-2 text-xl font-semibold" style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}>
+            <h2
+              className="mt-2 font-semibold uppercase tracking-[0.2em]"
+              style={{ fontFamily: sans, fontSize: "0.8125rem", color: "var(--dg-brown-dark)" }}
+            >
               Choose your membership
             </h2>
-            <p className="mt-1 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
-              Select a plan to unlock story generation and document analysis.
+            <p className="mt-2 max-w-xl text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
+              Select a plan to unlock document analysis and story generation.
             </p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <select
-                value={selectedTier}
-                onChange={(e) => setSelectedTier(e.target.value as MembershipTier)}
-                className="w-full rounded-md px-3 py-2"
-                style={{ fontFamily: sans, border: "1px solid var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}
+
+            <div className="mt-6 inline-flex rounded-md border p-1" style={{ borderColor: "var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}>
+              <button
+                type="button"
+                onClick={() => setSelectedInterval("monthly")}
+                className="rounded px-4 py-1.5 text-sm font-semibold transition-colors"
+                style={{
+                  fontFamily: sans,
+                  backgroundColor:
+                    selectedInterval === "monthly" ? "var(--dg-primary-bg)" : "transparent",
+                  color:
+                    selectedInterval === "monthly"
+                      ? "var(--dg-primary-fg)"
+                      : "var(--dg-brown-muted)",
+                }}
               >
-                {MEMBERSHIP_TIER_ORDER.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {TIER_DEFINITIONS[tier].displayName}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={selectedInterval}
-                onChange={(e) => setSelectedInterval(e.target.value as BillingInterval)}
-                className="w-full rounded-md px-3 py-2"
-                style={{ fontFamily: sans, border: "1px solid var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}
+                Monthly
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedInterval("annual")}
+                className="rounded px-4 py-1.5 text-sm font-semibold transition-colors"
+                style={{
+                  fontFamily: sans,
+                  backgroundColor:
+                    selectedInterval === "annual" ? "var(--dg-primary-bg)" : "transparent",
+                  color:
+                    selectedInterval === "annual"
+                      ? "var(--dg-primary-fg)"
+                      : "var(--dg-brown-muted)",
+                }}
               >
-                <option value="monthly">Monthly (${tierPrices.monthly}/mo)</option>
-                <option value="annual">Annual (${tierPrices.annual}/yr)</option>
-              </select>
+                Annual
+                <span
+                  className="ml-1.5 rounded px-1.5 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-wide"
+                  style={{
+                    backgroundColor:
+                      selectedInterval === "annual" ? "rgba(139,100,35,0.35)" : "var(--dg-parchment-deep)",
+                    color: "var(--dg-brown-dark)",
+                  }}
+                >
+                  save 20%
+                </span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void openCheckout()}
-              disabled={working !== null}
-              className="mt-4 rounded-md px-4 py-2 text-sm font-semibold text-[var(--dg-primary-fg)]"
-              style={{ fontFamily: sans, backgroundColor: "var(--dg-primary-bg)" }}
-            >
-              {working === "checkout" ? "Opening checkout..." : "Continue to secure checkout"}
-            </button>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {/* Curious */}
+              <div
+                className="relative flex flex-col rounded-lg border p-4 pt-5"
+                style={{ borderColor: "var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}
+              >
+                <h3 className="text-lg font-semibold" style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}>
+                  Curious
+                </h3>
+                <div className="mt-3" style={{ fontFamily: sans, color: "var(--dg-brown-dark)" }}>
+                  <span className="text-2xl font-bold">
+                    ${TIER_DEFINITIONS.basic.prices[selectedInterval]}
+                  </span>
+                  <span className="text-sm text-[var(--dg-brown-muted)]">
+                    /{selectedInterval === "monthly" ? "mo" : "yr"}
+                  </span>
+                </div>
+                <ul className="mt-4 flex flex-1 flex-col gap-2 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Story generation
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Manual data entry
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Search & organize
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    {formatCredits(TIER_DEFINITIONS.basic.monthlyCredits)} credits/month
+                  </li>
+                </ul>
+                <p className="mt-4 text-xs italic" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
+                  Stories only — no AI extraction.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void openCheckout("basic")}
+                  disabled={checkoutTier !== null}
+                  className="mt-4 w-full rounded-md border-2 px-3 py-2.5 text-sm font-semibold transition-opacity disabled:opacity-60"
+                  style={{
+                    fontFamily: sans,
+                    borderColor: "var(--dg-brown-outline)",
+                    color: "var(--dg-brown-dark)",
+                    backgroundColor: "transparent",
+                  }}
+                >
+                  {checkoutTier === "basic" ? "Opening checkout..." : "Select"}
+                </button>
+              </div>
+
+              {/* Devoted — featured */}
+              <div
+                className="relative flex flex-col rounded-lg border-2 p-4 pt-5 shadow-sm"
+                style={{
+                  borderColor: "var(--dg-primary-bg)",
+                  backgroundColor: "var(--dg-cream)",
+                  boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.12)",
+                }}
+              >
+                <span
+                  className="absolute -top-3 left-1/2 max-w-[calc(100%-1rem)] -translate-x-1/2 rounded-full px-3 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-wide"
+                  style={{
+                    fontFamily: sans,
+                    backgroundColor: "color-mix(in srgb, var(--dg-primary-bg) 70%, transparent)",
+                    color: "var(--dg-primary-fg)",
+                  }}
+                >
+                  Most popular
+                </span>
+                <h3 className="text-lg font-semibold" style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}>
+                  Devoted
+                </h3>
+                <div className="mt-3" style={{ fontFamily: sans, color: "var(--dg-brown-dark)" }}>
+                  <span className="text-2xl font-bold">
+                    ${TIER_DEFINITIONS.pro.prices[selectedInterval]}
+                  </span>
+                  <span className="text-sm text-[var(--dg-brown-muted)]">
+                    /{selectedInterval === "monthly" ? "mo" : "yr"}
+                  </span>
+                </div>
+                <ul className="mt-4 flex flex-1 flex-col gap-2 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Everything in Curious
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    AI extraction
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    {formatCredits(TIER_DEFINITIONS.pro.monthlyCredits)} credits/month
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => void openCheckout("pro")}
+                  disabled={checkoutTier !== null}
+                  className="mt-8 w-full rounded-md px-3 py-2.5 text-sm font-semibold transition-opacity disabled:opacity-60"
+                  style={{
+                    fontFamily: sans,
+                    backgroundColor: "var(--dg-primary-bg)",
+                    color: "var(--dg-primary-fg)",
+                  }}
+                >
+                  {checkoutTier === "pro" ? "Opening checkout..." : "Get started"}
+                </button>
+              </div>
+
+              {/* Obsessed */}
+              <div
+                className="relative flex flex-col rounded-lg border p-4 pt-5"
+                style={{ borderColor: "var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}
+              >
+                <h3 className="text-lg font-semibold" style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}>
+                  Obsessed
+                </h3>
+                <div className="mt-3" style={{ fontFamily: sans, color: "var(--dg-brown-dark)" }}>
+                  <span className="text-2xl font-bold">
+                    ${TIER_DEFINITIONS.max.prices[selectedInterval]}
+                  </span>
+                  <span className="text-sm text-[var(--dg-brown-muted)]">
+                    /{selectedInterval === "monthly" ? "mo" : "yr"}
+                  </span>
+                </div>
+                <ul className="mt-4 flex flex-1 flex-col gap-2 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Everything in Devoted
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    {formatCredits(TIER_DEFINITIONS.max.monthlyCredits)} credits/month
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Exclusive early access to new features
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => void openCheckout("max")}
+                  disabled={checkoutTier !== null}
+                  className="mt-8 w-full rounded-md border-2 px-3 py-2.5 text-sm font-semibold transition-opacity disabled:opacity-60"
+                  style={{
+                    fontFamily: sans,
+                    borderColor: "var(--dg-brown-outline)",
+                    color: "var(--dg-brown-dark)",
+                    backgroundColor: "transparent",
+                  }}
+                >
+                  {checkoutTier === "max" ? "Opening checkout..." : "Select"}
+                </button>
+              </div>
+
+              {/* Possessed */}
+              <div
+                className="relative flex flex-col rounded-lg border p-4 pt-5"
+                style={{ borderColor: "var(--dg-brown-border)", backgroundColor: "var(--dg-cream)" }}
+              >
+                <h3 className="text-lg font-semibold" style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}>
+                  Possessed
+                </h3>
+                <div className="mt-3" style={{ fontFamily: sans, color: "var(--dg-brown-dark)" }}>
+                  <span className="text-2xl font-bold">
+                    ${TIER_DEFINITIONS.possessed.prices[selectedInterval]}
+                  </span>
+                  <span className="text-sm text-[var(--dg-brown-muted)]">
+                    /{selectedInterval === "monthly" ? "mo" : "yr"}
+                  </span>
+                </div>
+                <ul className="mt-4 flex flex-1 flex-col gap-2 text-sm" style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Everything in Obsessed
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    {formatCredits(TIER_DEFINITIONS.possessed.monthlyCredits)} credits/month
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--dg-forest)]" aria-hidden>
+                      ✓
+                    </span>
+                    Best per-credit rate
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => void openCheckout("possessed")}
+                  disabled={checkoutTier !== null}
+                  className="mt-8 w-full rounded-md border-2 px-3 py-2.5 text-sm font-semibold transition-opacity disabled:opacity-60"
+                  style={{
+                    fontFamily: sans,
+                    borderColor: "var(--dg-brown-outline)",
+                    color: "var(--dg-brown-dark)",
+                    backgroundColor: "transparent",
+                  }}
+                >
+                  {checkoutTier === "possessed" ? "Opening checkout..." : "Select"}
+                </button>
+              </div>
+            </div>
           </>
         ) : null}
 

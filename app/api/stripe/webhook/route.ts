@@ -1,7 +1,12 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ADDON_PACKS, TIER_DEFINITIONS, type MembershipTier } from "@/lib/billing/config";
+import {
+  ADDON_PACKS,
+  TIER_DEFINITIONS,
+  getTierFromString,
+  type MembershipTier,
+} from "@/lib/billing/config";
 import {
   getStripeServerClient,
   getTierIntervalFromPriceId,
@@ -133,13 +138,19 @@ export async function POST(request: Request) {
       message: idempotencyError.message,
     });
     // #endregion
-    if (idempotencyError.code === "23505") {
-      return NextResponse.json({ received: true, duplicate: true });
+    if (idempotencyError.code !== "23505") {
+      return NextResponse.json(
+        { error: `Webhook logging failed: ${idempotencyError.message}` },
+        { status: 500 }
+      );
     }
-    return NextResponse.json(
-      { error: `Webhook logging failed: ${idempotencyError.message}` },
-      { status: 500 }
-    );
+    // Duplicate stripe_event_id: a prior delivery may have logged the event but failed
+    // before finishing (Stripe retries with the same id). Re-run handlers; upserts and
+    // credit RPCs are idempotent via idempotency keys.
+    debugLog("A4", "stripe.webhook.duplicate_event_replay", {
+      stripeEventId,
+      eventType,
+    });
   }
 
   if (eventType === "checkout.session.completed") {
@@ -149,9 +160,19 @@ export async function POST(request: Request) {
       customer?: string;
       subscription?: string;
       customer_email?: string;
+      client_reference_id?: string | null;
     };
     const meta = session.metadata ?? {};
-    const userId = meta.user_id;
+    const userIdFromMeta =
+      typeof meta.user_id === "string" && meta.user_id.trim() !== ""
+        ? meta.user_id.trim()
+        : null;
+    const userIdFromClientRef =
+      typeof session.client_reference_id === "string" &&
+      session.client_reference_id.trim() !== ""
+        ? session.client_reference_id.trim()
+        : null;
+    const userId = userIdFromMeta ?? userIdFromClientRef ?? undefined;
     // #region agent log
     debugLog("A2", "stripe.webhook.checkout_completed_meta", {
       stripeEventId,
@@ -179,7 +200,8 @@ export async function POST(request: Request) {
       }
 
       if (meta.checkout_mode === "subscription") {
-        const tier = meta.tier ?? "basic";
+        const tier = getTierFromString(meta.tier);
+        const billingInterval = meta.interval === "annual" ? "annual" : "monthly";
         let checkoutPeriodStart: string | null = null;
         let checkoutPeriodEnd: string | null = null;
         let checkoutSubscriptionStatus: string = "active";
@@ -227,7 +249,7 @@ export async function POST(request: Request) {
           const now = new Date();
           const periodStart = now;
           const periodEnd = new Date(now);
-          if (meta.interval === "annual") {
+          if (billingInterval === "annual") {
             periodEnd.setFullYear(periodEnd.getFullYear() + 1);
           } else {
             periodEnd.setMonth(periodEnd.getMonth() + 1);
@@ -267,7 +289,7 @@ export async function POST(request: Request) {
           stripe_subscription_id: session.subscription,
           stripe_price_id: null,
           tier,
-          billing_interval: meta.interval ?? "monthly",
+          billing_interval: billingInterval,
           status:
             checkoutSubscriptionStatus === "active"
               ? "active"
@@ -352,6 +374,13 @@ export async function POST(request: Request) {
         });
         // #endregion
       }
+    } else {
+      debugLog("A2", "stripe.webhook.checkout_completed_missing_user_id", {
+        stripeEventId,
+        sessionId: session.id,
+        hadMetaUserId: userIdFromMeta !== null,
+        hadClientReferenceId: userIdFromClientRef !== null,
+      });
     }
   }
 
