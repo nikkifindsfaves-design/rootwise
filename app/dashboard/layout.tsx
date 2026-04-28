@@ -1,5 +1,6 @@
 import { Lato, Playfair_Display } from "next/font/google";
 import type { ReactNode } from "react";
+import { DashboardThemeProvider } from "./dashboard-theme";
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
@@ -17,14 +18,17 @@ const lato = Lato({
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
-    <div
-      className={`${playfair.variable} ${lato.variable} min-h-screen`}
-      style={{
-        backgroundColor: "var(--dg-bg-main)",
-        fontFamily: "var(--font-dg-body), Lato, ui-sans-serif, system-ui, sans-serif",
-      }}
-    >
-      {children}
-    </div>
+    <DashboardThemeProvider>
+      <div
+        className={`${playfair.variable} ${lato.variable} min-h-screen`}
+        style={{
+          backgroundColor: "var(--dg-bg-main)",
+          fontFamily:
+            "var(--font-dg-body), Lato, ui-sans-serif, system-ui, sans-serif",
+        }}
+      >
+        {children}
+      </div>
+    </DashboardThemeProvider>
   );
 }

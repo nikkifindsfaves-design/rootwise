@@ -7,14 +7,25 @@ import {
   getTierFromString,
   type MembershipTier,
 } from "@/lib/billing/config";
+import { resolveCheckoutSessionUser } from "@/lib/billing/checkout-session-user";
+import { normalizeStripeSubscriptionBillingInterval } from "@/lib/billing/subscription-interval";
 import {
   getStripeServerClient,
   getTierIntervalFromPriceId,
 } from "@/lib/billing/stripe";
+import {
+  resolveCheckoutSessionCheckoutMode,
+  subscriptionIdFromCheckoutSession,
+  type StripeCheckoutMeta,
+} from "@/lib/billing/checkout-session-webhook";
+import { calculateProratedUpgradeCredits } from "@/lib/billing/proration-upgrade-credits";
+import {
+  invoiceEligibleForPendingUpgradeAddonGrant,
+  stripeSubscriptionIdFromInvoice,
+} from "@/lib/billing/stripe-invoice-upgrade-eligibility";
 
-type StripeMeta = {
-  user_id?: string;
-  checkout_mode?: string;
+/** Narrow Stripe Checkout metadata + typed tier keys used when creating sessions from our API. */
+type StripeMeta = StripeCheckoutMeta & {
   tier?: MembershipTier;
   interval?: "monthly" | "annual";
   addon_pack?: keyof typeof ADDON_PACKS;
@@ -22,43 +33,6 @@ type StripeMeta = {
 
 function getMonthlyAllocationForTier(tier: MembershipTier): number {
   return TIER_DEFINITIONS[tier].monthlyCredits;
-}
-
-function calculateProratedUpgradeCredits(params: {
-  oldTier: MembershipTier;
-  newTier: MembershipTier;
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
-  fallbackInterval: "monthly" | "annual";
-}): number {
-  const deltaMonthlyCredits =
-    getMonthlyAllocationForTier(params.newTier) -
-    getMonthlyAllocationForTier(params.oldTier);
-  if (deltaMonthlyCredits <= 0) return 0;
-
-  const nowMs = Date.now();
-  const periodEndMs = params.currentPeriodEnd
-    ? Date.parse(params.currentPeriodEnd)
-    : NaN;
-  if (!Number.isFinite(periodEndMs) || periodEndMs <= nowMs) return 0;
-
-  const periodStartMs = params.currentPeriodStart
-    ? Date.parse(params.currentPeriodStart)
-    : NaN;
-  const fallbackWindowDays = params.fallbackInterval === "annual" ? 365 : 30;
-  const fallbackWindowMs = fallbackWindowDays * 24 * 60 * 60 * 1000;
-
-  const fullWindowMs =
-    Number.isFinite(periodStartMs) && periodEndMs > periodStartMs
-      ? periodEndMs - periodStartMs
-      : fallbackWindowMs;
-  if (fullWindowMs <= 0) return 0;
-
-  const remainingWindowMs = periodEndMs - nowMs;
-  const proratedCredits = Math.floor(
-    (deltaMonthlyCredits * remainingWindowMs) / fullWindowMs
-  );
-  return Math.max(0, proratedCredits);
 }
 
 export async function POST(request: Request) {
@@ -156,23 +130,22 @@ export async function POST(request: Request) {
   if (eventType === "checkout.session.completed") {
     const session = event.data.object as {
       id: string;
+      mode?: string;
       metadata?: StripeMeta;
       customer?: string;
-      subscription?: string;
+      subscription?: unknown;
       customer_email?: string;
       client_reference_id?: string | null;
     };
     const meta = session.metadata ?? {};
-    const userIdFromMeta =
-      typeof meta.user_id === "string" && meta.user_id.trim() !== ""
-        ? meta.user_id.trim()
-        : null;
-    const userIdFromClientRef =
-      typeof session.client_reference_id === "string" &&
-      session.client_reference_id.trim() !== ""
-        ? session.client_reference_id.trim()
-        : null;
-    const userId = userIdFromMeta ?? userIdFromClientRef ?? undefined;
+    const subscriptionId = subscriptionIdFromCheckoutSession(session);
+    const resolvedCheckoutMode = resolveCheckoutSessionCheckoutMode(
+      meta,
+      session.mode,
+      subscriptionId
+    );
+    const { userId, hadMetaUserId, hadClientReferenceId } =
+      resolveCheckoutSessionUser(session);
     // #region agent log
     debugLog("A2", "stripe.webhook.checkout_completed_meta", {
       stripeEventId,
@@ -199,35 +172,29 @@ export async function POST(request: Request) {
         });
       }
 
-      if (meta.checkout_mode === "subscription") {
+      if (resolvedCheckoutMode === "subscription") {
         const tier = getTierFromString(meta.tier);
-        const billingInterval = meta.interval === "annual" ? "annual" : "monthly";
+        const billingInterval = normalizeStripeSubscriptionBillingInterval(meta.interval);
         let checkoutPeriodStart: string | null = null;
         let checkoutPeriodEnd: string | null = null;
         let checkoutSubscriptionStatus: string = "active";
-        if (typeof session.subscription !== "string" || session.subscription === "") {
+        if (!subscriptionId) {
           return NextResponse.json(
             { error: "Checkout did not include a subscription id." },
             { status: 500 }
           );
         }
         try {
-          const stripeSubscription = await stripe.subscriptions.retrieve(
-            session.subscription
-          );
+          const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
           const firstSubscriptionItem =
             Array.isArray(stripeSubscription.items?.data) &&
             stripeSubscription.items.data.length > 0
               ? stripeSubscription.items.data[0]
               : null;
           const periodStartUnix =
-            stripeSubscription.current_period_start ??
-            firstSubscriptionItem?.current_period_start ??
-            null;
+            firstSubscriptionItem?.current_period_start ?? null;
           const periodEndUnix =
-            stripeSubscription.current_period_end ??
-            firstSubscriptionItem?.current_period_end ??
-            null;
+            firstSubscriptionItem?.current_period_end ?? null;
           checkoutPeriodStart = periodStartUnix
             ? new Date(periodStartUnix * 1000).toISOString()
             : null;
@@ -271,8 +238,6 @@ export async function POST(request: Request) {
           typeof prior?.stripe_subscription_id === "string" &&
           prior.stripe_subscription_id.trim() !== "";
         const oldTier = (prior?.tier ?? "basic") as MembershipTier;
-        const fallbackInterval =
-          prior?.billing_interval === "annual" ? "annual" : "monthly";
         const pendingUpgradeCredits =
           hadExistingSubscription && oldTier !== tier
             ? calculateProratedUpgradeCredits({
@@ -280,37 +245,76 @@ export async function POST(request: Request) {
                 newTier: tier,
                 currentPeriodStart: prior?.current_period_start ?? null,
                 currentPeriodEnd: prior?.current_period_end ?? null,
-                fallbackInterval,
               })
             : 0;
 
-        const { error: subscriptionUpsertError } = await admin.from("subscriptions").upsert({
-          user_id: userId,
-          stripe_subscription_id: session.subscription,
-          stripe_price_id: null,
-          tier,
-          billing_interval: billingInterval,
-          status:
-            checkoutSubscriptionStatus === "active"
-              ? "active"
-              : checkoutSubscriptionStatus === "canceled"
-                ? "canceled"
-                : checkoutSubscriptionStatus === "unpaid"
-                  ? "unpaid"
-                  : "past_due",
-          current_period_start: checkoutPeriodStart,
-          current_period_end: checkoutPeriodEnd,
-          pending_upgrade_from_tier: pendingUpgradeCredits > 0 ? oldTier : null,
-          pending_upgrade_to_tier: pendingUpgradeCredits > 0 ? tier : null,
-          pending_upgrade_credits: pendingUpgradeCredits,
-          pending_upgrade_session_id:
-            pendingUpgradeCredits > 0 ? session.id : null,
-        });
+        const { error: subscriptionUpsertError } = await admin.from("subscriptions").upsert(
+          {
+            user_id: userId,
+            stripe_subscription_id: subscriptionId,
+            stripe_price_id: null,
+            tier,
+            billing_interval: billingInterval,
+            status:
+              checkoutSubscriptionStatus === "active"
+                ? "active"
+                : checkoutSubscriptionStatus === "canceled"
+                  ? "canceled"
+                  : checkoutSubscriptionStatus === "unpaid"
+                    ? "unpaid"
+                    : "past_due",
+            current_period_start: checkoutPeriodStart,
+            current_period_end: checkoutPeriodEnd,
+            pending_upgrade_from_tier: pendingUpgradeCredits > 0 ? oldTier : null,
+            pending_upgrade_to_tier: pendingUpgradeCredits > 0 ? tier : null,
+            pending_upgrade_credits: pendingUpgradeCredits,
+            pending_upgrade_session_id:
+              pendingUpgradeCredits > 0 ? session.id : null,
+          },
+          { onConflict: "user_id" }
+        );
         if (subscriptionUpsertError) {
           return NextResponse.json(
             { error: `Subscription update failed: ${subscriptionUpsertError.message}` },
             { status: 500 }
           );
+        }
+
+        // Grant upgrade proration credits here — not only on invoice.paid — because invoice.paid
+        // can arrive before this handler runs or before stripe_subscription_id matches the new sub.
+        if (pendingUpgradeCredits > 0) {
+          const { error: upgradeGrantError } = await admin.rpc("grant_credits", {
+            p_user_id: userId,
+            p_subscription_delta: 0,
+            p_addon_delta: pendingUpgradeCredits,
+            p_event_type: "upgrade_proration_grant",
+            p_idempotency_key: `checkout.session.completed:${session.id}:upgrade_proration`,
+            p_source: "stripe",
+            p_metadata: {
+              stripe_event_id: stripeEventId,
+              checkout_session_id: session.id,
+              from_tier: oldTier,
+              to_tier: tier,
+              granted_credits: pendingUpgradeCredits,
+            },
+          });
+          if (upgradeGrantError) {
+            return NextResponse.json(
+              {
+                error: `Upgrade proration grant failed: ${upgradeGrantError.message}`,
+              },
+              { status: 500 }
+            );
+          }
+          await admin
+            .from("subscriptions")
+            .update({
+              pending_upgrade_from_tier: null,
+              pending_upgrade_to_tier: null,
+              pending_upgrade_credits: 0,
+              pending_upgrade_session_id: null,
+            })
+            .eq("user_id", userId);
         }
 
         if (!hadExistingSubscription) {
@@ -334,7 +338,7 @@ export async function POST(request: Request) {
             );
           }
         }
-      } else if (meta.checkout_mode === "addon") {
+      } else if (resolvedCheckoutMode === "addon") {
         const pack = meta.addon_pack ?? "credits_250";
         const credits = ADDON_PACKS[pack].credits;
         const { error: addonGrantError } = await admin.rpc("grant_credits", {
@@ -378,8 +382,8 @@ export async function POST(request: Request) {
       debugLog("A2", "stripe.webhook.checkout_completed_missing_user_id", {
         stripeEventId,
         sessionId: session.id,
-        hadMetaUserId: userIdFromMeta !== null,
-        hadClientReferenceId: userIdFromClientRef !== null,
+        hadMetaUserId,
+        hadClientReferenceId,
       });
     }
   }
@@ -457,19 +461,23 @@ export async function POST(request: Request) {
     }
   }
 
-  if (eventType === "invoice.paid") {
+  if (
+    eventType === "invoice.paid" ||
+    eventType === "invoice.payment_succeeded"
+  ) {
     const invoice = event.data.object as {
       id: string;
-      subscription?: string;
+      subscription?: string | { id?: string } | null;
       billing_reason?: string;
     };
-    if (invoice.subscription) {
+    const subscriptionId = stripeSubscriptionIdFromInvoice(invoice);
+    if (subscriptionId) {
       const { data: subscriptionRow } = await admin
         .from("subscriptions")
         .select(
           "user_id, tier, pending_upgrade_from_tier, pending_upgrade_to_tier, pending_upgrade_credits, pending_upgrade_session_id"
         )
-        .eq("stripe_subscription_id", invoice.subscription)
+        .eq("stripe_subscription_id", subscriptionId)
         .maybeSingle();
 
       if (subscriptionRow?.user_id) {
@@ -508,7 +516,10 @@ export async function POST(request: Request) {
           });
         }
 
-        if (pendingUpgradeCredits > 0) {
+        if (
+          pendingUpgradeCredits > 0 &&
+          invoiceEligibleForPendingUpgradeAddonGrant(invoice.billing_reason)
+        ) {
           await admin.rpc("grant_credits", {
             p_user_id: subscriptionRow.user_id,
             p_subscription_delta: 0,
@@ -519,6 +530,7 @@ export async function POST(request: Request) {
             p_metadata: {
               stripe_event_id: stripeEventId,
               invoice_id: invoice.id,
+              billing_reason: billingReason,
               from_tier: pendingFrom,
               to_tier: pendingTo,
               checkout_session_id: pendingSessionId,

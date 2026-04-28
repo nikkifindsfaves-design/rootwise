@@ -72,6 +72,14 @@ export async function proxy(request: NextRequest) {
       (Number.isFinite(currentPeriodEnd) && currentPeriodEnd >= startOfToday);
 
     if (!hasAccess) {
+      const billingReturn = request.nextUrl.searchParams.get("billing");
+      // Returning from Stripe Checkout before webhooks activate subscription — land on dashboard.
+      if (
+        billingReturn === "success" &&
+        request.nextUrl.pathname.startsWith("/dashboard")
+      ) {
+        return response;
+      }
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/onboarding";
       if (!hasAccess) {

@@ -14,6 +14,7 @@ import {
   type CanvasThemeId,
 } from "@/lib/themes/canvas-themes";
 import { treeCanvasSurfaceStyleForTheme } from "@/lib/themes/tree-canvas-surface-styles";
+import { UpgradeInvoiceReturnBanner } from "@/components/billing/upgrade-invoice-return-banner";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
@@ -753,6 +754,8 @@ export default function MyTreesShell({
           </Link>
         </div>
       </nav>
+
+      <UpgradeInvoiceReturnBanner />
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         <section

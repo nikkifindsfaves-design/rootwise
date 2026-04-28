@@ -56,3 +56,16 @@ export function getTierIntervalFromPriceId(priceId: string): {
 } | null {
   return PRICE_ID_TO_PLAN.get(priceId) ?? null;
 }
+
+/** All configured `STRIPE_PRICE_*` ids (membership only), for Customer Portal subscription updates. */
+export function getConfiguredMembershipStripePriceIds(): string[] {
+  const ids: string[] = [];
+  for (const tier of MEMBERSHIP_TIER_ORDER) {
+    for (const interval of BILLING_INTERVAL_ORDER) {
+      const envKey = `STRIPE_PRICE_${tier.toUpperCase()}_${interval.toUpperCase()}`;
+      const id = process.env[envKey]?.trim();
+      if (id) ids.push(id);
+    }
+  }
+  return ids;
+}
