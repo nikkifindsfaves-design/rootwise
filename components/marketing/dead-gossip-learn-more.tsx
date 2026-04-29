@@ -645,7 +645,7 @@ export function DeadGossipLearnMore() {
                   lineHeight: 1.6,
                 }}
               >
-                Watch us build, feature by feature.
+                Watch us build, feature by feature in under 90 seconds.
               </p>
             </div>
             <style

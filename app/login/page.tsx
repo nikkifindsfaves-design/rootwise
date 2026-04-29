@@ -623,7 +623,7 @@ function LoginPageContent() {
                     }}
                     required
                     autoComplete="name"
-                    className="w-full rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-[var(--dg-brown-dark)] outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
+                    className="w-full rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-black outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
                     placeholder="First and last name."
                   />
                 </div>
@@ -644,7 +644,7 @@ function LoginPageContent() {
                     }}
                     required
                     autoComplete="email"
-                    className="w-full rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-[var(--dg-brown-dark)] outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
+                    className="w-full rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-black outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
                     placeholder="you@example.com"
                   />
                   {wlError ? (
@@ -671,7 +671,7 @@ function LoginPageContent() {
                       setWlError(null);
                     }}
                     rows={3}
-                    className="w-full resize-none rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-[var(--dg-brown-dark)] outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
+                    className="w-full resize-none rounded-md border border-[var(--dg-paper-border)] bg-white px-3 py-2 text-sm text-black outline-none ring-[var(--dg-brown-outline)] placeholder:text-[var(--dg-brown-muted)] focus:ring-2"
                     placeholder="e.g. I research colonial American lines"
                   />
                 </div>
