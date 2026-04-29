@@ -10,6 +10,7 @@ import {
   Playfair_Display,
   Special_Elite,
 } from "next/font/google";
+import { Analytics } from "@vercel/analytics/react";
 import { ThemeProvider } from "@/lib/theme/theme-context";
 import "./globals.css";
 
@@ -86,6 +87,7 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col">
         <ThemeProvider>{children}</ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
