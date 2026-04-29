@@ -32,6 +32,9 @@ const colors = {
   cream: "var(--dg-cream)",
 };
 
+/** Per-tree dashboard: after vertically centering the (+, info) stack with the credit boxes, nudge the whole group up (px). 0 = no nudge; higher = further up. */
+const CREDITS_INFO_ICON_LIFT_PX = 2;
+
 const VIBES = [
   {
     id: "classic",
@@ -123,6 +126,21 @@ function toCanvasThemeId(raw: string): CanvasThemeId {
   if (raw === "roots") return "heirloom";
   const t = CANVAS_THEME_OPTIONS.find((x) => x.id === raw);
   return t ? t.id : DEFAULT_CANVAS_THEME_ID;
+}
+
+function vibeLabelForDisplay(raw: string): string {
+  if (raw === "old_timey") {
+    const v = VIBES.find((x) => x.id === "hearthside");
+    return v?.name ?? "Hearthside";
+  }
+  const v = VIBES.find((x) => x.id === raw);
+  return v?.name ?? raw.replace(/_/g, " ");
+}
+
+function canvasThemeLabelForDisplay(raw: string): string {
+  const id = toCanvasThemeId(raw);
+  const t = CANVAS_THEME_OPTIONS.find((x) => x.id === id);
+  return t?.name ?? id;
 }
 
 function teaserFromHistoryItem(item: TodayHistoryItem): string {
@@ -242,10 +260,13 @@ export default function MyTreesShell({
   trees,
   treesErrorMessage,
   personsErrorMessage,
+  activeTreeDashboardId = null,
 }: {
   trees: TreeWithCount[];
   treesErrorMessage: string | null;
   personsErrorMessage: string | null;
+  /** When set, user is on `/dashboard/[treeId]` — show full dashboard plus canvas entry for this tree. */
+  activeTreeDashboardId?: string | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -299,6 +320,13 @@ export default function MyTreesShell({
   const [selectedAddonPack, setSelectedAddonPack] =
     useState<keyof typeof ADDON_PACKS>("credits_250");
 
+  const [emptyWelcomeDismissed, setEmptyWelcomeDismissed] = useState(false);
+
+  const activeTree =
+    activeTreeDashboardId !== null && activeTreeDashboardId !== ""
+      ? trees.find((t) => t.id === activeTreeDashboardId)
+      : undefined;
+
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -326,6 +354,10 @@ export default function MyTreesShell({
       setBillingLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (trees.length > 0) setEmptyWelcomeDismissed(false);
+  }, [trees.length]);
 
   useEffect(() => {
     void refreshBilling();
@@ -599,6 +631,195 @@ export default function MyTreesShell({
     }
   }
 
+  const isTreeSelectRoute =
+    activeTreeDashboardId === null || activeTreeDashboardId === "";
+
+  function renderTreePickerCardGrid() {
+    return (
+      <ul
+        className="grid gap-4"
+        style={{
+          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 200px))",
+        }}
+      >
+        {trees.map((tree) => {
+          const canvasResolved = toCanvasThemeId(tree.canvas_theme);
+          const surface = treeCanvasSurfaceStyleForTheme(
+            canvasResolved,
+            isAppDark
+          );
+          const fonts = treeListingCardFonts(canvasResolved, isAppDark);
+          const titleShadow = isAppDark
+            ? "0 1px 3px rgba(0,0,0,0.85), 0 0 1px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.35)"
+            : treeCardInk.titleShadowLight;
+          const metaShadow = isAppDark
+            ? "0 1px 2px rgba(0,0,0,0.75)"
+            : treeCardInk.metaShadowLight;
+          const iconShadow = isAppDark
+            ? "drop-shadow(0 1px 2px rgba(0,0,0,0.85))"
+            : treeCardInk.iconFilterLight;
+          return (
+            <div
+              key={tree.id}
+              className="dg-tree-list-card-wrap w-full min-w-0 max-w-[200px]"
+            >
+              <li
+                className="group relative flex h-full min-h-[9.5rem] w-full min-w-0 flex-col overflow-hidden rounded-lg border shadow-sm"
+                style={{
+                  position: "relative",
+                  borderColor: `${colors.brownBorder}bb`,
+                  boxShadow: "0 4px 20px rgb(var(--dg-shadow-rgb) / 0.12)",
+                  ...surface,
+                }}
+              >
+                <Link
+                  href={`/dashboard/${tree.id}`}
+                  className="absolute inset-0 z-[1] rounded-lg"
+                  aria-label={`Open tree ${tree.name}`}
+                />
+                <div
+                  className="relative z-20 flex shrink-0 justify-end gap-0.5 px-2.5 pt-2"
+                  style={{ pointerEvents: "auto" }}
+                >
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="dg-edit-tree-btn inline-flex cursor-pointer p-1.5"
+                    style={{ color: treeCardInk.icon, filter: iconShadow }}
+                    aria-label="Edit tree name, vibe, and canvas"
+                    onClick={() => openEditTree(tree)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openEditTree(tree);
+                      }
+                    }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 20h9"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+                      />
+                    </svg>
+                  </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="dg-delete-tree-btn inline-flex cursor-pointer p-1.5"
+                    style={{ color: treeCardInk.icon, filter: iconShadow }}
+                    aria-label="Delete tree"
+                    onClick={() => handleDeleteTree(tree.id, tree.name)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleDeleteTree(tree.id, tree.name);
+                      }
+                    }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
+                      />
+                    </svg>
+                  </span>
+                </div>
+                <div className="pointer-events-none relative z-[2] min-w-0 flex-1 px-2.5 pb-2.5 pt-1">
+                  <h3
+                    className="line-clamp-3 min-w-0 break-words leading-snug"
+                    style={{
+                      fontFamily: fonts.heading,
+                      fontStyle: fonts.headingItalic ? "italic" : undefined,
+                      fontWeight: fonts.headingWeight,
+                      fontSize: "clamp(1.05rem, 2.5vw, 1.28rem)",
+                      letterSpacing: fonts.headingItalic ? "0.02em" : "0.03em",
+                      color: treeCardInk.title,
+                      textShadow: titleShadow,
+                      filter: treeCardInk.titleDropFilter,
+                    }}
+                  >
+                    {tree.name}
+                  </h3>
+                  <p
+                    className="mt-1 shrink-0"
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: `calc(${fonts.metaFontSize} * 0.88)`,
+                      fontWeight: fonts.metaFontWeight,
+                      color: treeCardInk.meta,
+                      textShadow: metaShadow,
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    {tree.ancestorCount}{" "}
+                    {tree.ancestorCount === 1 ? "ancestor" : "ancestors"}
+                  </p>
+                </div>
+              </li>
+            </div>
+          );
+        })}
+        <div className="flex w-full min-w-0 max-w-[200px] flex-col self-stretch">
+          <button
+            type="button"
+            className="flex h-full min-h-[9.5rem] w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-2.5 py-3 transition-opacity hover:opacity-90"
+            style={{
+              borderColor: colors.brownBorder,
+              backgroundColor: colors.cream,
+              fontFamily: sans,
+              color: colors.brownMid,
+              cursor: "pointer",
+              boxSizing: "border-box",
+            }}
+            onClick={() => openCreateTreeFromCard()}
+          >
+            <span
+              className="text-[1.65rem] font-light leading-none"
+              style={{ color: colors.brownDark }}
+              aria-hidden
+            >
+              +
+            </span>
+            <span className="text-sm font-semibold">New tree</span>
+          </button>
+        </div>
+      </ul>
+    );
+  }
+
+  const emptyWelcomeOpen =
+    trees.length === 0 && !treesErrorMessage && !emptyWelcomeDismissed;
+  const blankTreeSelectBackdrop =
+    !treesErrorMessage &&
+    isTreeSelectRoute &&
+    (trees.length > 0 ||
+      (trees.length === 0 && (!emptyWelcomeDismissed || vibeModalOpen)));
+
   return (
     <>
       <style
@@ -667,6 +888,100 @@ export default function MyTreesShell({
         }}
       />
 
+      {blankTreeSelectBackdrop ? (
+        <div
+          className="fixed inset-0 z-[100] flex min-h-svh items-center justify-center overflow-y-auto overscroll-y-contain p-4"
+          style={{ backgroundColor: "var(--dg-bg-main)" }}
+        >
+          {emptyWelcomeOpen ? (
+            <div
+              className="w-full max-w-md"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="empty-welcome-title"
+            >
+              <div
+                className="my-8 w-full rounded-lg border p-6 shadow-xl"
+                style={{
+                  backgroundColor: colors.parchment,
+                  borderColor: colors.brownBorder,
+                  boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+                }}
+              >
+                <h2
+                  id="empty-welcome-title"
+                  className="text-xl font-bold sm:text-2xl"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  No skeletons in the closet yet. Let&apos;s fix that.
+                </h2>
+                <p
+                  className="mt-3 text-sm leading-relaxed"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Create your first tree to open the ledger. Same subscription
+                  and credits as always—this only chooses where your people live.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    style={btnPrimaryModal}
+                    onClick={() => {
+                      setEmptyWelcomeDismissed(true);
+                      openCreateTreeFromCard();
+                    }}
+                  >
+                    Create tree
+                  </button>
+                  <button
+                    type="button"
+                    style={btnOutline}
+                    onClick={() => setEmptyWelcomeDismissed(true)}
+                  >
+                    Not yet
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {trees.length > 0 && isTreeSelectRoute ? (
+            <div
+              className="w-full max-w-4xl px-2"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="tree-picker-title"
+            >
+              <div
+                className="my-8 w-full rounded-lg border p-6 shadow-xl sm:p-8"
+                style={{
+                  backgroundColor: colors.parchment,
+                  borderColor: colors.brownBorder,
+                  boxShadow: "0 12px 40px rgb(var(--dg-shadow-rgb) / 0.2)",
+                }}
+              >
+                <h2
+                  id="tree-picker-title"
+                  className="text-xl font-bold sm:text-2xl"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Choose your tree
+                </h2>
+                <p
+                  className="mt-2 text-sm leading-relaxed"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Open a ledger or start another tree. Same subscription and
+                  credits as always.
+                </p>
+                <div className="mt-6">{renderTreePickerCardGrid()}</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!blankTreeSelectBackdrop ? (
+      <>
       <nav
         className="border-b px-4 py-4 sm:px-6"
         style={{
@@ -782,115 +1097,340 @@ export default function MyTreesShell({
             boxShadow: "0 6px 20px rgb(var(--dg-shadow-rgb) / 0.07)",
           }}
         >
-          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="self-center space-y-3">
-              <div
-                className="relative rounded-md border p-3"
-                style={{
-                  borderColor: colors.brownBorder,
-                  backgroundColor: colors.cream,
-                }}
-              >
-                <Link
-                  href="/learn-more#understanding-credits"
-                  className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border"
-                  style={{
-                    borderColor: colors.brownBorder,
-                    color: colors.brownMid,
-                    backgroundColor: colors.parchment,
-                  }}
-                  aria-label="How monthly credits work"
-                  title="Understanding credits"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width={20}
-                    height={20}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
+          <div
+            className={`grid lg:grid-cols-[220px_minmax(0,1fr)] ${
+              activeTreeDashboardId
+                ? "gap-x-4 lg:items-stretch"
+                : "gap-4 lg:items-start"
+            }`}
+          >
+            {activeTreeDashboardId ? (
+              <div className="flex w-full min-w-0 max-w-full flex-col space-y-0.5 self-start lg:col-start-1 lg:row-start-1 lg:min-h-0 lg:self-stretch">
+                {activeTree ? (
+                  <>
+                    <h2
+                      className="text-xl font-bold sm:text-2xl"
+                      style={{ fontFamily: serif, color: colors.brownDark }}
+                    >
+                      {activeTree.name}
+                    </h2>
+                    <div className="flex flex-col space-y-0.5">
+                      <p
+                        style={{
+                          fontFamily: sans,
+                          fontSize: "0.75rem",
+                          color: colors.brownMuted,
+                        }}
+                      >
+                        <span style={{ color: colors.brownMid }}>Vibe</span>
+                        <span
+                          style={{ color: colors.brownBorder }}
+                          aria-hidden
+                        >
+                          {" "}
+                          ·{" "}
+                        </span>
+                        {vibeLabelForDisplay(activeTree.vibe)}
+                      </p>
+                      <p
+                        style={{
+                          fontFamily: sans,
+                          fontSize: "0.75rem",
+                          color: colors.brownMuted,
+                        }}
+                      >
+                        <span style={{ color: colors.brownMid }}>Theme</span>
+                        <span
+                          style={{ color: colors.brownBorder }}
+                          aria-hidden
+                        >
+                          {" "}
+                          ·{" "}
+                        </span>
+                        {canvasThemeLabelForDisplay(activeTree.canvas_theme)}
+                      </p>
+                    </div>
+                  </>
+                ) : null}
+                <div className="mt-3 flex min-h-0 flex-1 flex-col lg:min-h-0">
+                  <div className="flex w-full max-w-full flex-col gap-1.5">
+                    <div className="flex w-full items-center justify-between gap-1.5">
+                      <div className="grid shrink-0 gap-2 [grid-template-columns:max-content_max-content]">
+                        <div
+                          className="rounded-md border px-2 py-1.5"
+                          style={{
+                            borderColor: colors.brownBorder,
+                            backgroundColor: colors.cream,
+                          }}
+                        >
+                          <p
+                            style={{
+                              fontFamily: sans,
+                              fontSize: "0.7rem",
+                              color: colors.brownMuted,
+                            }}
+                          >
+                            Monthly credits
+                          </p>
+                          <p
+                            style={{
+                              fontFamily: serif,
+                              fontSize: "1rem",
+                              color: colors.brownDark,
+                            }}
+                          >
+                            {billingSnapshot?.subscriptionCredits ?? "—"}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-md border px-2 py-1.5"
+                          style={{
+                            borderColor: colors.brownBorder,
+                            backgroundColor: colors.cream,
+                          }}
+                        >
+                          <p
+                            style={{
+                              fontFamily: sans,
+                              fontSize: "0.7rem",
+                              color: colors.brownMuted,
+                            }}
+                          >
+                            Add-on credits
+                          </p>
+                          <p
+                            style={{
+                              fontFamily: serif,
+                              fontSize: "1rem",
+                              color: colors.brownDark,
+                            }}
+                          >
+                            {billingSnapshot?.addonCredits ?? "—"}
+                          </p>
+                        </div>
+                      </div>
+                      <div
+                        className="flex shrink-0 flex-col items-center gap-1"
+                        style={{
+                          transform: `translateY(-${CREDITS_INFO_ICON_LIFT_PX}px)`,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setAddonModalOpen(true)}
+                          className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border text-sm font-medium leading-none"
+                          style={{
+                            fontFamily: sans,
+                            borderColor: colors.brownBorder,
+                            color: colors.brownDark,
+                            backgroundColor: colors.parchment,
+                          }}
+                          aria-label="Buy add-on credits"
+                          title="Buy add-on credits"
+                        >
+                          +
+                        </button>
+                        <Link
+                          href="/learn-more#understanding-credits"
+                          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+                          style={{
+                            borderColor: colors.brownBorder,
+                            color: colors.brownMid,
+                            backgroundColor: colors.parchment,
+                          }}
+                          aria-label="Understanding credits"
+                          title="Understanding credits"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width={13}
+                            height={13}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.25}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M12 17V10.5" />
+                            <path d="M12 7h.01" />
+                          </svg>
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex w-full shrink-0 flex-col gap-1.5">
+                    <Link
+                      href={`/dashboard/${activeTreeDashboardId}/canvas`}
+                      className="dg-tree-hero-btn flex w-full shrink-0 items-center justify-center rounded-md border-2 px-2 py-2 text-center text-[11px] font-semibold no-underline transition-opacity hover:opacity-90 sm:px-3 sm:text-xs"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownOutline,
+                        color: colors.brownDark,
+                        backgroundColor: colors.cream,
+                      }}
+                    >
+                      Open family tree canvas
+                    </Link>
+                    <Link
+                      href="/tree-select"
+                      className="block w-full text-left text-[11px] font-medium underline underline-offset-2 sm:text-xs"
+                      style={{ color: "var(--dg-forest)" }}
+                    >
+                      ← Back to trees
+                    </Link>
+                  </div>
+                  <div className="min-h-0 w-full flex-1 basis-0" aria-hidden />
+                </div>
+                {billingLoading && billingSnapshot == null ? (
+                  <p
+                    className="mt-2 text-xs"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
                   >
-                    <path d="M12 17V10.5" />
-                    <path d="M12 7h.01" />
-                  </svg>
-                </Link>
-                <p
-                  style={{
-                    fontFamily: sans,
-                    fontSize: "0.75rem",
-                    color: colors.brownMuted,
-                  }}
-                >
-                  Monthly credits
-                </p>
-                <p
-                  style={{
-                    fontFamily: serif,
-                    fontSize: "1.05rem",
-                    color: colors.brownDark,
-                  }}
-                >
-                  {billingSnapshot?.subscriptionCredits ?? "—"}
-                </p>
+                    Refreshing credit balances…
+                  </p>
+                ) : null}
+                {billingError ? (
+                  <p
+                    className="mt-2 text-sm"
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                  >
+                    {billingError}
+                  </p>
+                ) : null}
               </div>
-
-              <div
-                className="relative rounded-md border p-3"
-                style={{
-                  borderColor: colors.brownBorder,
-                  backgroundColor: colors.cream,
-                }}
-              >
-                <p
+            ) : (
+              <div className="self-center space-y-3 lg:col-start-1 lg:row-start-1">
+                <div
+                  className="relative rounded-md border p-3"
                   style={{
-                    fontFamily: sans,
-                    fontSize: "0.75rem",
-                    color: colors.brownMuted,
-                  }}
-                >
-                  Add-on credits
-                </p>
-                <p
-                  style={{
-                    fontFamily: serif,
-                    fontSize: "1.05rem",
-                    color: colors.brownDark,
-                  }}
-                >
-                  {billingSnapshot?.addonCredits ?? "—"}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setAddonModalOpen(true)}
-                  className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border text-base font-semibold"
-                  style={{
-                    fontFamily: sans,
                     borderColor: colors.brownBorder,
-                    color: colors.brownDark,
-                    backgroundColor: colors.parchment,
+                    backgroundColor: colors.cream,
                   }}
-                  aria-label="Buy add-on credits"
-                  title="Buy add-on credits"
                 >
-                  +
-                </button>
-              </div>
+                  <Link
+                    href="/learn-more#understanding-credits"
+                    className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full border"
+                    style={{
+                      borderColor: colors.brownBorder,
+                      color: colors.brownMid,
+                      backgroundColor: colors.parchment,
+                    }}
+                    aria-label="How monthly credits work"
+                    title="Understanding credits"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width={16}
+                      height={16}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <path d="M12 17V10.5" />
+                      <path d="M12 7h.01" />
+                    </svg>
+                  </Link>
+                  <p
+                    style={{
+                      fontFamily: sans,
+                      fontSize: "0.75rem",
+                      color: colors.brownMuted,
+                    }}
+                  >
+                    Monthly credits
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: serif,
+                      fontSize: "1.05rem",
+                      color: colors.brownDark,
+                    }}
+                  >
+                    {billingSnapshot?.subscriptionCredits ?? "—"}
+                  </p>
+                </div>
 
-              <p
-                className="px-0.5 text-xs"
-                style={{ fontFamily: sans, color: colors.brownMuted }}
-              >
-                Plan:{" "}
-                {billingSnapshot ? getTierDisplayName(billingSnapshot.tier) : "—"}
-              </p>
-            </div>
+                <div
+                  className="relative rounded-md border p-3"
+                  style={{
+                    borderColor: colors.brownBorder,
+                    backgroundColor: colors.cream,
+                  }}
+                >
+                  <p
+                    style={{
+                      fontFamily: sans,
+                      fontSize: "0.75rem",
+                      color: colors.brownMuted,
+                    }}
+                  >
+                    Add-on credits
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: serif,
+                      fontSize: "1.05rem",
+                      color: colors.brownDark,
+                    }}
+                  >
+                    {billingSnapshot?.addonCredits ?? "—"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAddonModalOpen(true)}
+                    className="absolute right-3 top-3 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border text-base font-medium"
+                    style={{
+                      fontFamily: sans,
+                      borderColor: colors.brownBorder,
+                      color: colors.brownDark,
+                      backgroundColor: colors.parchment,
+                    }}
+                    aria-label="Buy add-on credits"
+                    title="Buy add-on credits"
+                  >
+                    +
+                  </button>
+                </div>
+                <p
+                  className="px-0.5 text-xs"
+                  style={{ fontFamily: sans, color: colors.brownMuted }}
+                >
+                  Plan:{" "}
+                  {billingSnapshot
+                    ? getTierDisplayName(billingSnapshot.tier)
+                    : "—"}
+                </p>
+                {billingLoading && billingSnapshot == null ? (
+                  <p
+                    className="mt-2 text-xs"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    Refreshing credit balances…
+                  </p>
+                ) : null}
+                {billingError ? (
+                  <p
+                    className="mt-2 text-sm"
+                    style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                  >
+                    {billingError}
+                  </p>
+                ) : null}
+              </div>
+            )}
 
             <div
-              className="rounded-md border p-3"
+              className={`rounded-md border p-3 lg:col-start-2 ${
+                activeTreeDashboardId
+                  ? "lg:row-start-1 lg:self-stretch"
+                  : "lg:row-start-1 lg:self-start"
+              }`}
               style={{
                 borderColor: colors.brownBorder,
                 backgroundColor: colors.cream,
@@ -901,7 +1441,7 @@ export default function MyTreesShell({
                   className="text-base font-bold sm:text-lg"
                   style={{ fontFamily: serif, color: colors.brownDark }}
                 >
-                  Today in Your History
+                  This week in Your History
                 </h3>
               </div>
 
@@ -965,22 +1505,6 @@ export default function MyTreesShell({
                 </div>
               )}
 
-              {billingLoading ? (
-                <p
-                  className="mt-2 text-xs"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                >
-                  Refreshing credit balances…
-                </p>
-              ) : null}
-              {billingError ? (
-                <p
-                  className="mt-2 text-sm"
-                  style={{ fontFamily: sans, color: "var(--dg-danger)" }}
-                >
-                  {billingError}
-                </p>
-              ) : null}
             </div>
           </div>
         </section>
@@ -1015,6 +1539,7 @@ export default function MyTreesShell({
           </p>
         ) : null}
 
+        {!activeTreeDashboardId ? (
         <section
           className="mb-10 rounded-lg border p-6"
           style={{
@@ -1051,180 +1576,9 @@ export default function MyTreesShell({
             </div>
           ) : null}
 
-          <ul
-            className="grid gap-4"
-            style={{
-              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 200px))",
-            }}
-          >
-            {trees.map((tree) => {
-              const canvasResolved = toCanvasThemeId(tree.canvas_theme);
-              const surface = treeCanvasSurfaceStyleForTheme(
-                canvasResolved,
-                isAppDark
-              );
-              const fonts = treeListingCardFonts(canvasResolved, isAppDark);
-              const titleShadow = isAppDark
-                ? "0 1px 3px rgba(0,0,0,0.85), 0 0 1px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.35)"
-                : treeCardInk.titleShadowLight;
-              const metaShadow = isAppDark
-                ? "0 1px 2px rgba(0,0,0,0.75)"
-                : treeCardInk.metaShadowLight;
-              const iconShadow = isAppDark
-                ? "drop-shadow(0 1px 2px rgba(0,0,0,0.85))"
-                : treeCardInk.iconFilterLight;
-              return (
-                <div
-                  key={tree.id}
-                  className="dg-tree-list-card-wrap w-full min-w-0 max-w-[200px]"
-                >
-                <li
-                  className="group relative flex h-full min-h-[9.5rem] w-full min-w-0 flex-col overflow-hidden rounded-lg border shadow-sm"
-                  style={{
-                    position: "relative",
-                    borderColor: `${colors.brownBorder}bb`,
-                    boxShadow: "0 4px 20px rgb(var(--dg-shadow-rgb) / 0.12)",
-                    ...surface,
-                  }}
-                >
-                  <Link
-                    href={`/dashboard/${tree.id}`}
-                    className="absolute inset-0 z-[1] rounded-lg"
-                    aria-label={`Open tree ${tree.name}`}
-                  />
-                  <div
-                    className="relative z-20 flex shrink-0 justify-end gap-0.5 px-2.5 pt-2"
-                    style={{ pointerEvents: "auto" }}
-                  >
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className="dg-edit-tree-btn inline-flex cursor-pointer p-1.5"
-                      style={{ color: treeCardInk.icon, filter: iconShadow }}
-                      aria-label="Edit tree name, vibe, and canvas"
-                      onClick={() => openEditTree(tree)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openEditTree(tree);
-                        }
-                      }}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={1.75}
-                        aria-hidden
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 20h9"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-                        />
-                      </svg>
-                    </span>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className="dg-delete-tree-btn inline-flex cursor-pointer p-1.5"
-                      style={{ color: treeCardInk.icon, filter: iconShadow }}
-                      aria-label="Delete tree"
-                      onClick={() => handleDeleteTree(tree.id, tree.name)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          handleDeleteTree(tree.id, tree.name);
-                        }
-                      }}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={1.75}
-                        aria-hidden
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
-                        />
-                      </svg>
-                    </span>
-                  </div>
-                  <div className="pointer-events-none relative z-[2] min-w-0 flex-1 px-2.5 pb-2.5 pt-1">
-                    <h3
-                      className="line-clamp-3 min-w-0 break-words leading-snug"
-                      style={{
-                        fontFamily: fonts.heading,
-                        fontStyle: fonts.headingItalic ? "italic" : undefined,
-                        fontWeight: fonts.headingWeight,
-                        fontSize: "clamp(1.05rem, 2.5vw, 1.28rem)",
-                        letterSpacing: fonts.headingItalic ? "0.02em" : "0.03em",
-                        color: treeCardInk.title,
-                        textShadow: titleShadow,
-                        filter: treeCardInk.titleDropFilter,
-                      }}
-                    >
-                      {tree.name}
-                    </h3>
-                    <p
-                      className="mt-1 shrink-0"
-                      style={{
-                        fontFamily: fonts.body,
-                        fontSize: `calc(${fonts.metaFontSize} * 0.88)`,
-                        fontWeight: fonts.metaFontWeight,
-                        color: treeCardInk.meta,
-                        textShadow: metaShadow,
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      {tree.ancestorCount}{" "}
-                      {tree.ancestorCount === 1 ? "ancestor" : "ancestors"}
-                    </p>
-                  </div>
-                </li>
-                </div>
-              );
-            })}
-            <div className="flex w-full min-w-0 max-w-[200px] flex-col self-stretch">
-              <button
-                type="button"
-                className="flex h-full min-h-[9.5rem] w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-2.5 py-3 transition-opacity hover:opacity-90"
-                style={{
-                  borderColor: colors.brownBorder,
-                  backgroundColor: colors.cream,
-                  fontFamily: sans,
-                  color: colors.brownMid,
-                  cursor: "pointer",
-                  boxSizing: "border-box",
-                }}
-                onClick={() => openCreateTreeFromCard()}
-              >
-                <span
-                  className="text-[1.65rem] font-light leading-none"
-                  style={{ color: colors.brownDark }}
-                  aria-hidden
-                >
-                  +
-                </span>
-                <span className="text-sm font-semibold">New tree</span>
-              </button>
-            </div>
-          </ul>
+          {renderTreePickerCardGrid()}
         </section>
+        ) : null}
 
         <section
           className="mb-10 rounded-lg border p-6"
@@ -1421,6 +1775,8 @@ export default function MyTreesShell({
           </section>
         </div>
       </div>
+      </>
+      ) : null}
 
       {addonModalOpen ? (
         <div

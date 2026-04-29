@@ -239,7 +239,7 @@ function LoginPageContent() {
       return;
     }
 
-    router.push("/dashboard");
+    router.push("/tree-select");
   }
 
   async function resendVerificationForSignup() {

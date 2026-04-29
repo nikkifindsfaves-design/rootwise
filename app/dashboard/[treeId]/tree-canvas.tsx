@@ -35,6 +35,7 @@ import {
   useControls,
   type ReactZoomPanPinchContentRef,
 } from "react-zoom-pan-pinch";
+import { UpgradeInvoiceReturnBanner } from "@/components/billing/upgrade-invoice-return-banner";
 import DocumentUploadSection from "../document-upload";
 
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
@@ -3078,6 +3079,7 @@ export default function TreeCanvas({
       />
 
       <div className="flex h-svh min-h-0 flex-col overflow-hidden">
+        <UpgradeInvoiceReturnBanner />
         <nav
           className="shrink-0 border-b px-4 py-3 sm:px-6"
           style={{
@@ -3118,11 +3120,11 @@ export default function TreeCanvas({
                   {treeName}
                 </p>
                 <Link
-                  href="/dashboard"
+                  href={`/dashboard/${treeId}`}
                   className="mt-1 inline-block text-xs underline sm:text-sm"
                   style={{ fontFamily: sans, color: colors.forest }}
                 >
-                  Back to My Trees
+                  Tree dashboard
                 </Link>
               </div>
             </div>

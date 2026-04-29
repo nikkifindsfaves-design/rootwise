@@ -631,7 +631,7 @@ export default function ReviewDuplicatesPage() {
           : pendingReview.returnTreeId &&
               pendingReview.returnTreeId.trim() !== ""
             ? `/dashboard/${pendingReview.returnTreeId.trim()}`
-            : "/dashboard";
+            : "/tree-select";
       router.push(dest);
     } catch {
       setSubmitError("Network error. Try again.");

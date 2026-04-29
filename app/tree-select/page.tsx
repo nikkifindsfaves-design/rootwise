@@ -6,16 +6,7 @@ import MyTreesShell, {
   type TreeWithCount,
 } from "@/app/dashboard/my-trees-shell";
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export default async function TreeDashboardPage({
-  params,
-}: {
-  params: Promise<{ treeId: string }>;
-}) {
-  const { treeId } = await params;
-
+export default async function TreeSelectPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -23,21 +14,6 @@ export default async function TreeDashboardPage({
 
   if (!user) {
     redirect("/login");
-  }
-
-  if (!UUID_RE.test(treeId)) {
-    redirect("/tree-select");
-  }
-
-  const { data: treeRow, error: treeErr } = await supabase
-    .from("trees")
-    .select("id")
-    .eq("id", treeId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (treeErr || !treeRow) {
-    redirect("/tree-select");
   }
 
   const { data: trees, error: treesError } = await supabase
@@ -83,7 +59,6 @@ export default async function TreeDashboardPage({
       trees={treesWithCounts}
       treesErrorMessage={treesError?.message ?? null}
       personsErrorMessage={personsError?.message ?? null}
-      activeTreeDashboardId={treeId}
     />
   );
 }

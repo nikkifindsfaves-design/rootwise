@@ -18,7 +18,7 @@ const promoSans = Source_Sans_3({
 export const metadata: Metadata = {
   title: "Dead Gossip — Learn more",
   description:
-    "Why we built Dead Gossip, what's new, how credits work, and what's coming next.",
+    "Why we built Dead Gossip, the body of work so far, how credits work, and what's coming next.",
 };
 
 export default function LearnMoreLayout({

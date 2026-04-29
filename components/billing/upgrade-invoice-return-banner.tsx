@@ -56,7 +56,8 @@ export function UpgradeInvoiceReturnBanner() {
 
   if (!payload) return null;
 
-  const onDashboardHome = pathname === "/dashboard";
+  const onTreePicker =
+    pathname === "/tree-select" || pathname === "/dashboard";
   const paidLabel = formatMoney(payload.paidCents, payload.currency);
   const totalLabel = formatMoney(payload.totalCents, payload.currency);
   const zeroPaid = payload.paidCents === 0;
@@ -73,9 +74,9 @@ export function UpgradeInvoiceReturnBanner() {
     >
       <div className="mx-auto flex max-w-6xl flex-col gap-3">
         <div className="flex shrink-0 flex-wrap items-center gap-3">
-          {!onDashboardHome ? (
+          {!onTreePicker ? (
             <Link
-              href="/dashboard"
+              href="/tree-select"
               className="text-sm font-semibold underline underline-offset-2"
               style={{ color: "var(--dg-brown-outline)" }}
             >

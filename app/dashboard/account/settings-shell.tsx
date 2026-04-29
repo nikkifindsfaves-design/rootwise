@@ -425,11 +425,11 @@ export default function AccountSettingsShell() {
           Account Settings
         </h1>
         <Link
-          href="/dashboard"
+          href="/tree-select"
           className="text-sm underline underline-offset-2"
           style={{ fontFamily: sans, color: "var(--dg-brown-outline)" }}
         >
-          Back to dashboard
+          Back to trees
         </Link>
       </div>
 

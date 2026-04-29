@@ -10,9 +10,67 @@ type TabId =
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "why", label: "Why Dead Gossip" },
+  { id: "features", label: "The Body of Work (So Far)" },
   { id: "credits", label: "Understanding Credits" },
-  { id: "features", label: "Features & Releases" },
-  { id: "next", label: "What's Next" },
+  { id: "next", label: "Next of Kin" },
+];
+
+/** YouTube embed id (from youtube.com/watch?v=… or youtu.be/…) */
+const WHATS_NEW_ITEMS: {
+  id: string;
+  youtubeId: string;
+  dateLabel: string;
+  description: string;
+}[] = [
+  {
+    id: "day-thirty-vibes",
+    youtubeId: "HVxMsh1L-xw",
+    dateLabel: "April 27, 2026",
+    description:
+      "Your ancestor lived one life but Dead Gossip will tell it five ways. Day 30 of building in public: same person, same records, different vibe, completely different story. Reverent or reckless — you decide how their history reads. Still polishing but the bones are good. And in genealogy, the bones are everything. The good, the bad, the buried.",
+  },
+  {
+    id: "canvas-themes-vibe",
+    youtubeId: "ui8xF4vsbR0",
+    dateLabel: "April 24, 2026",
+    description:
+      "The family tree hasn't had a glow-up since someone hand-drew one on parchment in 1847. That changes today. Building Dead Gossip in public: three canvas themes that transform your entire experience. Dead Gossip for chaos energy. Evidence Board for the ancestors with a record. Heirloom for the ones who kept their secrets quiet. Your tree, your ancestors, your vibe. The good, the bad, the buried.",
+  },
+  {
+    id: "day-twenty-glow-up",
+    youtubeId: "RYCcrGw2VmA",
+    dateLabel: "April 17, 2026",
+    description:
+      "Your ancestors didn't survive wars, famine and questionable marriages just to end up on an ugly profile page. Day 20 of building Dead Gossip in public: same features — documents, vitals, notepad — but now they actually look like they belong together. The glow-up is real and the dead deserved better. The good, the bad, the buried.",
+  },
+  {
+    id: "census-profile",
+    youtubeId: "SdQvjViGD9w",
+    dateLabel: "April 14, 2026",
+    description:
+      "Someone scrawled your ancestor's name in cursive on a census form 150 years ago and AI just pulled every detail off the page. Building Dead Gossip in public: handwritten census extraction, a profile page that finally does these people justice, photos to put faces to names and four record types running — birth, death, marriage and census. The dead are getting the glow-up they deserve. The good, the bad, the buried.",
+  },
+  {
+    id: "day-ten",
+    youtubeId: "vQJD4mGK9uA",
+    dateLabel: "April 5, 2026",
+    description:
+      "Your third-great-grandfather's 1847 baptism just got narrated in five different vibes by AI. Want it respectful? Done. Want it chaotic? Also done. Day 10 of building Dead Gossip in public: event stories with personality, a family tree canvas and manual ancestor selection for the ones who slipped through the cracks. The good, the bad, the buried.",
+  },
+  {
+    id: "day-two",
+    youtubeId: "av1fgK5fnAA",
+    dateLabel: "March 28, 2026",
+    description:
+      "Your great-great-grandmother's birth record just got read by AI in under 10 seconds. Day 2 of building Dead Gossip in public: data extraction, duplicate detection, merge review and a landing page worthy of the dead. The good, the bad, the buried.",
+  },
+  {
+    id: "day-one",
+    youtubeId: "xJkvs177YzU",
+    dateLabel: "March 27, 2026",
+    description:
+      "Day one. No code experience. No plan. Just a webpage to track a few ancestors and a gut feeling this could be something. The bodies would come later.",
+  },
 ];
 
 const WHATS_NEXT_ITEMS: {
@@ -564,21 +622,143 @@ export function DeadGossipLearnMore() {
         ) : null}
 
         {tab === "features" ? (
-          <section style={{ textAlign: "center" }}>
-            <h2
-              style={{
-                fontFamily: display,
-                fontWeight: 600,
-                fontSize: "clamp(1.375rem, 3.5vw, 1.75rem)",
-                marginBottom: 10,
+          <section>
+            <div style={{ textAlign: "center", marginBottom: 36 }}>
+              <h2
+                style={{
+                  fontFamily: display,
+                  fontWeight: 600,
+                  fontSize: "clamp(1.375rem, 3.5vw, 1.75rem)",
+                  marginBottom: 10,
+                }}
+              >
+                The Body of Work (So Far)
+              </h2>
+              <p
+                style={{
+                  margin: 0,
+                  maxWidth: 520,
+                  marginLeft: "auto",
+                  marginRight: "auto",
+                  color: dimWhite,
+                  fontSize: 15,
+                  lineHeight: 1.6,
+                }}
+              >
+                Watch us build, feature by feature.
+              </p>
+            </div>
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `
+.whats-new-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+  background-color: rgba(255,255,255,0.02);
+  box-sizing: border-box;
+}
+.whats-new-row .whats-new-media {
+  flex: 1 1 320px;
+  max-width: min(100%, 440px);
+  min-width: 0;
+}
+.whats-new-row .whats-new-copy {
+  flex: 1 1 220px;
+  min-width: 0;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-left: none;
+}
+@media (min-width: 640px) {
+  .whats-new-row .whats-new-copy {
+    border-top: none;
+    border-left: 1px solid rgba(255,255,255,0.08);
+  }
+}
+              `.trim(),
               }}
+            />
+            <div
+              role="list"
+              style={{ display: "flex", flexDirection: "column", gap: 28 }}
             >
-              Features &amp; Releases
-            </h2>
-            <p style={{ margin: "0 auto 36px", maxWidth: 520, color: dimWhite, fontSize: 15, lineHeight: 1.6 }}>
-              What we&apos;ve shipped recently — and why we built it.
-            </p>
-            <p style={{ margin: 0, color: dimMore, fontSize: 15 }}>Coming soon</p>
+              {WHATS_NEW_ITEMS.map((item) => (
+                <article
+                  key={item.id}
+                  role="listitem"
+                  className="whats-new-row"
+                  style={{
+                    borderLeftWidth: 3,
+                    borderLeftStyle: "solid",
+                    borderLeftColor: "rgba(234, 179, 8, 0.65)",
+                  }}
+                  aria-label={`${item.dateLabel}. ${item.description.slice(0, 120)}`}
+                >
+                  <div
+                    className="whats-new-media"
+                    style={{
+                      position: "relative",
+                      alignSelf: "flex-start",
+                      aspectRatio: "16 / 9",
+                      backgroundColor: "rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    <iframe
+                      title={`The Body of Work — ${item.dateLabel}`}
+                      src={`https://www.youtube.com/embed/${item.youtubeId}?rel=0`}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                        border: "none",
+                        display: "block",
+                      }}
+                    />
+                  </div>
+                  <div
+                    className="whats-new-copy"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "center",
+                      gap: 10,
+                      padding: "22px 24px",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontFamily: display,
+                        fontSize: "clamp(1.05rem, 2.8vw, 1.35rem)",
+                        fontWeight: 600,
+                        lineHeight: 1.2,
+                        color: "#fafafa",
+                      }}
+                    >
+                      {item.dateLabel}
+                    </p>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontFamily: sans,
+                        fontSize: 15,
+                        lineHeight: 1.65,
+                        color: dimWhite,
+                      }}
+                    >
+                      {item.description}
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
         ) : null}
 
@@ -974,7 +1154,15 @@ export function DeadGossipLearnMore() {
 
         {tab === "next" ? (
           <section>
-            <div style={{ marginBottom: 28, textAlign: "left" }}>
+            <div
+              style={{
+                marginBottom: 28,
+                maxWidth: 680,
+                marginLeft: "auto",
+                marginRight: "auto",
+                textAlign: "center",
+              }}
+            >
               <h2
                 style={{
                   fontFamily: display,
@@ -983,19 +1171,20 @@ export function DeadGossipLearnMore() {
                   marginBottom: 10,
                 }}
               >
-                You Decide What&apos;s Next
+                Next of Kin
               </h2>
               <p
                 style={{
                   margin: 0,
+                  marginLeft: "auto",
+                  marginRight: "auto",
                   fontSize: 15,
                   lineHeight: 1.65,
                   color: dimWhite,
                   maxWidth: 520,
                 }}
               >
-                Vote on the research problems that matter most to you.
-                The highest-voted items move up and get built first.
+                What we&apos;re digging into next.
               </p>
             </div>
             <div

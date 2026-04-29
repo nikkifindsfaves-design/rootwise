@@ -35,6 +35,7 @@ export async function proxy(request: NextRequest) {
   if (
     !user &&
     (request.nextUrl.pathname.startsWith("/dashboard") ||
+      request.nextUrl.pathname.startsWith("/tree-select") ||
       request.nextUrl.pathname.startsWith("/review") ||
       request.nextUrl.pathname.startsWith("/onboarding"))
   ) {
@@ -47,6 +48,7 @@ export async function proxy(request: NextRequest) {
   if (
     user &&
     (request.nextUrl.pathname.startsWith("/dashboard") ||
+      request.nextUrl.pathname.startsWith("/tree-select") ||
       request.nextUrl.pathname.startsWith("/review")) &&
     !request.nextUrl.pathname.startsWith("/dashboard/account")
   ) {
@@ -76,7 +78,8 @@ export async function proxy(request: NextRequest) {
       // Returning from Stripe Checkout before webhooks activate subscription — land on dashboard.
       if (
         billingReturn === "success" &&
-        request.nextUrl.pathname.startsWith("/dashboard")
+        (request.nextUrl.pathname.startsWith("/dashboard") ||
+          request.nextUrl.pathname.startsWith("/tree-select"))
       ) {
         return response;
       }

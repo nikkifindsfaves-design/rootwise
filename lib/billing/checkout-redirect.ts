@@ -16,7 +16,9 @@ export function buildStripeCheckoutBillingUrls(
   const base =
     returnTo === "account"
       ? `${origin}/dashboard/account`
-      : `${origin}/${returnTo}`;
+      : returnTo === "onboarding"
+        ? `${origin}/onboarding`
+        : `${origin}/tree-select`;
   return {
     success_url: `${base}?billing=success`,
     cancel_url: `${base}?billing=cancel`,

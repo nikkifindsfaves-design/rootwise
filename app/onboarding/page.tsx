@@ -272,7 +272,7 @@ function OnboardingPageContent() {
   useEffect(() => {
     const billingReturn = searchParams.get("billing");
     if (billingReturn === "success") {
-      router.replace("/dashboard?billing=success");
+      router.replace("/tree-select?billing=success");
       return;
     }
     const signupState = searchParams.get("signup_state");
@@ -694,7 +694,7 @@ function OnboardingPageContent() {
             </p>
             <button
               type="button"
-              onClick={() => router.replace("/dashboard")}
+              onClick={() => router.replace("/tree-select")}
               className="mt-4 rounded-md px-4 py-2 text-sm font-semibold text-[var(--dg-primary-fg)]"
               style={{ fontFamily: sans, backgroundColor: "var(--dg-primary-bg)" }}
             >

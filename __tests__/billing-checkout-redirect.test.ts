@@ -29,8 +29,8 @@ describe("buildStripeCheckoutBillingUrls", () => {
       "http://localhost:3000",
       "dashboard"
     );
-    expect(urls.success_url).toBe("http://localhost:3000/dashboard?billing=success");
-    expect(urls.cancel_url).toBe("http://localhost:3000/dashboard?billing=cancel");
+    expect(urls.success_url).toBe("http://localhost:3000/tree-select?billing=success");
+    expect(urls.cancel_url).toBe("http://localhost:3000/tree-select?billing=cancel");
   });
 
   it("uses onboarding path when requested", () => {
@@ -61,7 +61,7 @@ describe("buildStripeCheckoutBillingUrls", () => {
     const successBase = urls.success_url.replace(/\?billing=success$/, "");
     const cancelBase = urls.cancel_url.replace(/\?billing=cancel$/, "");
     expect(successBase).toBe(cancelBase);
-    expect(successBase).toBe(`${origin}/dashboard`);
+    expect(successBase).toBe(`${origin}/tree-select`);
   });
 });
 
@@ -89,7 +89,7 @@ describe("appendBillingUpgradeReturnParams", () => {
   });
 
   it("omits hosted URL when null", () => {
-    const base = "http://localhost:3000/dashboard?billing=success";
+    const base = "http://localhost:3000/tree-select?billing=success";
     const next = appendBillingUpgradeReturnParams(base, {
       invoiceId: "in_abc",
       hostedInvoiceUrl: null,

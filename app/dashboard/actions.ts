@@ -34,7 +34,7 @@ export async function addPerson(formData: FormData) {
       : null;
 
   if (!first_name || !last_name) {
-    redirect("/dashboard?error=Name+fields+are+required");
+    redirect("/tree-select?error=Name+fields+are+required");
   }
 
   const { error } = await supabase.from("persons").insert({
@@ -50,10 +50,11 @@ export async function addPerson(formData: FormData) {
 
   if (error) {
     redirect(
-      `/dashboard?error=${encodeURIComponent(error.message)}`
+      `/tree-select?error=${encodeURIComponent(error.message)}`
     );
   }
 
   revalidatePath("/dashboard");
-  redirect("/dashboard");
+  revalidatePath("/tree-select");
+  redirect("/tree-select");
 }

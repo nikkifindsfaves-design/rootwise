@@ -2379,7 +2379,7 @@ export default function PersonProfilePage() {
   const personTreeId = (person?.tree_id ?? "").trim();
   const effectiveBackTreeId = treeId !== "" ? treeId : personTreeId;
   const backToTreeHref =
-    effectiveBackTreeId !== "" ? `/dashboard/${effectiveBackTreeId}` : "/dashboard";
+    effectiveBackTreeId !== "" ? `/dashboard/${effectiveBackTreeId}` : "/tree-select";
   const backToTreeLabel = "Return to tree";
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -5401,7 +5401,7 @@ export default function PersonProfilePage() {
     setDeletePersonOpen(false);
     const deletedTreeId = (person.tree_id ?? "").trim();
     router.push(
-      deletedTreeId !== "" ? `/dashboard/${deletedTreeId}` : "/dashboard"
+      deletedTreeId !== "" ? `/dashboard/${deletedTreeId}` : "/tree-select"
     );
     router.refresh();
   }
