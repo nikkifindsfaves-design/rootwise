@@ -726,32 +726,48 @@ export default function MyTreesShell({
           >
             Sign out
           </button>
-          <Link
-            href="/dashboard/account"
-            className="dg-settings-btn ml-1 inline-flex h-8 w-8 shrink-0 items-center justify-center"
-            style={{
-              fontFamily: sans,
-              color: colors.brownMid,
-            }}
-            aria-label="Account settings"
-            title="Account settings"
+          <div
+            className="flex shrink-0 flex-col items-end gap-1.5"
+            style={{ fontFamily: sans }}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
+            <Link
+              href="/dashboard/account"
+              className="dg-settings-btn inline-flex h-8 w-8 shrink-0 items-center justify-center"
+              style={{
+                color: colors.brownMid,
+              }}
+              aria-label="Account settings"
+              title="Account settings"
             >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </Link>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </Link>
+            <Link
+              href="/learn-more"
+              className="dg-learn-more-link whitespace-nowrap text-xs font-medium leading-tight"
+              style={{
+                marginTop: 10,
+                color: colors.brownMid,
+                textDecoration: "underline",
+                textUnderlineOffset: 3,
+              }}
+            >
+              Learn More
+            </Link>
+          </div>
         </div>
       </nav>
 
@@ -769,12 +785,39 @@ export default function MyTreesShell({
           <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
             <div className="self-center space-y-3">
               <div
-                className="rounded-md border p-3"
+                className="relative rounded-md border p-3"
                 style={{
                   borderColor: colors.brownBorder,
                   backgroundColor: colors.cream,
                 }}
               >
+                <Link
+                  href="/learn-more#understanding-credits"
+                  className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border"
+                  style={{
+                    borderColor: colors.brownBorder,
+                    color: colors.brownMid,
+                    backgroundColor: colors.parchment,
+                  }}
+                  aria-label="How monthly credits work"
+                  title="Understanding credits"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width={20}
+                    height={20}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M12 17V10.5" />
+                    <path d="M12 7h.01" />
+                  </svg>
+                </Link>
                 <p
                   style={{
                     fontFamily: sans,

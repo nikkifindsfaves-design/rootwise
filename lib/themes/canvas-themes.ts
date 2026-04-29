@@ -10,12 +10,12 @@ export const CANVAS_THEME_IDS = [
 ] as const;
 
 export type CanvasThemeId = (typeof CANVAS_THEME_IDS)[number];
-export const DEFAULT_CANVAS_THEME_ID: CanvasThemeId = CANVAS_THEME_IDS[0];
 export const CANVAS_THEME_ID = {
   EVIDENCE_BOARD: CANVAS_THEME_IDS[0],
   DEAD_GOSSIP: CANVAS_THEME_IDS[1],
   ROOTS: CANVAS_THEME_IDS[2],
 } as const;
+export const DEFAULT_CANVAS_THEME_ID: CanvasThemeId = CANVAS_THEME_ID.DEAD_GOSSIP;
 
 export type PhotoFrameStyle = "polaroid" | "scrapbook" | "oval";
 

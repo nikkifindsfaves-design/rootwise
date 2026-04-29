@@ -35,25 +35,39 @@ function LeftPanel() {
       className="dg-login-left-panel flex min-w-0 flex-col px-6 py-8 text-[color:var(--dg-cream)] sm:px-8 sm:py-10 lg:min-h-[100dvh] lg:px-12 lg:py-12"
       style={{ backgroundColor: leftBg }}
     >
-      <header className="mb-8 shrink-0 sm:mb-10 lg:mb-10">
-        <p
-          className="text-[clamp(1.75rem,5vw+0.5rem,2.75rem)] leading-[1.05] tracking-tight sm:text-4xl"
-          style={{ fontFamily: "var(--font-playfair), Georgia, serif" }}
+      <header className="mb-8 flex w-full shrink-0 items-start justify-between gap-4 sm:mb-10 lg:mb-10">
+        <div className="min-w-0 flex-1">
+          <p
+            className="text-[clamp(1.75rem,5vw+0.5rem,2.75rem)] leading-[1.05] tracking-tight sm:text-4xl"
+            style={{ fontFamily: "var(--font-playfair), Georgia, serif" }}
+          >
+            Dead Gossip
+          </p>
+          <p
+            className="mt-2 text-sm italic sm:text-base"
+            style={{ color: creamMuted }}
+          >
+            The good, the bad, the buried.
+          </p>
+          <p
+            className="mt-8 text-[0.65rem] font-semibold uppercase tracking-[0.2em]"
+            style={{ color: "var(--dg-paper-border)" }}
+          >
+            AI-powered genealogy
+          </p>
+        </div>
+        <Link
+          href="/learn-more"
+          className="dg-login-learn-more-pill shrink-0 rounded-full px-3.5 py-2 text-[0.7rem] font-semibold uppercase tracking-[0.14em] transition hover:opacity-[0.92] active:opacity-[0.88]"
+          style={{
+            alignSelf: "flex-start",
+            border: `1px solid ${goldMuted}`,
+            color: "var(--dg-paper-border)",
+            backgroundColor: "rgba(255, 252, 247 / 0.06)",
+          }}
         >
-          Dead Gossip
-        </p>
-        <p
-          className="mt-2 text-sm italic sm:text-base"
-          style={{ color: creamMuted }}
-        >
-          The good, the bad, the buried.
-        </p>
-        <p
-          className="mt-8 text-[0.65rem] font-semibold uppercase tracking-[0.2em]"
-          style={{ color: "var(--dg-paper-border)" }}
-        >
-          AI-powered genealogy
-        </p>
+          Learn more
+        </Link>
       </header>
 
       <div className="-mt-[40px] flex min-w-0 shrink-0 flex-col gap-8 py-2 sm:-mt-[70px] sm:gap-10 sm:py-4 lg:gap-10 lg:py-6">
@@ -101,7 +115,7 @@ function LeftPanel() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {[
                   "Case File",
-                  "Scandal Sheet",
+                  "Dead Gossip",
                   "Hearthside",
                   "Southern Gothic",
                   "Gen Z",
@@ -565,6 +579,7 @@ function LoginPageContent() {
             </div>
 
             <h1
+              id="waitlist"
               className="mt-6 text-2xl font-semibold text-[var(--dg-brown-dark)] sm:text-3xl"
               style={{ fontFamily: "var(--font-heirloom-body), Georgia, serif" }}
             >

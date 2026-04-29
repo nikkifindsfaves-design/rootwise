@@ -1,6 +1,6 @@
 export const MANUAL_ENTRY_DOCUMENT_SUBTYPE = "Manual entry";
 
-export const DEFAULT_VIBE = "classic";
+export const DEFAULT_VIBE = "gossip_girl";
 
 export const PLACE_INPUT_SEARCH_THRESHOLD = 2;
 export const PLACE_INPUT_DEBOUNCE_MS = 200;

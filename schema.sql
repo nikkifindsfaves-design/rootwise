@@ -87,8 +87,8 @@ create table public.trees (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
   name text not null,
-  vibe text not null default 'classic',
-  canvas_theme text not null default 'string',
+  vibe text not null default 'gossip_girl',
+  canvas_theme text not null default 'dead_gossip',
   created_at timestamptz not null default now()
 );
 
