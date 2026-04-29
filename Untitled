@@ -1,0 +1,6 @@
+In app/layout.tsx, update the metadata export to include:
+- title: "Dead Gossip — AI-Powered Genealogy Research"
+- description: "Upload historical records. Let AI extract the details. Build your family tree with stories that bring your ancestors to life. The good, the bad, the buried."
+- Open Graph tags with title, description, url set to https://www.deadgossip.app, siteName set to Dead Gossip, type set to website, and images pointing to https://www.deadgossip.app/og-image.png with width 1200 and height 630
+- Twitter card set to summary_large_image with the same title, description and image
+Don't change anything else in the file.
