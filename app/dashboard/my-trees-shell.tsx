@@ -1231,7 +1231,7 @@ export default function MyTreesShell({
                           +
                         </button>
                         <Link
-                          href="/learn-more#understanding-credits"
+                          href="/understanding-credits"
                           className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
                           style={{
                             borderColor: colors.brownBorder,
@@ -1310,7 +1310,7 @@ export default function MyTreesShell({
                   }}
                 >
                   <Link
-                    href="/learn-more#understanding-credits"
+                    href="/understanding-credits"
                     className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full border"
                     style={{
                       borderColor: colors.brownBorder,

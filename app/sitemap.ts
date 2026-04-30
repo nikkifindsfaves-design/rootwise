@@ -12,5 +12,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.8,
     },
+    {
+      url: "https://www.deadgossip.app/understanding-credits",
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
   ];
 }

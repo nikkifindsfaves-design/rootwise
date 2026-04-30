@@ -386,23 +386,68 @@ function OnboardingPageContent() {
       >
         {showPlanStep ? (
           <>
-            <h2
-              className="font-semibold uppercase"
-              style={{
-                fontFamily: sans,
-                fontSize: "clamp(1.125rem, 2.75vw, calc(2rem - 10px))",
-                letterSpacing: "0.04em",
-                color: "var(--dg-brown-dark)",
-              }}
-            >
-              Choose your membership
-            </h2>
-            <p
-              className="mt-2 max-w-xl text-sm"
-              style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
-            >
-              Select a plan to unlock document analysis and story generation.
-            </p>
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 pr-2">
+                <h2
+                  className="font-semibold uppercase"
+                  style={{
+                    fontFamily: sans,
+                    fontSize: "clamp(1.125rem, 2.75vw, calc(2rem - 10px))",
+                    letterSpacing: "0.04em",
+                    color: "var(--dg-brown-dark)",
+                  }}
+                >
+                  Choose your membership
+                </h2>
+                <p
+                  className="mt-2 max-w-xl text-sm"
+                  style={{ fontFamily: sans, color: "var(--dg-brown-muted)" }}
+                >
+                  Select a plan to unlock document analysis and story generation.
+                </p>
+              </div>
+              <Link
+                href="/understanding-credits"
+                className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold underline underline-offset-[3px] transition-opacity hover:opacity-[0.88]"
+                style={{
+                  fontFamily: sans,
+                  color: "var(--dg-forest)",
+                  textDecorationColor:
+                    "color-mix(in srgb, var(--dg-forest) 42%, transparent)",
+                }}
+                aria-label="Learn more about credits"
+              >
+                <span
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border"
+                  style={{
+                    borderColor:
+                      "color-mix(in srgb, var(--dg-forest) 55%, var(--dg-brown-border))",
+                    color: "var(--dg-forest)",
+                    backgroundColor:
+                      "color-mix(in srgb, var(--dg-forest) 10%, var(--dg-cream))",
+                  }}
+                  aria-hidden
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width={14}
+                    height={14}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.25}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 17V10.5" />
+                    <path d="M12 7h.01" />
+                  </svg>
+                </span>
+                <span className="max-w-[9.5rem] text-pretty leading-snug sm:max-w-none">
+                  Learn more about credits
+                </span>
+              </Link>
+            </div>
 
             <div
               className="mt-6 inline-flex rounded-md border p-1"

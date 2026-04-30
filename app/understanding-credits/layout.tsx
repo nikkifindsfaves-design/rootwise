@@ -16,12 +16,12 @@ const promoSans = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: "Dead Gossip — Learn more",
+  title: "Dead Gossip — Understanding credits",
   description:
-    "Why we built Dead Gossip, the body of work so far, and what's coming next.",
+    "How monthly and add-on credits work, what each feature costs, and what happens when credits run out.",
 };
 
-export default function LearnMoreLayout({
+export default function UnderstandingCreditsLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -30,7 +30,7 @@ export default function LearnMoreLayout({
       style={{
         minHeight: "100vh",
         backgroundColor: "#0c0a09",
-        color: "rgba(250, 250, 249, 0.92)",
+        color: "rgba(250, 250, 250, 0.92)",
         fontFamily:
           'var(--dg-promo-sans), "Source Sans 3", system-ui, sans-serif',
       }}
