@@ -4,10 +4,13 @@
   --background: #ffffff;
   --foreground: #171717;
 
-  --dg-bg-main: #faf7f2;
-  --dg-parchment: #f3ebe0;
-  --dg-parchment-deep: #e8dcc8;
-  --dg-cream: #fffcf7;
+  /* Page shell (dashboard layout): stay near-white so bordered sections read as distinct “islands”. */
+  --dg-bg-main: #fefcf9;
+  /* Panel/card fills: darker than --dg-bg-main — do not lighten these when lightening the page. */
+  --dg-parchment: #dfd0be;
+  --dg-parchment-deep: #cec1ae;
+  /* Inset chips / nav: lighter wash inside parchment panels (credits, history block, etc.). */
+  --dg-cream: #f4efe6;
   --dg-brown-dark: #3d2914;
   --dg-brown-mid: #5c3d2e;
   --dg-brown-muted: #7a6654;
@@ -24,7 +27,7 @@
   --dg-danger-mid: #6b2a2a;
   --dg-badge-tan-bg: #8b6f4e;
   --dg-badge-tan-fg: #ffffff;
-  --dg-gradient-hero-top: rgb(255 252 247 / 0.5);
+  --dg-gradient-hero-top: rgb(244 239 230 / 0.5);
   --dg-shadow-rgb: 61 41 20;
   --dg-photo-scrim: #3d2914;
   --dg-image-dim: #2a1810;

@@ -223,6 +223,7 @@ const MERGE_COMPARE_KEYS = [
   "birth_date",
   "death_date",
   "birth_place_id",
+  "death_place_id",
   "gender",
   "notes",
 ] as const;
@@ -236,6 +237,7 @@ const MERGE_FIELD_LABELS: Record<MergeCompareKey, string> = {
   birth_date: "Birth date",
   death_date: "Death date",
   birth_place_id: "Birth place",
+  death_place_id: "Death place",
   gender: "Gender",
   notes: "Notes",
 };
@@ -244,6 +246,12 @@ function mergeFieldStr(
   p: PersonRow,
   key: MergeCompareKey
 ): string {
+  if (key === "birth_place_id") {
+    return formatPlaceFromVersionRow(p.birth_place ?? null).trim();
+  }
+  if (key === "death_place_id") {
+    return formatPlaceFromVersionRow(p.death_place ?? null).trim();
+  }
   const v = p[key as keyof PersonRow];
   if (v == null) return "";
   return String(v).trim();
@@ -254,6 +262,16 @@ function mergeFieldsConflict(
   dup: PersonRow,
   key: MergeCompareKey
 ): boolean {
+  if (key === "birth_place_id") {
+    const a = (primary.birth_place_id ?? "").trim();
+    const b = (dup.birth_place_id ?? "").trim();
+    return a !== "" && b !== "" && a !== b;
+  }
+  if (key === "death_place_id") {
+    const a = (primary.death_place_id ?? "").trim();
+    const b = (dup.death_place_id ?? "").trim();
+    return a !== "" && b !== "" && a !== b;
+  }
   const a = mergeFieldStr(primary, key);
   const b = mergeFieldStr(dup, key);
   return a !== "" && b !== "" && a !== b;
@@ -268,6 +286,67 @@ function formatMergeFieldForUi(key: MergeCompareKey, raw: string): string {
     return `${raw.slice(0, 200)}…`;
   }
   return raw;
+}
+
+function normalizeMergeSearchPersonRow(raw: Record<string, unknown>): PersonRow {
+  const birth_place = normalizePlaceVersionEmbed(
+    raw.birth_place as
+      | PlaceVersionRow
+      | PlaceVersionRow[]
+      | null
+      | undefined
+  );
+  const death_place = normalizePlaceVersionEmbed(
+    raw.death_place as
+      | PlaceVersionRow
+      | PlaceVersionRow[]
+      | null
+      | undefined
+  );
+  return {
+    id: String(raw.id ?? ""),
+    first_name: String(raw.first_name ?? ""),
+    middle_name:
+      raw.middle_name === null || raw.middle_name === undefined
+        ? null
+        : String(raw.middle_name),
+    last_name: String(raw.last_name ?? ""),
+    birth_date:
+      raw.birth_date === null || raw.birth_date === undefined
+        ? null
+        : String(raw.birth_date),
+    death_date:
+      raw.death_date === null || raw.death_date === undefined
+        ? null
+        : String(raw.death_date),
+    birth_place_id:
+      raw.birth_place_id === null || raw.birth_place_id === undefined
+        ? null
+        : String(raw.birth_place_id),
+    death_place_id:
+      raw.death_place_id === null || raw.death_place_id === undefined
+        ? null
+        : String(raw.death_place_id),
+    photo_url:
+      raw.photo_url === null || raw.photo_url === undefined
+        ? null
+        : String(raw.photo_url),
+    gender:
+      raw.gender === null || raw.gender === undefined
+        ? null
+        : String(raw.gender),
+    notes:
+      raw.notes === null || raw.notes === undefined
+        ? null
+        : String(raw.notes),
+    military_branch: null,
+    service_number: null,
+    cause_of_death: null,
+    marital_status: null,
+    surviving_spouse: null,
+    birth_place,
+    death_place,
+  };
 }
 
 type EventRow = {
@@ -713,6 +792,28 @@ function normalizeDateToMMDDYYYY(raw: string | null): string {
   } catch {
     return "";
   }
+}
+
+/** `photos.photo_date` value when a row is tagged to an event (same rules as `formatDateString`). */
+function photoDateFromLinkedEvent(
+  eventId: string | null,
+  eventList: EventRow[]
+): string | null {
+  if (!eventId) return null;
+  const ev = eventList.find((e) => e.id === eventId);
+  if (!ev) return null;
+  const d = formatDateString(ev.event_date ?? "").trim();
+  return d === "" ? null : d;
+}
+
+function resolvePhotoDateWithLinkedEvent(
+  manualTrimmed: string,
+  eventId: string | null,
+  eventList: EventRow[]
+): string | null {
+  const fromEvent = photoDateFromLinkedEvent(eventId, eventList);
+  if (eventId && fromEvent) return fromEvent;
+  return manualTrimmed === "" ? null : manualTrimmed;
 }
 
 function classifyRelationship(
@@ -2379,7 +2480,9 @@ export default function PersonProfilePage() {
   const personTreeId = (person?.tree_id ?? "").trim();
   const effectiveBackTreeId = treeId !== "" ? treeId : personTreeId;
   const backToTreeHref =
-    effectiveBackTreeId !== "" ? `/dashboard/${effectiveBackTreeId}` : "/tree-select";
+    effectiveBackTreeId !== ""
+      ? `/dashboard/${effectiveBackTreeId}/canvas`
+      : "/tree-select";
   const backToTreeLabel = "Return to tree";
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -4004,7 +4107,8 @@ export default function PersonProfilePage() {
           if (!r.ok) {
             throw new Error(j.error ?? "Search failed");
           }
-          setMergeSearchResults(j.matches ?? []);
+          const rows = (j.matches ?? []) as Record<string, unknown>[];
+          setMergeSearchResults(rows.map(normalizeMergeSearchPersonRow));
         } catch (e) {
           setMergeSearchError(
             e instanceof Error ? e.message : "Search failed"
@@ -4119,6 +4223,45 @@ export default function PersonProfilePage() {
     }
     return m;
   }, [photoEventTags, photoRowById]);
+
+  const photoPreviewNavList = useMemo(() => {
+    const withUrl = (rows: Record<string, unknown>[]) =>
+      rows.filter((r) => photoUrlFromRow(r) != null);
+    if (eventPhotoGalleryEventId) {
+      return withUrl(
+        eventPhotosByEventId.get(eventPhotoGalleryEventId) ?? []
+      );
+    }
+    return withUrl(photoRows);
+  }, [eventPhotoGalleryEventId, eventPhotosByEventId, photoRows]);
+
+  const photoPreviewNavIndex = useMemo(() => {
+    if (!photoPreviewModal || typeof photoPreviewModal.id !== "string") {
+      return -1;
+    }
+    return photoPreviewNavList.findIndex(
+      (r) => typeof r.id === "string" && r.id === photoPreviewModal.id
+    );
+  }, [photoPreviewModal, photoPreviewNavList]);
+
+  useEffect(() => {
+    if (!photoPreviewModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const idx = photoPreviewNavIndex;
+      if (idx < 0) return;
+      if (e.key === "ArrowLeft" && idx > 0) {
+        e.preventDefault();
+        setPhotoPreviewModal(photoPreviewNavList[idx - 1]!);
+      }
+      if (e.key === "ArrowRight" && idx < photoPreviewNavList.length - 1) {
+        e.preventDefault();
+        setPhotoPreviewModal(photoPreviewNavList[idx + 1]!);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [photoPreviewModal, photoPreviewNavList, photoPreviewNavIndex]);
 
   const timelineEvents = useMemo(
     () => sortEventsChronologically(dedupeTimelineEvents(events)),
@@ -4469,10 +4612,15 @@ export default function PersonProfilePage() {
       setPhotoUploadError(error.message);
       return;
     }
+    const resolvedPhotoDate = resolvePhotoDateWithLinkedEvent(
+      photoDate.trim(),
+      eventId,
+      events
+    );
     const { error: metaErr } = await supabase
       .from("photos")
       .update({
-        photo_date: photoDate.trim() || null,
+        photo_date: resolvedPhotoDate,
         caption: caption.trim() || null,
       })
       .eq("id", photoRowId)
@@ -5067,12 +5215,16 @@ export default function PersonProfilePage() {
         POLAROID_CROP_VIEWPORT_H
       );
       const cz = Math.min(3, Math.max(1, photoSetupZoom));
-      const dateTrim = photoSetupDate.trim();
+      const dateTrim = resolvePhotoDateWithLinkedEvent(
+        photoSetupDate.trim(),
+        photoSetupEventId,
+        events
+      );
       const captionTrim = photoSetupCaption.trim();
       const { error: upErr } = await supabase
         .from("photos")
         .update({
-          photo_date: dateTrim === "" ? null : dateTrim,
+          photo_date: dateTrim,
           caption: captionTrim === "" ? null : captionTrim,
         })
         .eq("id", photoId)
@@ -5115,12 +5267,14 @@ export default function PersonProfilePage() {
       const tagRows = photoSetupTags.map((t) => {
         const is_primary =
           !setupWithPhotos.has(t.id) && !setupWithTags.has(t.id);
+        /** Only the profile being edited gets this crop; other tags stay uncropped until their own profile. */
+        const applyViewCropHere = is_primary && t.id === personId;
         return {
           photo_id: photoId,
           person_id: t.id,
           user_id: user.id,
           is_primary,
-          ...(is_primary ? { crop_x: cx, crop_y: cy, crop_zoom: cz } : {}),
+          ...(applyViewCropHere ? { crop_x: cx, crop_y: cy, crop_zoom: cz } : {}),
         };
       });
       if (tagRows.length > 0) {
@@ -5441,6 +5595,7 @@ export default function PersonProfilePage() {
       birth_date: dup.birth_date ?? null,
       death_date: dup.death_date ?? null,
       birth_place_id: dup.birth_place_id ?? null,
+      death_place_id: dup.death_place_id ?? null,
       photo_url: dup.photo_url ?? null,
       gender: dup.gender ?? null,
       military_branch: dup.military_branch ?? null,
@@ -9870,7 +10025,7 @@ export default function PersonProfilePage() {
               </h2>
               <button
                 type="button"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 text-2xl leading-none opacity-80 transition hover:opacity-100"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-0 text-4xl leading-none opacity-80 transition hover:opacity-100"
                 style={{
                   fontFamily: sans,
                   color: colors.brownMuted,
@@ -9946,7 +10101,6 @@ export default function PersonProfilePage() {
                     typeof row.caption === "string" ? row.caption.trim() : "";
                   const yearLabel = photoYearLabel(row.photo_date);
                   if (!url) return null;
-                  const thumbCrop = personPhotoCropForRow(row);
                   const openCropModal = () => {
                     void openPhotoSetupForExisting(row);
                   };
@@ -9954,14 +10108,31 @@ export default function PersonProfilePage() {
                     setPhotoPreviewModal(row);
                   };
                   return (
-                    <li key={pid} className="w-40">
-                      <div
-                        className="group relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
-                        style={{
-                          borderColor: colors.brownBorder,
-                          backgroundColor: colors.parchment,
-                        }}
-                      >
+                    <li key={pid} className="group flex w-40 flex-col">
+                      <div className="relative w-40">
+                        {caption ? (
+                          <div
+                            className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 max-h-36 w-max max-w-[min(17.5rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-md border px-2.5 py-2 text-left text-xs leading-snug opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                            style={{
+                              fontFamily: sans,
+                              borderColor: colors.brownBorder,
+                              backgroundColor: colors.cream,
+                              color: colors.brownDark,
+                              boxShadow:
+                                "0 8px 24px rgb(var(--dg-shadow-rgb) / 0.2)",
+                            }}
+                            role="tooltip"
+                          >
+                            {caption}
+                          </div>
+                        ) : null}
+                        <div
+                          className="relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
+                          style={{
+                            borderColor: colors.brownBorder,
+                            backgroundColor: colors.parchment,
+                          }}
+                        >
                         {rowId ? (
                           <button
                             type="button"
@@ -10071,33 +10242,10 @@ export default function PersonProfilePage() {
                             </button>
                           </div>
                         ) : null}
-                        {caption ? (
-                          <div
-                            className="pointer-events-none absolute inset-x-0 bottom-0 z-[6] px-2 pb-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                            aria-hidden
-                            style={{
-                              background:
-                                "linear-gradient(to top, color-mix(in srgb, var(--dg-photo-scrim) 84%, transparent), transparent)",
-                            }}
-                          >
-                            <p
-                              className="line-clamp-2 text-xs leading-snug"
-                              style={{
-                                fontFamily: sans,
-                                color: "#ffffff",
-                                backgroundColor: "rgb(20 16 12 / 0.78)",
-                                borderRadius: 6,
-                                padding: "0.3rem 0.45rem",
-                                boxShadow: "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.35)",
-                              }}
-                            >
-                              {caption}
-                            </p>
-                          </div>
-                        ) : null}
+                      </div>
                       </div>
                       <p
-                        className="mt-1.5 text-[11px]"
+                        className="-mt-1 text-center text-[22px] font-semibold tabular-nums leading-none"
                         style={{ fontFamily: sans, color: colors.brownMuted }}
                       >
                         {yearLabel}
@@ -10154,7 +10302,7 @@ export default function PersonProfilePage() {
                     </div>
                     <button
                       type="button"
-                      className="text-2xl leading-none"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center text-4xl leading-none"
                       style={{
                         fontFamily: sans,
                         color: colors.brownMuted,
@@ -10185,9 +10333,26 @@ export default function PersonProfilePage() {
                           typeof row.caption === "string" ? row.caption.trim() : "";
                         const yearLabel = photoYearLabel(row.photo_date);
                         return (
-                          <li key={key} className="w-40">
+                          <li key={key} className="group flex w-40 flex-col">
+                            <div className="relative w-40">
+                              {caption ? (
+                                <div
+                                  className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 max-h-36 w-max max-w-[min(17.5rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-md border px-2.5 py-2 text-left text-xs leading-snug opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                                  style={{
+                                    fontFamily: sans,
+                                    borderColor: colors.brownBorder,
+                                    backgroundColor: colors.cream,
+                                    color: colors.brownDark,
+                                    boxShadow:
+                                      "0 8px 24px rgb(var(--dg-shadow-rgb) / 0.2)",
+                                  }}
+                                  role="tooltip"
+                                >
+                                  {caption}
+                                </div>
+                              ) : null}
                             <div
-                              className="group relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
+                              className="relative h-40 w-40 overflow-hidden rounded-lg border shadow-sm"
                               style={{
                                 borderColor: colors.brownBorder,
                                 backgroundColor: colors.parchment,
@@ -10207,34 +10372,10 @@ export default function PersonProfilePage() {
                                   className="h-full w-full object-cover"
                                 />
                               </button>
-                              {caption ? (
-                                <div
-                                  className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] px-2 pb-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                                  aria-hidden
-                                  style={{
-                                    background:
-                                      "linear-gradient(to top, color-mix(in srgb, var(--dg-photo-scrim) 84%, transparent), transparent)",
-                                  }}
-                                >
-                                  <p
-                                    className="line-clamp-2 text-xs leading-snug"
-                                    style={{
-                                      fontFamily: sans,
-                                      color: "#ffffff",
-                                      backgroundColor: "rgb(20 16 12 / 0.78)",
-                                      borderRadius: 6,
-                                      padding: "0.3rem 0.45rem",
-                                      boxShadow:
-                                        "0 2px 8px rgb(var(--dg-shadow-rgb) / 0.35)",
-                                    }}
-                                  >
-                                    {caption}
-                                  </p>
-                                </div>
-                              ) : null}
+                            </div>
                             </div>
                             <p
-                              className="mt-1.5 text-[11px]"
+                              className="-mt-1 text-center text-[22px] font-semibold tabular-nums leading-none"
                               style={{ fontFamily: sans, color: colors.brownMuted }}
                             >
                               {yearLabel}
@@ -10268,17 +10409,13 @@ export default function PersonProfilePage() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <h2
-                id="photo-preview-title"
-                className="text-2xl font-bold"
-                style={{ fontFamily: serif, color: colors.brownDark }}
-              >
-                Photo
+            <div className="mb-4 flex items-start justify-end gap-4">
+              <h2 id="photo-preview-title" className="sr-only">
+                Photo preview
               </h2>
               <button
                 type="button"
-                className="text-2xl leading-none"
+                className="flex h-11 w-11 shrink-0 items-center justify-center text-4xl leading-none"
                 style={{
                   fontFamily: sans,
                   color: colors.brownMuted,
@@ -10299,20 +10436,72 @@ export default function PersonProfilePage() {
                   ? photoPreviewModal.caption.trim()
                   : "";
               const yearLabel = photoYearLabel(photoPreviewModal.photo_date);
+              const navIdx = photoPreviewNavIndex;
+              const canPrev =
+                navIdx > 0 && navIdx < photoPreviewNavList.length;
+              const canNext =
+                navIdx >= 0 && navIdx < photoPreviewNavList.length - 1;
+              const navBtnClass =
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-3xl leading-none transition disabled:cursor-not-allowed disabled:opacity-35";
               return (
                 <>
-                  <div className="flex justify-center">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={url}
-                      alt=""
-                      className="max-h-[72vh] w-auto max-w-full rounded-md border object-contain"
-                      style={{ borderColor: colors.brownBorder }}
-                    />
+                  <div className="flex items-center justify-center gap-2 sm:gap-4">
+                    <button
+                      type="button"
+                      className={navBtnClass}
+                      style={{
+                        fontFamily: sans,
+                        color: colors.brownDark,
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.parchment,
+                        cursor: canPrev ? "pointer" : "not-allowed",
+                      }}
+                      aria-label="Previous photo"
+                      disabled={!canPrev}
+                      onClick={() => {
+                        if (!canPrev || navIdx <= 0) return;
+                        setPhotoPreviewModal(photoPreviewNavList[navIdx - 1]!);
+                      }}
+                    >
+                      ‹
+                    </button>
+                    <div className="flex min-w-0 flex-1 justify-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt=""
+                        className="max-h-[72vh] w-auto max-w-full rounded-md border object-contain"
+                        style={{ borderColor: colors.brownBorder }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className={navBtnClass}
+                      style={{
+                        fontFamily: sans,
+                        color: colors.brownDark,
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.parchment,
+                        cursor: canNext ? "pointer" : "not-allowed",
+                      }}
+                      aria-label="Next photo"
+                      disabled={!canNext}
+                      onClick={() => {
+                        if (
+                          !canNext ||
+                          navIdx < 0 ||
+                          navIdx >= photoPreviewNavList.length - 1
+                        )
+                          return;
+                        setPhotoPreviewModal(photoPreviewNavList[navIdx + 1]!);
+                      }}
+                    >
+                      ›
+                    </button>
                   </div>
-                  <div className="mt-3">
+                  <div className="-mt-1">
                     <p
-                      className="text-sm"
+                      className="text-center text-[28px] font-semibold tabular-nums leading-none sm:text-left"
                       style={{ fontFamily: sans, color: colors.brownMuted }}
                     >
                       {yearLabel}
@@ -11411,7 +11600,7 @@ export default function PersonProfilePage() {
 
       {mergeModalOpen && person ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "var(--dg-modal-backdrop)" }}
           role="dialog"
           aria-modal="true"
@@ -11578,8 +11767,7 @@ export default function PersonProfilePage() {
                     const dup = mergeSelectedDup;
                     const pv = mergeFieldStr(person, key);
                     const dv = mergeFieldStr(dup, key);
-                    const hasConflict =
-                      pv !== "" && dv !== "" && pv !== dv;
+                    const hasConflict = mergeFieldsConflict(person, dup, key);
                     const cellBase: React.CSSProperties = {
                       backgroundColor: colors.cream,
                       borderColor: colors.brownBorder,
@@ -11945,7 +12133,14 @@ export default function PersonProfilePage() {
                 <select
                   id="crop-photo-event"
                   value={cropModalEventId ?? ""}
-                  onChange={(e) => setCropModalEventId(e.target.value || null)}
+                  onChange={(e) => {
+                    const id = e.target.value || null;
+                    setCropModalEventId(id);
+                    if (id) {
+                      const d = photoDateFromLinkedEvent(id, events);
+                      if (d) setCropModalDate(d);
+                    }
+                  }}
                   style={modalInputStyle}
                 >
                   <option value="">No event tag</option>
@@ -12212,9 +12407,14 @@ export default function PersonProfilePage() {
                   <select
                     id="photo-setup-event"
                     value={photoSetupEventId ?? ""}
-                    onChange={(e) =>
-                      setPhotoSetupEventId(e.target.value || null)
-                    }
+                    onChange={(e) => {
+                      const id = e.target.value || null;
+                      setPhotoSetupEventId(id);
+                      if (id) {
+                        const d = photoDateFromLinkedEvent(id, events);
+                        if (d) setPhotoSetupDate(d);
+                      }
+                    }}
                     style={modalInputStyle}
                   >
                     <option value="">No event tag</option>

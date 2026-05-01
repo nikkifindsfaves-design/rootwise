@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -31,16 +32,14 @@ function readTheme(): DGTheme {
   if (typeof window === "undefined") return "light";
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return "light";
 }
 
 function applyThemeClass(theme: DGTheme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
 
-/** Re-apply `html.dark` from localStorage / system preference (e.g. after leaving a route that forced light). */
+/** Re-apply `html.dark` from localStorage (path-aware callers may need to navigate so ThemeProvider applies). */
 export function syncDocumentThemeFromStorage() {
   if (typeof document === "undefined") return;
   applyThemeClass(readTheme());
@@ -51,14 +50,10 @@ function subscribe(onChange: () => void) {
   const onStorage = (e: StorageEvent) => {
     if (e.key === STORAGE_KEY || e.key === null) onChange();
   };
-  const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  const onMq = () => onChange();
   window.addEventListener("storage", onStorage);
-  mq.addEventListener("change", onMq);
   return () => {
     storeListeners.delete(onChange);
     window.removeEventListener("storage", onStorage);
-    mq.removeEventListener("change", onMq);
   };
 }
 
@@ -76,23 +71,27 @@ function persistTheme(next: DGTheme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const theme = useSyncExternalStore(
+  const pathname = usePathname();
+  const storedTheme = useSyncExternalStore(
     subscribe,
     getClientSnapshot,
     getServerSnapshot
   );
 
+  const appliedTheme: DGTheme =
+    pathname === "/login" ? "light" : storedTheme;
+
   useLayoutEffect(() => {
-    applyThemeClass(theme);
-  }, [theme]);
+    applyThemeClass(appliedTheme);
+  }, [appliedTheme]);
 
   const toggleTheme = useCallback(() => {
-    persistTheme(theme === "light" ? "dark" : "light");
-  }, [theme]);
+    persistTheme(storedTheme === "light" ? "dark" : "light");
+  }, [storedTheme]);
 
   const value = useMemo(
-    () => ({ theme, toggleTheme }),
-    [theme, toggleTheme]
+    () => ({ theme: appliedTheme, toggleTheme }),
+    [appliedTheme, toggleTheme]
   );
 
   return (

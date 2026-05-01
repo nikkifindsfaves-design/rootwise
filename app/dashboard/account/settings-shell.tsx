@@ -14,6 +14,9 @@ import {
 const serif = "var(--font-dg-display), 'Playfair Display', Georgia, serif";
 const sans = "var(--font-dg-body), Lato, sans-serif";
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type CreditLedgerRow = {
   id: string;
   event_type: string;
@@ -411,6 +414,16 @@ export default function AccountSettingsShell() {
     Boolean(stripeSubscriptionId?.trim()) &&
     Boolean(billingSnapshot?.hasPaidAccess);
 
+  const treeReturnParam = (searchParams.get("tree") ?? "").trim();
+  const accountBackHref =
+    treeReturnParam !== "" && UUID_RE.test(treeReturnParam)
+      ? `/dashboard/${treeReturnParam}`
+      : "/tree-select";
+  const accountBackLabel =
+    treeReturnParam !== "" && UUID_RE.test(treeReturnParam)
+      ? "Back to tree dashboard"
+      : "Back to trees";
+
   const shimmerBar =
     "animate-pulse rounded-md bg-[color-mix(in_srgb,var(--dg-brown-border)_35%,transparent)]";
 
@@ -425,11 +438,11 @@ export default function AccountSettingsShell() {
           Account Settings
         </h1>
         <Link
-          href="/tree-select"
+          href={accountBackHref}
           className="text-sm underline underline-offset-2"
           style={{ fontFamily: sans, color: "var(--dg-brown-outline)" }}
         >
-          Back to trees
+          {accountBackLabel}
         </Link>
       </div>
 

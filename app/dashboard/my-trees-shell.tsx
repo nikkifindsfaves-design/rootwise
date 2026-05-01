@@ -513,7 +513,7 @@ export default function MyTreesShell({
     setCreateError(null);
     setEditError(null);
     setPendingTreeName("");
-    setSelectedVibe(null);
+    setSelectedVibe(toVibeId(DEFAULT_VIBE));
     setHoveredVibe(null);
     setSelectedCanvasTheme(DEFAULT_CANVAS_THEME_ID);
     setHoveredCanvasThemePick(null);
@@ -1046,7 +1046,11 @@ export default function MyTreesShell({
             style={{ fontFamily: sans }}
           >
             <Link
-              href="/dashboard/account"
+              href={
+                activeTreeDashboardId
+                  ? `/dashboard/account?tree=${encodeURIComponent(activeTreeDashboardId)}`
+                  : "/dashboard/account"
+              }
               className="dg-settings-btn inline-flex h-8 w-8 shrink-0 items-center justify-center"
               style={{
                 color: colors.brownMid,
@@ -1453,7 +1457,7 @@ export default function MyTreesShell({
                       className="dg-history-card rounded-md border p-2.5"
                       style={{
                         borderColor: colors.brownBorder,
-                        backgroundColor: "var(--dg-parchment)",
+                        backgroundColor: "var(--dg-bg-main)",
                       }}
                     >
                       <p
@@ -1497,7 +1501,7 @@ export default function MyTreesShell({
                     fontFamily: sans,
                     borderColor: colors.brownBorder,
                     color: colors.brownMuted,
-                    backgroundColor: "var(--dg-parchment)",
+                    backgroundColor: "var(--dg-bg-main)",
                   }}
                 >
                   Nothing in range yet. We check nearby dates across past years and
@@ -1935,18 +1939,18 @@ export default function MyTreesShell({
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    width="9"
-                    height="9"
-                    fill="none"
+                    width={13}
+                    height={13}
                     viewBox="0 0 24 24"
+                    fill="none"
                     stroke="currentColor"
-                    strokeWidth="2.25"
+                    strokeWidth={2.25}
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                     aria-hidden
                   >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 16v-4" />
-                    <path d="M12 8h.01" />
+                    <path d="M12 17V10.5" />
+                    <path d="M12 7h.01" />
                   </svg>
                 </button>
                 {createTreeSectionInfo === "vibe" ? (
@@ -2060,18 +2064,18 @@ export default function MyTreesShell({
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
-                      width="9"
-                      height="9"
-                      fill="none"
+                      width={13}
+                      height={13}
                       viewBox="0 0 24 24"
+                      fill="none"
                       stroke="currentColor"
-                      strokeWidth="2.25"
+                      strokeWidth={2.25}
                       strokeLinecap="round"
+                      strokeLinejoin="round"
                       aria-hidden
                     >
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 16v-4" />
-                      <path d="M12 8h.01" />
+                      <path d="M12 17V10.5" />
+                      <path d="M12 7h.01" />
                     </svg>
                   </button>
                   {createTreeSectionInfo === "canvas" ? (
