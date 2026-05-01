@@ -1,6 +1,7 @@
 "use client";
 
 import { MERGE_FIELDS, type MergeField } from "@/lib/person-merge/merge-fields";
+import { inverseRelationshipType } from "@/lib/relationships/direction";
 import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
 import { createClient } from "@/lib/supabase/client";
 import { formatPlace, type PlaceObject } from "@/lib/utils/places";
@@ -561,11 +562,16 @@ export default function ReviewDuplicatesPage() {
                 if (!name) return null;
                 return {
                   name,
-                  relationship_type: rel.relationship_type?.trim() || "other",
+                  relationship_type: inverseRelationshipType(
+                    rel.relationship_type?.trim() || "other"
+                  ),
                 };
               })
               .filter(
-                (rp): rp is { name: string; relationship_type: string } =>
+                (rp): rp is {
+                  name: string;
+                  relationship_type: ReturnType<typeof inverseRelationshipType>;
+                } =>
                   rp !== null
               );
 

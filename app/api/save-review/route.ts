@@ -1,6 +1,7 @@
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
-import { createClient } from "@/lib/supabase/server";
 import { MERGE_FIELDS, type MergeField } from "@/lib/person-merge/merge-fields";
+import { inverseRelationshipType } from "@/lib/relationships/direction";
+import { createClient } from "@/lib/supabase/server";
 import { normalizeGender } from "@/lib/utils/gender";
 import {
   findOrCreatePlace,
@@ -62,22 +63,6 @@ function buildFullName(row: {
 
 function normalizeFullName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function inverseRelationshipType(t: string): string {
-  const n = t.trim().toLowerCase();
-  const map: Record<string, string> = {
-    parent: "child",
-    child: "parent",
-    spouse: "spouse",
-    sibling: "sibling",
-    grandparent: "grandchild",
-    grandchild: "grandparent",
-    "aunt/uncle": "niece/nephew",
-    "niece/nephew": "aunt/uncle",
-    other: "other",
-  };
-  return map[n] ?? "other";
 }
 
 function isMergeField(k: string): k is MergeField {

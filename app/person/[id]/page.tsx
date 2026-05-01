@@ -3,6 +3,14 @@
 import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { buildEventTypeSelectOptions } from "@/lib/events/event-type-options";
+import {
+  directedRelationshipFromRelatedToFocal,
+  directedRelationshipsFromBirthFamilyEvents,
+  directedRelationshipsFromRelatedToFocal,
+  hasBirthFamilyEventTypes,
+  inverseRelationshipType,
+  relationshipTypeLabel,
+} from "@/lib/relationships/direction";
 import { RECORD_TYPES } from "@/lib/records/record-types";
 import {
   CANVAS_THEME_ID,
@@ -106,6 +114,62 @@ type TreePersonSearchRow = {
   birth_date: string | null;
 };
 
+type AddEventPlaceFields = {
+  township: string | null;
+  county: string | null;
+  state: string | null;
+  country: string;
+};
+
+type AddEventAttachedPerson = {
+  clientId: string;
+  existingPersonId: string | null;
+  isProfilePerson: boolean;
+  eventRole?: AddEventParticipantRole;
+  relatedToClientId?: string;
+  generateStory: boolean;
+  cause_of_death: string;
+  first_name: string;
+  middle_name: string;
+  last_name: string;
+  birth_date: string;
+  death_date: string;
+  gender: string;
+  notes: string;
+  event_type: string;
+  event_notes: string;
+  relationshipToProfile: FamilyRelationshipChoice | "";
+  landData: {
+    acres: string;
+    transaction_type: string;
+  };
+};
+
+type AddEventParticipantRole =
+  | "primary"
+  | "child"
+  | "parent"
+  | "spouse"
+  | "party"
+  | "other";
+
+type AddEventSlotConfig = {
+  clientId: string;
+  heading: string;
+  eventType: string;
+  role: AddEventParticipantRole;
+  useProfile?: boolean;
+  relatedToClientId?: string;
+  showGender?: boolean;
+};
+
+type AddEventTemplate = {
+  eventType: string;
+  maxWidthClassName: string;
+  slots: AddEventSlotConfig[];
+  allowManualPeople: boolean;
+};
+
 type PersonDeskPanel = "none" | "margin" | "file" | "receipts" | "occupation";
 
 /**
@@ -117,50 +181,23 @@ function bidirectionalRelationshipRows(
   profilePersonId: string,
   otherPersonId: string
 ): RelRow[] {
-  switch (choice) {
-    case "parent":
-      return [
-        {
-          person_a_id: otherPersonId,
-          person_b_id: profilePersonId,
-          relationship_type: "parent",
-        },
-        {
-          person_a_id: profilePersonId,
-          person_b_id: otherPersonId,
-          relationship_type: "child",
-        },
-      ];
-    case "child":
-      return [
-        {
-          person_a_id: profilePersonId,
-          person_b_id: otherPersonId,
-          relationship_type: "parent",
-        },
-        {
-          person_a_id: otherPersonId,
-          person_b_id: profilePersonId,
-          relationship_type: "child",
-        },
-      ];
-    case "spouse":
-    case "sibling":
-      return [
-        {
-          person_a_id: profilePersonId,
-          person_b_id: otherPersonId,
-          relationship_type: choice,
-        },
-        {
-          person_a_id: otherPersonId,
-          person_b_id: profilePersonId,
-          relationship_type: choice,
-        },
-      ];
-    default:
-      return [];
-  }
+  const forward = directedRelationshipFromRelatedToFocal(
+    otherPersonId,
+    profilePersonId,
+    choice
+  );
+  return [
+    {
+      person_a_id: forward.personAId,
+      person_b_id: forward.personBId,
+      relationship_type: forward.relationshipType,
+    },
+    {
+      person_a_id: forward.personBId,
+      person_b_id: forward.personAId,
+      relationship_type: inverseRelationshipType(forward.relationshipType),
+    },
+  ];
 }
 
 function birthYearLabel(dateStr: string | null | undefined): string | null {
@@ -792,6 +829,253 @@ function normalizeDateToMMDDYYYY(raw: string | null): string {
   } catch {
     return "";
   }
+}
+
+function placeFieldsFromDisplay(display: string): AddEventPlaceFields | null {
+  const looksLikeCounty = (value: string): boolean =>
+    /\b(county|co\.?|cnty\.?)\b/i.test(value);
+  const parts = display
+    .trim()
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) {
+    return { township: null, county: null, state: null, country: parts[0]! };
+  }
+  if (parts.length === 2) {
+    return { township: null, county: null, state: parts[0]!, country: parts[1]! };
+  }
+  if (parts.length === 3) {
+    const first = parts[0]!;
+    return {
+      township: looksLikeCounty(first) ? null : first,
+      county: looksLikeCounty(first) ? first : null,
+      state: parts[1]!,
+      country: parts[2]!,
+    };
+  }
+  const country = parts[parts.length - 1]!;
+  const state = parts[parts.length - 2]!;
+  const county = parts[parts.length - 3]!;
+  const township = parts.slice(0, -3).join(", ");
+  return { township, county, state, country };
+}
+
+function normalizeAddEventType(eventType: string): string {
+  return eventType.trim().toLowerCase();
+}
+
+function addEventTemplateForType(eventTypeRaw: string): AddEventTemplate | null {
+  const eventType = normalizeAddEventType(eventTypeRaw);
+  if (eventType === "child born") {
+    return {
+      eventType,
+      maxWidthClassName: "max-w-2xl",
+      allowManualPeople: false,
+      slots: [
+        {
+          clientId: "child-born:profile-parent",
+          heading: "Parent",
+          eventType: "child born",
+          role: "parent",
+          useProfile: true,
+          relatedToClientId: "child-born:child",
+        },
+        {
+          clientId: "child-born:child",
+          heading: "Child information",
+          eventType: "birth",
+          role: "child",
+          showGender: true,
+        },
+        {
+          clientId: "child-born:other-parent",
+          heading: "Other parent",
+          eventType: "child born",
+          role: "parent",
+          relatedToClientId: "child-born:child",
+        },
+      ],
+    };
+  }
+  if (eventType === "death") {
+    return {
+      eventType,
+      maxWidthClassName: "max-w-2xl",
+      allowManualPeople: false,
+      slots: [
+        {
+          clientId: "death:deceased",
+          heading: "Person",
+          eventType: "death",
+          role: "primary",
+          useProfile: true,
+        },
+        {
+          clientId: "death:parent-1",
+          heading: "Parent",
+          eventType: "child died",
+          role: "parent",
+          relatedToClientId: "death:deceased",
+        },
+        {
+          clientId: "death:parent-2",
+          heading: "Parent",
+          eventType: "child died",
+          role: "parent",
+          relatedToClientId: "death:deceased",
+        },
+        {
+          clientId: "death:surviving-spouse",
+          heading: "Surviving spouse",
+          eventType: "spouse died",
+          role: "spouse",
+          relatedToClientId: "death:deceased",
+        },
+      ],
+    };
+  }
+  if (eventType === "child died") {
+    return {
+      eventType,
+      maxWidthClassName: "max-w-2xl",
+      allowManualPeople: false,
+      slots: [
+        {
+          clientId: "child-died:profile-parent",
+          heading: "Parent",
+          eventType: "child died",
+          role: "parent",
+          useProfile: true,
+          relatedToClientId: "child-died:child",
+        },
+        {
+          clientId: "child-died:child",
+          heading: "Child who died",
+          eventType: "death",
+          role: "child",
+          showGender: true,
+        },
+        {
+          clientId: "child-died:other-parent",
+          heading: "Other parent",
+          eventType: "child died",
+          role: "parent",
+          relatedToClientId: "child-died:child",
+        },
+        {
+          clientId: "child-died:surviving-spouse",
+          heading: "Surviving spouse",
+          eventType: "spouse died",
+          role: "spouse",
+          relatedToClientId: "child-died:child",
+        },
+      ],
+    };
+  }
+  if (eventType === "burial") {
+    return {
+      eventType,
+      maxWidthClassName: "max-w-2xl",
+      allowManualPeople: false,
+      slots: [
+        {
+          clientId: "burial:person",
+          heading: "Person",
+          eventType: "burial",
+          role: "primary",
+          useProfile: true,
+        },
+      ],
+    };
+  }
+  if (eventType === "marriage") {
+    return {
+      eventType,
+      maxWidthClassName: "max-w-2xl",
+      allowManualPeople: false,
+      slots: [
+        {
+          clientId: "marriage:party-1",
+          heading: "Party 1",
+          eventType: "marriage",
+          role: "party",
+          useProfile: true,
+        },
+        {
+          clientId: "marriage:party-2",
+          heading: "Party 2",
+          eventType: "marriage",
+          role: "party",
+          relatedToClientId: "marriage:party-1",
+        },
+        {
+          clientId: "marriage:party-1-parent-1",
+          heading: "Party 1 parent",
+          eventType: "other",
+          role: "parent",
+          relatedToClientId: "marriage:party-1",
+        },
+        {
+          clientId: "marriage:party-1-parent-2",
+          heading: "Party 1 parent",
+          eventType: "other",
+          role: "parent",
+          relatedToClientId: "marriage:party-1",
+        },
+        {
+          clientId: "marriage:party-2-parent-1",
+          heading: "Party 2 parent",
+          eventType: "other",
+          role: "parent",
+          relatedToClientId: "marriage:party-2",
+        },
+        {
+          clientId: "marriage:party-2-parent-2",
+          heading: "Party 2 parent",
+          eventType: "other",
+          role: "parent",
+          relatedToClientId: "marriage:party-2",
+        },
+      ],
+    };
+  }
+  if (eventType === "divorce") {
+    return {
+      eventType,
+      maxWidthClassName: "max-w-2xl",
+      allowManualPeople: false,
+      slots: [
+        {
+          clientId: "divorce:party-1",
+          heading: "Party 1",
+          eventType: "divorce",
+          role: "party",
+          useProfile: true,
+        },
+        {
+          clientId: "divorce:party-2",
+          heading: "Party 2",
+          eventType: "divorce",
+          role: "party",
+          relatedToClientId: "divorce:party-1",
+        },
+      ],
+    };
+  }
+  return null;
+}
+
+function personDisplayName(row: {
+  first_name: string | null;
+  middle_name?: string | null;
+  last_name: string | null;
+}): string {
+  return [row.first_name, row.middle_name ?? "", row.last_name]
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** `photos.photo_date` value when a row is tagged to an event (same rules as `formatDateString`). */
@@ -2695,6 +2979,8 @@ export default function PersonProfilePage() {
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [recordUploadModalOpen, setRecordUploadModalOpen] = useState(false);
+  const [addEventTypeChooserOpen, setAddEventTypeChooserOpen] = useState(false);
+  const [addEventChosenType, setAddEventChosenType] = useState("");
   const [addEventOpen, setAddEventOpen] = useState(false);
   const [addEventDraft, setAddEventDraft] = useState({
     event_type: "",
@@ -2703,13 +2989,24 @@ export default function PersonProfilePage() {
     notes: "",
     event_place_id: null as string | null,
     event_place_display: "",
-    event_place_fields: null as {
-      township: string | null;
-      county: string | null;
-      state: string | null;
-      country: string;
-    } | null,
+    event_place_fields: null as AddEventPlaceFields | null,
   });
+  const [addEventAttachedPeople, setAddEventAttachedPeople] = useState<
+    AddEventAttachedPerson[]
+  >([]);
+  const [addEventMarriageParentsVisible, setAddEventMarriageParentsVisible] =
+    useState(false);
+  const [addEventPersonSearch, setAddEventPersonSearch] = useState("");
+  const [addEventPersonSearchClientId, setAddEventPersonSearchClientId] =
+    useState<string | null>(null);
+  const [addEventPersonSearchLoading, setAddEventPersonSearchLoading] =
+    useState(false);
+  const [addEventPersonSearchResults, setAddEventPersonSearchResults] =
+    useState<PersonRow[]>([]);
+  const [addEventError, setAddEventError] = useState<string | null>(null);
+  const [addEventStoryNotice, setAddEventStoryNotice] = useState<string | null>(
+    null
+  );
   const [addEventSaving, setAddEventSaving] = useState(false);
   const [addingSourceEventId, setAddingSourceEventId] = useState<string | null>(
     null
@@ -4121,6 +4418,67 @@ export default function PersonProfilePage() {
     }, 320);
     return () => window.clearTimeout(handle);
   }, [mergeSearchQuery, mergeModalOpen, personId]);
+
+  useEffect(() => {
+    if (!addEventOpen || !personId) return;
+    const q = addEventPersonSearch.trim();
+    if (q.length < 2) {
+      setAddEventPersonSearchResults([]);
+      setAddEventPersonSearchLoading(false);
+      return;
+    }
+    const selectedIds = new Set(
+      addEventAttachedPeople
+        .map((row) => row.existingPersonId)
+        .filter((id): id is string => id != null && id !== "")
+    );
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        setAddEventPersonSearchLoading(true);
+        try {
+          const res = await fetch(
+            `/api/merge-persons?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(personId)}`,
+            { credentials: "include" }
+          );
+          const data = (await res.json()) as {
+            matches?: PersonRow[];
+            error?: string;
+          };
+          if (!res.ok) throw new Error(data.error ?? "Search failed");
+          const rows = ((data.matches ?? []) as Record<string, unknown>[])
+            .map(normalizeMergeSearchPersonRow)
+            .filter((row) => !selectedIds.has(row.id));
+          setAddEventPersonSearchResults(rows);
+        } catch (error) {
+          setAddEventError(error instanceof Error ? error.message : "Search failed");
+          setAddEventPersonSearchResults([]);
+        } finally {
+          setAddEventPersonSearchLoading(false);
+        }
+      })();
+    }, 320);
+    return () => window.clearTimeout(handle);
+  }, [
+    addEventAttachedPeople,
+    addEventOpen,
+    addEventPersonSearch,
+    personId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !addEventOpen ||
+      normalizeAddEventType(addEventDraft.event_type) !== "death" ||
+      family.parents.length === 0
+    ) {
+      return;
+    }
+    setAddEventAttachedPeople((prev) => {
+      const deceasedSlot = prev.find((row) => row.clientId === "death:deceased");
+      if (!deceasedSlot) return prev;
+      return applyParentRowsToChildSlot(prev, deceasedSlot, family.parents);
+    });
+  }, [addEventDraft.event_type, addEventOpen, family.parents]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5739,6 +6097,24 @@ export default function PersonProfilePage() {
     return { ok: true };
   }
 
+  async function deleteFamilyRelationshipRowsBetween(
+    supabase: ReturnType<typeof createClient>,
+    userId: string,
+    treeIdForRels: string,
+    firstPersonId: string,
+    secondPersonId: string
+  ) {
+    return supabase
+      .from("relationships")
+      .delete()
+      .eq("user_id", userId)
+      .eq("tree_id", treeIdForRels)
+      .in("relationship_type", ["parent", "child", "spouse", "sibling"])
+      .or(
+        `and(person_a_id.eq.${firstPersonId},person_b_id.eq.${secondPersonId}),and(person_a_id.eq.${secondPersonId},person_b_id.eq.${firstPersonId})`
+      );
+  }
+
   async function submitEditRelationship() {
     if (!personId || !editRelModal || effectiveTreeIdForFamily === "") return;
     const nextType = editRelType.trim().toLowerCase();
@@ -5762,20 +6138,13 @@ export default function PersonProfilePage() {
         setEditRelError("Not signed in.");
         return;
       }
-      const reverseType =
-        editRelModal.relationshipType === "parent"
-          ? "child"
-          : editRelModal.relationshipType === "child"
-            ? "parent"
-            : editRelModal.relationshipType;
-      const { error: delErr } = await supabase
-        .from("relationships")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("tree_id", effectiveTreeIdForFamily)
-        .or(
-          `and(person_a_id.eq.${editRelModal.personAId},person_b_id.eq.${editRelModal.personBId},relationship_type.eq.${editRelModal.relationshipType}),and(person_a_id.eq.${editRelModal.personBId},person_b_id.eq.${editRelModal.personAId},relationship_type.eq.${reverseType})`
-        );
+      const { error: delErr } = await deleteFamilyRelationshipRowsBetween(
+        supabase,
+        user.id,
+        effectiveTreeIdForFamily,
+        personId,
+        editRelModal.otherPersonId
+      );
       if (delErr) {
         setEditRelError(delErr.message);
         return;
@@ -5830,20 +6199,13 @@ export default function PersonProfilePage() {
         setEditRelError("Not signed in.");
         return;
       }
-      const reverseType =
-        editRelModal.relationshipType === "parent"
-          ? "child"
-          : editRelModal.relationshipType === "child"
-            ? "parent"
-            : editRelModal.relationshipType;
-      const { error: delErr } = await supabase
-        .from("relationships")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("tree_id", effectiveTreeIdForFamily)
-        .or(
-          `and(person_a_id.eq.${editRelModal.personAId},person_b_id.eq.${editRelModal.personBId},relationship_type.eq.${editRelModal.relationshipType}),and(person_a_id.eq.${editRelModal.personBId},person_b_id.eq.${editRelModal.personAId},relationship_type.eq.${reverseType})`
-        );
+      const { error: delErr } = await deleteFamilyRelationshipRowsBetween(
+        supabase,
+        user.id,
+        effectiveTreeIdForFamily,
+        personId,
+        editRelModal.otherPersonId
+      );
       if (delErr) {
         setEditRelError(delErr.message);
         return;
@@ -6326,107 +6688,784 @@ export default function PersonProfilePage() {
     });
   }
 
-  async function handleAddEventSave() {
-    if (!addEventDraft.event_type.trim()) return;
-    setAddEventSaving(true);
-    try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+  function profileAddEventPerson(defaultEventType = ""): AddEventAttachedPerson | null {
+    if (!person) return null;
+    return {
+      clientId: "profile",
+      existingPersonId: personId,
+      isProfilePerson: true,
+      eventRole: "primary",
+      generateStory: true,
+      first_name: person.first_name ?? "",
+      middle_name: person.middle_name ?? "",
+      last_name: person.last_name ?? "",
+      birth_date: normalizeDateToMMDDYYYY(person.birth_date),
+      death_date: normalizeDateToMMDDYYYY(person.death_date),
+      gender: person.gender ?? "",
+      notes: "",
+      cause_of_death: "",
+      event_type: defaultEventType,
+      event_notes: "",
+      relationshipToProfile: "",
+      landData: { acres: "", transaction_type: "" },
+    };
+  }
 
-      let placeId: string | null = addEventDraft.event_place_id;
-      if (!placeId && addEventDraft.event_place_fields) {
-        const res = await fetch("/api/places/find-or-create", {
+  function blankAddEventPerson(
+    clientId: string,
+    defaultEventType = "",
+    role: AddEventParticipantRole = "other",
+    relatedToClientId?: string
+  ): AddEventAttachedPerson {
+    return {
+      clientId,
+      existingPersonId: null,
+      isProfilePerson: false,
+      eventRole: role,
+      relatedToClientId,
+      generateStory: true,
+      first_name: "",
+      middle_name: "",
+      last_name: "",
+      birth_date: "",
+      death_date: "",
+      gender: "",
+      notes: "",
+      cause_of_death: "",
+      event_type: defaultEventType,
+      event_notes: "",
+      relationshipToProfile: "",
+      landData: { acres: "", transaction_type: "" },
+    };
+  }
+
+  function addEventPersonFromSlot(
+    slot: AddEventSlotConfig,
+    defaultEventType: string
+  ): AddEventAttachedPerson | null {
+    const eventType = slot.eventType || defaultEventType;
+    if (slot.useProfile) {
+      const profileRow = profileAddEventPerson(eventType);
+      return profileRow
+        ? {
+            ...profileRow,
+            clientId: slot.clientId,
+            eventRole: slot.role,
+            relatedToClientId: slot.relatedToClientId,
+          }
+        : null;
+    }
+    return blankAddEventPerson(
+      slot.clientId,
+      eventType,
+      slot.role,
+      slot.relatedToClientId
+    );
+  }
+
+  function resetAddEventState(defaultEventType = "") {
+    setAddEventDraft({
+      event_type: defaultEventType,
+      event_date: "",
+      description: "",
+      notes: "",
+      event_place_id: null,
+      event_place_fields: null,
+      event_place_display: "",
+    });
+    const template = addEventTemplateForType(defaultEventType);
+    if (template) {
+      const templatePeople = template.slots
+        .map((slot) => addEventPersonFromSlot(slot, defaultEventType))
+        .filter((row): row is AddEventAttachedPerson => row != null);
+      setAddEventAttachedPeople(
+        normalizeAddEventType(defaultEventType) === "death"
+          ? autofillKnownParentsForProfileChild(templatePeople)
+          : templatePeople
+      );
+    } else {
+      const profileRow = profileAddEventPerson(defaultEventType);
+      setAddEventAttachedPeople(profileRow ? [profileRow] : []);
+    }
+    setAddEventPersonSearch("");
+    setAddEventPersonSearchClientId(null);
+    setAddEventPersonSearchResults([]);
+    setAddEventMarriageParentsVisible(false);
+    setAddEventError(null);
+    setAddEventStoryNotice(null);
+  }
+
+  function openAddEventTypeChooser() {
+    resetAddEventState();
+    setAddEventChosenType("");
+    setAddEventTypeChooserOpen(true);
+  }
+
+  function openAddEventModal(defaultEventType: string) {
+    resetAddEventState(defaultEventType);
+    setAddEventTypeChooserOpen(false);
+    setAddEventOpen(true);
+    if (normalizeAddEventType(defaultEventType) === "death" && personId) {
+      void (async () => {
+        const parentRows = await fetchParentsForExistingChild(personId);
+        if (parentRows.length === 0) return;
+        setAddEventAttachedPeople((prev) => {
+          const deceasedSlot = prev.find((row) => row.clientId === "death:deceased");
+          if (!deceasedSlot) return prev;
+          return applyParentRowsToChildSlot(prev, deceasedSlot, parentRows);
+        });
+      })();
+    }
+  }
+
+  function updateAddEventPerson(
+    clientId: string,
+    updater: (person: AddEventAttachedPerson) => AddEventAttachedPerson
+  ) {
+    setAddEventAttachedPeople((prev) =>
+      prev.map((row) => (row.clientId === clientId ? updater(row) : row))
+    );
+  }
+
+  function addEventPersonFromExistingSlot(
+    slot: AddEventSlotConfig,
+    row: PersonRow
+  ): AddEventAttachedPerson {
+    return {
+      clientId: slot.clientId,
+      existingPersonId: row.id,
+      isProfilePerson: false,
+      eventRole: slot.role,
+      relatedToClientId: slot.relatedToClientId,
+      generateStory: true,
+      first_name: row.first_name ?? "",
+      middle_name: row.middle_name ?? "",
+      last_name: row.last_name ?? "",
+      birth_date: normalizeDateToMMDDYYYY(row.birth_date),
+      death_date: normalizeDateToMMDDYYYY(row.death_date),
+      gender: row.gender ?? "",
+      notes: "",
+      cause_of_death: "",
+      event_type: slot.eventType || addEventDraft.event_type,
+      event_notes: "",
+      relationshipToProfile: "",
+      landData: { acres: "", transaction_type: "" },
+    };
+  }
+
+  function parentRowsForKnownChild(childId: string): PersonRow[] {
+    if (!personId) return [];
+    const parents: PersonRow[] = [];
+    if (family.children.some((child) => child.id === childId) && person) {
+      parents.push(person);
+    }
+    for (const group of family.spouseWithChildrenGroups) {
+      if (group.children.some((child) => child.id === childId)) {
+        parents.push(group.spouse);
+      }
+    }
+    return parents.filter(
+      (parent, index, all) => all.findIndex((row) => row.id === parent.id) === index
+    );
+  }
+
+  function applyParentRowsToChildSlot(
+    people: AddEventAttachedPerson[],
+    childSlot: AddEventAttachedPerson,
+    parentRows: PersonRow[]
+  ): AddEventAttachedPerson[] {
+    if (parentRows.length === 0) return people;
+    const parentSlots = people.filter(
+      (row) => row.eventRole === "parent" && row.relatedToClientId === childSlot.clientId
+    );
+    if (parentSlots.length === 0) return people;
+    const usedParentIds = new Set(
+      parentSlots
+        .map((slot) => slot.existingPersonId)
+        .filter((id): id is string => typeof id === "string" && id.trim() !== "")
+    );
+    const availableParents = parentRows.filter((parent) => !usedParentIds.has(parent.id));
+    const parentBySlotId = new Map<string, AddEventAttachedPerson>();
+    let parentIndex = 0;
+    parentSlots.forEach((slot) => {
+      if (slot.existingPersonId || slot.first_name.trim() || slot.last_name.trim()) return;
+      const parentRow = availableParents[parentIndex];
+      if (!parentRow) return;
+      parentIndex += 1;
+      const slotConfig = addEventTemplateForType(addEventDraft.event_type)?.slots.find(
+        (candidate) => candidate.clientId === slot.clientId
+      );
+      if (!slotConfig) return;
+      parentBySlotId.set(slot.clientId, {
+        ...addEventPersonFromExistingSlot(slotConfig, parentRow),
+        isProfilePerson: slot.isProfilePerson,
+      });
+    });
+    if (parentBySlotId.size === 0) return people;
+    return people.map((row) => parentBySlotId.get(row.clientId) ?? row);
+  }
+
+  function autofillKnownParentsForChildSlot(
+    people: AddEventAttachedPerson[],
+    childSlot: AddEventAttachedPerson
+  ): AddEventAttachedPerson[] {
+    if (!childSlot.existingPersonId) return people;
+    const parentRows = parentRowsForKnownChild(childSlot.existingPersonId);
+    return applyParentRowsToChildSlot(people, childSlot, parentRows);
+  }
+
+  function autofillKnownParentsForProfileChild(
+    people: AddEventAttachedPerson[]
+  ): AddEventAttachedPerson[] {
+    const childSlot = people.find((row) => row.clientId === "death:deceased");
+    if (!childSlot || !personId) return people;
+    return applyParentRowsToChildSlot(
+      people,
+      { ...childSlot, existingPersonId: childSlot.existingPersonId ?? personId },
+      family.parents
+    );
+  }
+
+  async function fetchParentsForExistingChild(childId: string): Promise<PersonRow[]> {
+    const supabase = createClient();
+    let relQuery = supabase
+      .from("relationships")
+      .select("person_a_id, person_b_id, relationship_type")
+      .or(`person_a_id.eq.${childId},person_b_id.eq.${childId}`);
+    const { data: relRows, error: relErr } = await relQuery;
+    if (relErr || !relRows || relRows.length === 0) return [];
+    const parentIds = [
+      ...new Set(
+        (relRows as Array<{
+          person_a_id?: string | null;
+          person_b_id?: string | null;
+          relationship_type?: string | null;
+        }>)
+          .map((row) => {
+            const relType = (row.relationship_type ?? "").trim().toLowerCase();
+            if (relType === "parent" && row.person_b_id === childId) {
+              return row.person_a_id;
+            }
+            if (relType === "child" && row.person_a_id === childId) {
+              return row.person_b_id;
+            }
+            return null;
+          })
+          .filter((id): id is string => typeof id === "string" && id.trim() !== "")
+      ),
+    ];
+    if (parentIds.length === 0) return [];
+    const { data: parentRows, error: parentErr } = await supabase
+      .from("persons")
+      .select(
+        "id, first_name, middle_name, last_name, birth_date, death_date, gender"
+      )
+      .in("id", parentIds);
+    if (parentErr || !parentRows) return [];
+    const byId = new Map((parentRows as PersonRow[]).map((row) => [row.id, row]));
+    return parentIds.map((id) => byId.get(id)).filter((row): row is PersonRow => !!row);
+  }
+
+  function addExistingPersonToEvent(row: PersonRow) {
+    const selected = new Set(
+      addEventAttachedPeople
+        .map((personRow) => personRow.existingPersonId)
+        .filter((id): id is string => id != null && id !== "")
+    );
+    if (selected.has(row.id)) return;
+    setAddEventAttachedPeople((prev) => [
+      ...prev,
+      {
+        clientId: `existing:${row.id}`,
+        existingPersonId: row.id,
+        isProfilePerson: false,
+        generateStory: true,
+        first_name: row.first_name ?? "",
+        middle_name: row.middle_name ?? "",
+        last_name: row.last_name ?? "",
+        birth_date: normalizeDateToMMDDYYYY(row.birth_date),
+        death_date: normalizeDateToMMDDYYYY(row.death_date),
+        gender: row.gender ?? "",
+        notes: "",
+        cause_of_death: "",
+        event_type: addEventDraft.event_type,
+        event_notes: "",
+        relationshipToProfile: "",
+        landData: { acres: "", transaction_type: "" },
+      },
+    ]);
+    setAddEventPersonSearch("");
+    setAddEventPersonSearchClientId(null);
+    setAddEventPersonSearchResults([]);
+  }
+
+  function selectExistingPersonForAddEventSlot(clientId: string, row: PersonRow) {
+    const selectedBeforeUpdate = addEventAttachedPeople.find(
+      (personRow) => personRow.clientId === clientId
+    );
+    const shouldFetchParents = selectedBeforeUpdate?.eventRole === "child";
+    const selectedExistingPersonId = row.id;
+    setAddEventAttachedPeople((prev) => {
+      const selected = prev.map((personRow) =>
+        personRow.clientId === clientId
+          ? {
+              ...personRow,
+              existingPersonId: row.id,
+              generateStory: personRow.generateStory,
+              first_name: row.first_name ?? "",
+              middle_name: row.middle_name ?? "",
+              last_name: row.last_name ?? "",
+              birth_date: normalizeDateToMMDDYYYY(row.birth_date),
+              death_date: normalizeDateToMMDDYYYY(row.death_date),
+              gender: row.gender ?? "",
+              notes: "",
+              cause_of_death: "",
+            }
+          : personRow
+      );
+      const selectedSlot = selected.find((personRow) => personRow.clientId === clientId);
+      return shouldFetchParents
+        ? autofillKnownParentsForChildSlot(selected, selectedSlot!)
+        : selected;
+    });
+    if (shouldFetchParents && selectedExistingPersonId) {
+      void (async () => {
+        const parentRows = await fetchParentsForExistingChild(selectedExistingPersonId);
+        if (parentRows.length === 0) return;
+        setAddEventAttachedPeople((prev) => {
+          const childSlot = prev.find((personRow) => personRow.clientId === clientId);
+          if (!childSlot) return prev;
+          return applyParentRowsToChildSlot(prev, childSlot, parentRows);
+        });
+      })();
+    }
+    setAddEventPersonSearch("");
+    setAddEventPersonSearchClientId(null);
+    setAddEventPersonSearchResults([]);
+  }
+
+  function clearExistingPersonFromAddEventSlot(clientId: string) {
+    updateAddEventPerson(clientId, (personRow) => ({
+      ...personRow,
+      existingPersonId: null,
+      first_name: "",
+      middle_name: "",
+      last_name: "",
+      birth_date: "",
+      death_date: "",
+      gender: "",
+      notes: "",
+      cause_of_death: "",
+    }));
+    setAddEventPersonSearch("");
+    setAddEventPersonSearchClientId(clientId);
+    setAddEventPersonSearchResults([]);
+  }
+
+  function addNewPersonToEvent() {
+    setAddEventAttachedPeople((prev) => [
+      ...prev,
+      blankAddEventPerson(
+        `new:${crypto.randomUUID()}`,
+        addEventDraft.event_type,
+        "other"
+      ),
+    ]);
+  }
+
+  function removeAddEventPerson(clientId: string) {
+    setAddEventAttachedPeople((prev) =>
+      prev.filter((row) => row.isProfilePerson || row.clientId !== clientId)
+    );
+  }
+
+  function combinedEventNotes(row: AddEventAttachedPerson): string | null {
+    const shared = addEventDraft.notes.trim();
+    const personal = row.event_notes.trim();
+    const joined = [shared, personal].filter(Boolean).join("\n\n");
+    return joined || null;
+  }
+
+  function addEventEffectiveType(row: AddEventAttachedPerson): string {
+    return row.event_type.trim() || addEventDraft.event_type.trim();
+  }
+
+  function birthFamilyRows() {
+    const children = addEventAttachedPeople.filter(
+      (row) => addEventEffectiveType(row).trim().toLowerCase() === "birth"
+    );
+    const parents = addEventAttachedPeople.filter(
+      (row) => addEventEffectiveType(row).trim().toLowerCase() === "child born"
+    );
+    return { children, parents };
+  }
+
+  function birthFamilyEventNotes(row: AddEventAttachedPerson): string | null {
+    if (!isBirthFamilyEventForAddEvent()) return null;
+    const { children, parents } = birthFamilyRows();
+    const rowType = addEventEffectiveType(row).trim().toLowerCase();
+    const childNames = children
+      .filter((child) => child.clientId !== row.clientId)
+      .map(personDisplayName)
+      .filter(Boolean);
+    const parentNames = parents
+      .filter((parent) => parent.clientId !== row.clientId)
+      .map(personDisplayName)
+      .filter(Boolean);
+    const shared = addEventDraft.notes.trim();
+    const personal = row.event_notes.trim();
+    const roleNote =
+      rowType === "birth"
+        ? parentNames.length > 0
+          ? `Birth; parents: ${parentNames.join(" and ")}.`
+          : "Birth."
+        : rowType === "child born"
+          ? childNames.length > 0
+            ? `Child born: ${childNames.join(" and ")}.`
+            : "Child born."
+          : "";
+    const joined = [roleNote, shared, personal].filter(Boolean).join("\n\n");
+    return joined || null;
+  }
+
+  function eventNotesForAddEvent(row: AddEventAttachedPerson): string | null {
+    return birthFamilyEventNotes(row) ?? combinedEventNotes(row);
+  }
+
+  function isBirthFamilyEventForAddEvent(
+    people: AddEventAttachedPerson[] = addEventAttachedPeople
+  ) {
+    return hasBirthFamilyEventTypes(
+      people.map((row) => ({
+        personId: row.clientId,
+        eventType: row.event_type.trim() || addEventDraft.event_type,
+      }))
+    );
+  }
+
+  function isBirthFamilyWorkflowForAddEvent(
+    people: AddEventAttachedPerson[] = addEventAttachedPeople
+  ) {
+    return people.some((row) => {
+      const eventType = addEventEffectiveType(row).trim().toLowerCase();
+      return eventType === "birth" || eventType === "child born";
+    });
+  }
+
+  function relationshipEdgesForAddEvent(
+    people: AddEventAttachedPerson[] = addEventAttachedPeople
+  ) {
+    const templateEdges: Array<{
+      fromClientId: string;
+      toClientId: string;
+      relationship_type: string;
+    }> = [];
+    const peopleByClientId = new Map(people.map((row) => [row.clientId, row]));
+    for (const row of people) {
+      if (!row.relatedToClientId) continue;
+      const target = peopleByClientId.get(row.relatedToClientId);
+      if (!target) continue;
+      if (row.eventRole === "parent") {
+        templateEdges.push({
+          fromClientId: row.clientId,
+          toClientId: target.clientId,
+          relationship_type: "parent",
+        });
+      } else if (row.eventRole === "spouse" || row.eventRole === "party") {
+        templateEdges.push({
+          fromClientId: row.clientId,
+          toClientId: target.clientId,
+          relationship_type: "spouse",
+        });
+      }
+    }
+    if (templateEdges.length > 0) return templateEdges;
+
+    const profileClientId =
+      people.find((row) => row.isProfilePerson)?.clientId ??
+      "profile";
+    if (isBirthFamilyEventForAddEvent(people)) {
+      return directedRelationshipsFromBirthFamilyEvents(
+        people.map((row) => ({
+          personId: row.clientId,
+          eventType: row.event_type.trim() || addEventDraft.event_type,
+        }))
+      ).map((edge) => ({
+        fromClientId: edge.personAId,
+        toClientId: edge.personBId,
+        relationship_type: edge.relationshipType,
+      }));
+    }
+    if (isBirthFamilyWorkflowForAddEvent(people)) return [];
+
+    const relationshipRows = people.filter(
+      (row) => !row.isProfilePerson && row.relationshipToProfile
+    );
+    const childRows = relationshipRows.filter(
+      (row) => row.relationshipToProfile === "child"
+    );
+    const parentRows = relationshipRows.filter(
+      (row) => row.relationshipToProfile === "parent"
+    );
+    const shouldLinkParentsToChildren =
+      isBirthFamilyEventForAddEvent() &&
+      childRows.length > 0 &&
+      parentRows.length > 0;
+
+    return directedRelationshipsFromRelatedToFocal(
+      profileClientId,
+      relationshipRows.map((row) => ({
+        relatedPersonId: row.clientId,
+        relationshipType: row.relationshipToProfile,
+      })),
+      shouldLinkParentsToChildren
+        ? { parentRelationshipTargetIds: childRows.map((row) => row.clientId) }
+        : undefined
+    ).map((edge) => ({
+      fromClientId: edge.personAId,
+      toClientId: edge.personBId,
+      relationship_type: edge.relationshipType,
+    }));
+  }
+
+  function relatedPeopleForAddEventPerson(clientId: string) {
+    const profileRow = addEventAttachedPeople.find((row) => row.isProfilePerson);
+    const focal = addEventAttachedPeople.find((row) => row.clientId === clientId);
+    if (!profileRow || !focal) return [];
+    const out: Array<{ name: string; relationship_type: string }> = [];
+    if (isBirthFamilyEventForAddEvent()) {
+      const focalType = (focal.event_type.trim() || addEventDraft.event_type)
+        .trim()
+        .toLowerCase();
+      for (const row of addEventAttachedPeople) {
+        if (row.clientId === focal.clientId) continue;
+        const rowName = personDisplayName(row);
+        if (!rowName) continue;
+        const rowType = (row.event_type.trim() || addEventDraft.event_type)
+          .trim()
+          .toLowerCase();
+        if (focalType === "birth" && rowType === "child born") {
+          out.push({ name: rowName, relationship_type: "parent" });
+        } else if (focalType === "child born" && rowType === "birth") {
+          out.push({ name: rowName, relationship_type: "child" });
+        }
+      }
+      return out;
+    }
+
+    for (const row of addEventAttachedPeople) {
+      if (row.isProfilePerson || !row.relationshipToProfile) continue;
+      const rowName = personDisplayName(row);
+      const profileName = personDisplayName(profileRow);
+      if (focal.isProfilePerson && rowName) {
+        out.push({
+          name: rowName,
+          relationship_type: row.relationshipToProfile,
+        });
+      } else if (row.clientId === focal.clientId && profileName) {
+        out.push({
+          name: profileName,
+          relationship_type: inverseRelationshipType(row.relationshipToProfile),
+        });
+      }
+    }
+    return out;
+  }
+
+  function eventPlaceStringForAddEvent(): string | null {
+    const display = addEventDraft.event_place_display.trim();
+    if (display) return display;
+    return addEventDraft.event_place_fields
+      ? formatPlace(addEventDraft.event_place_fields).trim() || null
+      : null;
+  }
+
+  async function generateStoriesForSavedProfileEvents(params: {
+    treeId: string;
+    personIds: string[];
+    draftPeople: AddEventAttachedPerson[];
+    peopleByClientId: Map<string, { personId: string; name: string }>;
+    savedEvents: Array<{
+      personIndex: number;
+      eventIndex: number;
+      personId: string;
+      eventId: string;
+    }>;
+  }) {
+    if (!params.treeId || params.savedEvents.length === 0) return;
+    const supabase = createClient();
+    const contextPersonIds = [...new Set(params.personIds)];
+    let generatedCount = 0;
+    let stoppedForCredits = false;
+
+    for (const savedEvent of params.savedEvents) {
+      const draftPerson = params.draftPeople[savedEvent.personIndex];
+      if (!draftPerson) continue;
+      if (!draftPerson.generateStory) continue;
+      const resolved = params.peopleByClientId.get(draftPerson.clientId);
+      const personName = resolved?.name || personDisplayName(draftPerson);
+      const eventType =
+        draftPerson.event_type.trim() || addEventDraft.event_type.trim() || "other";
+      try {
+        const storyRes = await fetch("/api/regenerate-story", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(addEventDraft.event_place_fields),
+          credentials: "same-origin",
+          body: JSON.stringify({
+            tree_id: params.treeId,
+            anchor_person_id: savedEvent.personId,
+            context_person_ids: contextPersonIds,
+            exclude_event_id: savedEvent.eventId,
+            person_name: personName,
+            event_type: eventType,
+            event_date: addEventDraft.event_date.trim() || null,
+            event_place: eventPlaceStringForAddEvent(),
+            event_notes: eventNotesForAddEvent(draftPerson),
+            related_people: relatedPeopleForAddEventPerson(draftPerson.clientId),
+          }),
         });
-        if (res.ok) {
-          const data = await res.json();
-          placeId = data.id ?? null;
-        }
-      }
-
-      const { data: insertedEvent, error } = await supabase
-        .from("events")
-        .insert({
-          user_id: user.id,
-          person_id: personId,
-          event_type: addEventDraft.event_type.trim(),
-          event_date: addEventDraft.event_date.trim() || null,
-          event_place_id: placeId,
-          notes: addEventDraft.notes.trim() || null,
-        })
-        .select("id")
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!insertedEvent) throw new Error("No event returned after insert");
-
-      // Generate story in Dead Gossip voice
-      if (person && insertedEvent?.id) {
-        const personName = [
-          person.first_name,
-          person.middle_name,
-          person.last_name,
-        ]
-          .filter(Boolean)
-          .join(" ");
-
-        const placeString = addEventDraft.event_place_fields
-          ? [
-              addEventDraft.event_place_fields.township,
-              addEventDraft.event_place_fields.county,
-              addEventDraft.event_place_fields.state,
-              addEventDraft.event_place_fields.country,
-            ]
-              .filter(Boolean)
-              .join(", ")
-          : null;
-
-        try {
-          const storyRes = await fetch("/api/regenerate-story", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              tree_id: person.tree_id,
-              anchor_person_id: personId,
-              person_name: personName,
-              event_type: addEventDraft.event_type.trim(),
-              event_date: addEventDraft.event_date.trim() || null,
-              event_place: placeString,
-              event_notes: addEventDraft.notes.trim() || null,
-              related_people: [],
-            }),
-          });
-
-          if (storyRes.ok) {
-            const storyData = await storyRes.json();
-            if (storyData.story_full) {
-              await supabase
-                .from("events")
-                .update({ story_full: storyData.story_full })
-                .eq("id", insertedEvent.id);
-            }
+        const storyData = (await storyRes.json().catch(() => null)) as {
+          story_full?: unknown;
+          code?: string;
+          error?: string;
+        } | null;
+        if (!storyRes.ok) {
+          if (storyData?.code === "insufficient_credits") {
+            stoppedForCredits = true;
+            break;
           }
-        } catch {
-          // Story generation failure is silent — event is already saved
+          continue;
         }
+        if (typeof storyData?.story_full === "string" && storyData.story_full.trim()) {
+          const { error: updateErr } = await supabase
+            .from("events")
+            .update({ story_full: storyData.story_full.trim() })
+            .eq("id", savedEvent.eventId);
+          if (!updateErr) generatedCount += 1;
+        }
+      } catch {
+        // Keep the saved event; story generation can be retried from the timeline.
       }
+    }
+
+    if (stoppedForCredits) {
+      setAddEventStoryNotice(
+        generatedCount > 0
+          ? `Saved the event and wrote ${generatedCount} stories before credits ran out.`
+          : "Saved the event, but stories were skipped because credits ran out."
+      );
+    }
+  }
+
+  async function handleAddEventSave() {
+    const validPeople = addEventAttachedPeople.filter(
+      (row) =>
+        row.isProfilePerson ||
+        row.existingPersonId ||
+        row.first_name.trim() ||
+        row.last_name.trim()
+    );
+    if (!addEventDraft.event_type.trim()) {
+      setAddEventError("Choose a shared event type.");
+      return;
+    }
+    if (validPeople.length === 0) {
+      setAddEventError("Attach at least one person.");
+      return;
+    }
+    setAddEventSaving(true);
+    setAddEventError(null);
+    setAddEventStoryNotice(null);
+    try {
+      const validClientIds = new Set(validPeople.map((row) => row.clientId));
+      const relationshipsForSave = relationshipEdgesForAddEvent(validPeople).filter(
+        (edge) =>
+          validClientIds.has(edge.fromClientId) &&
+          validClientIds.has(edge.toClientId)
+      );
+      console.log("[add-event] relationships payload", relationshipsForSave);
+      const saveRes = await fetch("/api/person-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          treeId: effectiveTreeIdForFamily || person?.tree_id || null,
+          people: validPeople.map((row) => {
+            const eventType =
+              row.event_type.trim() || addEventDraft.event_type.trim() || "other";
+            const personBirthDate =
+              addEventDraft.event_type.trim().toLowerCase() === "child born" &&
+              eventType.trim().toLowerCase() === "birth"
+                ? addEventDraft.event_date.trim()
+                : row.birth_date.trim();
+            return {
+              clientId: row.clientId,
+              existingPersonId: row.existingPersonId,
+              first_name: row.first_name.trim(),
+              middle_name: row.middle_name.trim() || null,
+              last_name: row.last_name.trim(),
+              birth_date: personBirthDate || null,
+              death_date: row.death_date.trim() || null,
+              cause_of_death: row.cause_of_death.trim() || null,
+              gender: row.gender.trim() || null,
+              notes: row.notes.trim() || null,
+              event: {
+                event_type: eventType,
+                event_date: addEventDraft.event_date.trim() || null,
+                event_place_id: addEventDraft.event_place_id,
+                event_place_fields: addEventDraft.event_place_fields,
+                event_place_display:
+                  addEventDraft.event_place_display.trim() || null,
+                notes: eventNotesForAddEvent(row),
+                story_full: null,
+                land_data:
+                  eventType === "land"
+                    ? {
+                        acres: row.landData.acres.trim() || null,
+                        transaction_type:
+                          row.landData.transaction_type.trim() || null,
+                      }
+                    : null,
+              },
+            };
+          }),
+          relationships: relationshipsForSave,
+        }),
+      });
+      const saveData = (await saveRes.json().catch(() => null)) as {
+        success?: boolean;
+        error?: string;
+        personIds?: string[];
+        people?: Array<{ clientId: string; personId: string; name: string }>;
+        savedEvents?: Array<{
+          personIndex: number;
+          eventIndex: number;
+          personId: string;
+          eventId: string;
+        }>;
+      } | null;
+      if (!saveRes.ok || !saveData?.success) {
+        throw new Error(saveData?.error ?? "Could not save event.");
+      }
+
+      const peopleByClientId = new Map(
+        (saveData.people ?? []).map((row) => [row.clientId, row])
+      );
+      await generateStoriesForSavedProfileEvents({
+        treeId: effectiveTreeIdForFamily || person?.tree_id || "",
+        personIds: saveData.personIds ?? [],
+        draftPeople: validPeople,
+        peopleByClientId,
+        savedEvents: saveData.savedEvents ?? [],
+      });
 
       setAddEventOpen(false);
-      setAddEventDraft({
-        event_type: "",
-        event_date: "",
-        description: "",
-        notes: "",
-        event_place_id: null,
-        event_place_fields: null,
-        event_place_display: "",
-      });
+      resetAddEventState();
       await load();
+    } catch (error) {
+      setAddEventError(
+        error instanceof Error ? error.message : "Could not save event."
+      );
     } finally {
       setAddEventSaving(false);
     }
@@ -7841,7 +8880,7 @@ export default function PersonProfilePage() {
                 </h2>
                 <button
                   type="button"
-                  onClick={() => setAddEventOpen(true)}
+                  onClick={openAddEventTypeChooser}
                   className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
                   style={{
                     fontFamily: sans,
@@ -11012,7 +12051,7 @@ export default function PersonProfilePage() {
               style={{ fontFamily: sans, color: colors.brownMuted }}
               htmlFor="edit-family-rel-type"
             >
-              Relationship type
+              Relationship to this person
             </label>
             <select
               id="edit-family-rel-type"
@@ -11022,10 +12061,11 @@ export default function PersonProfilePage() {
               style={modalInputStyle}
               disabled={editRelBusy}
             >
-              <option value="parent">Parent</option>
-              <option value="child">Child</option>
-              <option value="spouse">Spouse</option>
-              <option value="sibling">Sibling</option>
+              {(["parent", "child", "spouse", "sibling"] as const).map((opt) => (
+                <option key={opt} value={opt}>
+                  {relationshipTypeLabel(opt)}
+                </option>
+              ))}
             </select>
             {editRelError ? (
               <p
@@ -11309,10 +12349,11 @@ export default function PersonProfilePage() {
                     }
                     style={modalInputStyle}
                   >
-                    <option value="parent">Parent</option>
-                    <option value="child">Child</option>
-                    <option value="spouse">Spouse</option>
-                    <option value="sibling">Sibling</option>
+                    {(["parent", "child", "spouse", "sibling"] as const).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {relationshipTypeLabel(opt)}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 {addFamilyFindError ? (
@@ -11483,10 +12524,11 @@ export default function PersonProfilePage() {
                     }
                     style={modalInputStyle}
                   >
-                    <option value="parent">Parent</option>
-                    <option value="child">Child</option>
-                    <option value="spouse">Spouse</option>
-                    <option value="sibling">Sibling</option>
+                    {(["parent", "child", "spouse", "sibling"] as const).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {relationshipTypeLabel(opt)}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 {addFamilyCreateError ? (
@@ -12728,13 +13770,81 @@ export default function PersonProfilePage() {
           </div>
         </div>
       ) : null}
+      {addEventTypeChooserOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border p-6 shadow-xl"
+            style={{
+              backgroundColor: "var(--dg-cream)",
+              borderColor: colors.brownBorder,
+            }}
+          >
+            <h3
+              className="text-lg font-semibold"
+              style={{ fontFamily: serif, color: colors.brownDark }}
+            >
+              Choose Event Type
+            </h3>
+            <p
+              className="mt-1 text-sm"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Pick the event first, then enter only the details for that event.
+            </p>
+            <label
+              className="mt-5 mb-1 block text-xs font-semibold uppercase tracking-wider"
+              style={{ fontFamily: sans, color: colors.brownMuted }}
+            >
+              Event Type
+            </label>
+            <select
+              value={addEventChosenType}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                setAddEventChosenType(nextType);
+                if (nextType) openAddEventModal(nextType);
+              }}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+              style={modalInputStyle}
+              autoFocus
+            >
+              <option value="">Select an event type...</option>
+              {buildEventTypeSelectOptions([], false).map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAddEventTypeChooserOpen(false)}
+                className="rounded-md px-4 py-2 text-sm font-medium"
+                style={{ fontFamily: sans, color: colors.brownMuted }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {addEventOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center overscroll-y-contain p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
         >
+          {(() => {
+            const activeTemplate = addEventTemplateForType(addEventDraft.event_type);
+            const isTemplatedAddEvent = activeTemplate != null;
+            const activeTemplateType = activeTemplate?.eventType ?? "";
+            return (
           <div
-            className="w-full max-w-lg rounded-xl shadow-xl"
+            className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-xl shadow-xl ${
+              activeTemplate?.maxWidthClassName ?? "max-w-2xl"
+            }`}
             style={{
               backgroundColor: "var(--dg-cream)",
               border: `1px solid ${colors.brownBorder}`,
@@ -12744,129 +13854,715 @@ export default function PersonProfilePage() {
               className="flex items-center justify-between border-b px-6 py-4"
               style={{ borderColor: colors.brownBorder }}
             >
-              <h3
-                className="text-lg font-semibold"
-                style={{ fontFamily: serif, color: colors.brownDark }}
-              >
-                New Intel
-              </h3>
+              <div>
+                <h3
+                  className="text-lg font-semibold"
+                  style={{ fontFamily: serif, color: colors.brownDark }}
+                >
+                  Add Event
+                </h3>
+                {!isTemplatedAddEvent ? (
+                  <p
+                    className="mt-1 text-xs"
+                    style={{ fontFamily: sans, color: colors.brownMuted }}
+                  >
+                    Add full event details once, then attach every person who shares
+                    this fact.
+                  </p>
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={() => setAddEventOpen(false)}
                 className="text-xl leading-none"
                 style={{ color: colors.brownMuted }}
               >
-                ×
+                x
               </button>
             </div>
 
-            <div className="space-y-4 px-6 py-5">
-              <div>
-                <label
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              <div
+                className="mb-5 rounded-lg border p-4"
+                style={{
+                  borderColor: colors.brownBorder,
+                  backgroundColor: colors.parchment,
+                }}
+              >
+                <h4
+                  className="mb-3 text-xs font-bold uppercase tracking-[0.12em]"
                   style={{ fontFamily: sans, color: colors.brownMuted }}
                 >
-                  Event Type <span style={{ color: "red" }}>*</span>
-                </label>
-                <select
-                  value={addEventDraft.event_type}
-                  onChange={(e) =>
-                    setAddEventDraft((d) => ({
-                      ...d,
-                      event_type: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  Shared Event Details
+                </h4>
+                <div className="grid gap-3">
+                  <div>
+                    <label
+                      className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      Event Type
+                    </label>
+                    <div
+                      className="rounded-md border px-3 py-2 text-sm font-semibold"
+                      style={{
+                        ...modalInputStyle,
+                        backgroundColor: "var(--dg-parchment)",
+                      }}
+                    >
+                      {addEventDraft.event_type}
+                    </div>
+                  </div>
+                  <div>
+                    <label
+                      className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      Date
+                    </label>
+                    <SmartDateInput
+                      value={addEventDraft.event_date}
+                      onChange={(val) =>
+                        setAddEventDraft((d) => ({ ...d, event_date: val }))
+                      }
+                      style={modalInputStyle}
+                      placeholder="MM/DD/YYYY"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      Place
+                    </label>
+                    <PlaceInput
+                      value={addEventDraft.event_place_display}
+                      onChange={(v) =>
+                        setAddEventDraft((d) => ({
+                          ...d,
+                          event_place_display: v,
+                          event_place_id: null,
+                          event_place_fields: placeFieldsFromDisplay(v),
+                        }))
+                      }
+                      onPlaceSelect={(place) =>
+                        setAddEventDraft((d) => ({
+                          ...d,
+                          event_place_display: place.display,
+                          event_place_id: place.id,
+                          event_place_fields: {
+                            township: place.township,
+                            county: place.county,
+                            state: place.state,
+                            country: place.country,
+                          },
+                        }))
+                      }
+                      style={modalInputStyle}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label
+                      className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                      style={{ fontFamily: sans, color: colors.brownMuted }}
+                    >
+                      Notes
+                    </label>
+                    <textarea
+                      value={addEventDraft.notes}
+                      onChange={(e) =>
+                        setAddEventDraft((d) => ({ ...d, notes: e.target.value }))
+                      }
+                      rows={3}
+                      className="w-full resize-y rounded-md border px-3 py-2 text-sm"
+                      style={modalInputStyle}
+                      placeholder="What happened? Include the document detail, oral history, or family story you know."
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {!isTemplatedAddEvent && activeTemplate?.allowManualPeople !== false ? (
+                <>
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <div className="flex-1">
+                      <label
+                        className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                        style={{ fontFamily: sans, color: colors.brownMuted }}
+                      >
+                        Attach Existing Person
+                      </label>
+                      <input
+                        type="search"
+                        value={addEventPersonSearch}
+                        onChange={(e) => {
+                          setAddEventPersonSearchClientId(null);
+                          setAddEventPersonSearch(e.target.value);
+                        }}
+                        onFocus={() => setAddEventPersonSearchClientId(null)}
+                        placeholder="Search first and last name..."
+                        className="w-full"
+                        style={modalInputStyle}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addNewPersonToEvent}
+                      className="rounded-md border px-3 py-2 text-sm font-semibold"
+                      style={{
+                        fontFamily: sans,
+                        borderColor: colors.brownBorder,
+                        color: colors.forest,
+                        backgroundColor: colors.parchment,
+                      }}
+                    >
+                      Add New Person
+                    </button>
+                  </div>
+
+                  {addEventPersonSearchClientId == null &&
+                  addEventPersonSearch.trim().length >= 2 ? (
+                    <div
+                      className="mb-4 rounded-md border p-2"
+                      style={{
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.parchment,
+                      }}
+                    >
+                      {addEventPersonSearchLoading ? (
+                        <p
+                          className="text-sm italic"
+                          style={{ fontFamily: sans, color: colors.brownMuted }}
+                        >
+                          Searching...
+                        </p>
+                      ) : addEventPersonSearchResults.length === 0 ? (
+                        <p
+                          className="text-sm italic"
+                          style={{ fontFamily: sans, color: colors.brownMuted }}
+                        >
+                          No matches found.
+                        </p>
+                      ) : (
+                        <ul className="m-0 max-h-48 list-none overflow-y-auto p-0">
+                          {addEventPersonSearchResults.map((row) => (
+                            <li
+                              key={row.id}
+                              className="flex items-center justify-between gap-3 border-b py-2 last:border-b-0"
+                              style={{ borderColor: colors.brownBorder }}
+                            >
+                              <span
+                                className="text-sm"
+                                style={{ fontFamily: sans, color: colors.brownDark }}
+                              >
+                                {personDisplayName(row) || "Unnamed person"}
+                                {row.birth_date ? ` (${formatDateString(row.birth_date)})` : ""}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => addExistingPersonToEvent(row)}
+                                className="rounded border px-2 py-1 text-xs font-semibold"
+                                style={{
+                                  borderColor: colors.forest,
+                                  color: colors.forest,
+                                  backgroundColor: "transparent",
+                                }}
+                              >
+                                Attach
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+
+              <div className="space-y-3">
+                {addEventAttachedPeople
+                  .filter(
+                    (row) =>
+                      activeTemplateType !== "marriage" ||
+                      addEventMarriageParentsVisible ||
+                      row.eventRole !== "parent"
+                  )
+                  .map((row, idx) => {
+                  const rowName = personDisplayName(row);
+                  const eventType =
+                    row.event_type.trim() || addEventDraft.event_type.trim();
+                  const slotConfig = activeTemplate?.slots.find(
+                    (slot) => slot.clientId === row.clientId
+                  );
+                  const participantHeading =
+                    row.isProfilePerson
+                      ? `${rowName || personFullName} (${slotConfig?.heading ?? "profile"})`
+                      : slotConfig?.heading ??
+                        (row.existingPersonId
+                          ? rowName || "Attached person"
+                          : `New person ${idx + 1}`);
+                  const hideRelationshipInput =
+                    isTemplatedAddEvent || isBirthFamilyWorkflowForAddEvent();
+                  const canEditPersonFields = !row.isProfilePerson && !row.existingPersonId;
+                  const showSlotExistingSearch =
+                    isTemplatedAddEvent && !row.isProfilePerson;
+                  const showPersonDates = !isTemplatedAddEvent;
+                  const showGender =
+                    !isTemplatedAddEvent || slotConfig?.showGender === true;
+                  return (
+                    <div
+                      key={row.clientId}
+                      className="rounded-lg border p-4"
+                      style={{
+                        borderColor: colors.brownBorder,
+                        backgroundColor: colors.parchment,
+                      }}
+                    >
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                          <h4
+                            className="font-semibold"
+                            style={{ fontFamily: serif, color: colors.brownDark }}
+                          >
+                            {participantHeading}
+                          </h4>
+                          {row.eventRole === "parent" ? (
+                            <label
+                              className="mt-2 flex items-center gap-2 text-xs font-medium"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={row.generateStory}
+                                onChange={(e) =>
+                                  updateAddEventPerson(row.clientId, (p) => ({
+                                    ...p,
+                                    generateStory: e.target.checked,
+                                  }))
+                                }
+                                className="h-4 w-4 rounded border"
+                                style={{ borderColor: colors.brownBorder }}
+                              />
+                              Generate story
+                            </label>
+                          ) : null}
+                          {!isTemplatedAddEvent ? (
+                            <p
+                              className="text-xs"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              This person will get their own timeline event and story
+                              when credits are available.
+                            </p>
+                          ) : null}
+                        </div>
+                        {!row.isProfilePerson && !isTemplatedAddEvent ? (
+                          <button
+                            type="button"
+                            onClick={() => removeAddEventPerson(row.clientId)}
+                            className="text-xs font-semibold"
+                            style={{ color: "var(--dg-danger)" }}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {showSlotExistingSearch ? (
+                        <div
+                          className="mb-3 rounded-md border p-3"
+                          style={{
+                            borderColor: colors.brownBorder,
+                            backgroundColor: "var(--dg-cream)",
+                          }}
+                        >
+                          {row.existingPersonId ? (
+                            <div className="flex items-center justify-between gap-3">
+                              <p
+                                className="text-sm"
+                                style={{ fontFamily: sans, color: colors.brownDark }}
+                              >
+                                Existing person: {rowName || "Unnamed person"}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  clearExistingPersonFromAddEventSlot(row.clientId)
+                                }
+                                className="rounded border px-2 py-1 text-xs font-semibold"
+                                style={{
+                                  borderColor: colors.brownBorder,
+                                  color: colors.forest,
+                                  backgroundColor: "transparent",
+                                }}
+                              >
+                                Change
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <label
+                                className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                                style={{ fontFamily: sans, color: colors.brownMuted }}
+                              >
+                                Select existing person
+                              </label>
+                              <input
+                                type="search"
+                                value={
+                                  addEventPersonSearchClientId === row.clientId
+                                    ? addEventPersonSearch
+                                    : ""
+                                }
+                                onChange={(e) => {
+                                  setAddEventPersonSearchClientId(row.clientId);
+                                  setAddEventPersonSearch(e.target.value);
+                                }}
+                                onFocus={() =>
+                                  setAddEventPersonSearchClientId(row.clientId)
+                                }
+                                placeholder="Search first and last name..."
+                                className="w-full"
+                                style={modalInputStyle}
+                              />
+                              {addEventPersonSearchClientId === row.clientId &&
+                              addEventPersonSearch.trim().length >= 2 ? (
+                                <div
+                                  className="mt-2 rounded-md border p-2"
+                                  style={{
+                                    borderColor: colors.brownBorder,
+                                    backgroundColor: colors.parchment,
+                                  }}
+                                >
+                                  {addEventPersonSearchLoading ? (
+                                    <p
+                                      className="text-sm italic"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                    >
+                                      Searching...
+                                    </p>
+                                  ) : addEventPersonSearchResults.length === 0 ? (
+                                    <p
+                                      className="text-sm italic"
+                                      style={{
+                                        fontFamily: sans,
+                                        color: colors.brownMuted,
+                                      }}
+                                    >
+                                      No matches found.
+                                    </p>
+                                  ) : (
+                                    <ul className="m-0 max-h-40 list-none overflow-y-auto p-0">
+                                      {addEventPersonSearchResults.map((match) => (
+                                        <li
+                                          key={match.id}
+                                          className="flex items-center justify-between gap-3 border-b py-2 last:border-b-0"
+                                          style={{ borderColor: colors.brownBorder }}
+                                        >
+                                          <span
+                                            className="text-sm"
+                                            style={{
+                                              fontFamily: sans,
+                                              color: colors.brownDark,
+                                            }}
+                                          >
+                                            {personDisplayName(match) ||
+                                              "Unnamed person"}
+                                            {match.birth_date
+                                              ? ` (${formatDateString(match.birth_date)})`
+                                              : ""}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              selectExistingPersonForAddEventSlot(
+                                                row.clientId,
+                                                match
+                                              )
+                                            }
+                                            className="rounded border px-2 py-1 text-xs font-semibold"
+                                            style={{
+                                              borderColor: colors.forest,
+                                              color: colors.forest,
+                                              backgroundColor: "transparent",
+                                            }}
+                                          >
+                                            Select
+                                          </button>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      ) : null}
+
+                      {canEditPersonFields ? (
+                        <div
+                          className={
+                            isTemplatedAddEvent
+                              ? "mb-3 grid gap-3"
+                              : "mb-3 grid gap-3 sm:grid-cols-3"
+                          }
+                        >
+                          <input
+                            value={row.first_name}
+                            onChange={(e) =>
+                              updateAddEventPerson(row.clientId, (p) => ({
+                                ...p,
+                                first_name: e.target.value,
+                              }))
+                            }
+                            placeholder="First name"
+                            style={modalInputStyle}
+                          />
+                          <input
+                            value={row.middle_name}
+                            onChange={(e) =>
+                              updateAddEventPerson(row.clientId, (p) => ({
+                                ...p,
+                                middle_name: e.target.value,
+                              }))
+                            }
+                            placeholder="Middle"
+                            style={modalInputStyle}
+                          />
+                          <input
+                            value={row.last_name}
+                            onChange={(e) =>
+                              updateAddEventPerson(row.clientId, (p) => ({
+                                ...p,
+                                last_name: e.target.value,
+                              }))
+                            }
+                            placeholder="Last name"
+                            style={modalInputStyle}
+                          />
+                          {showPersonDates ? (
+                            <>
+                              <SmartDateInput
+                                value={row.birth_date}
+                                onChange={(value) =>
+                                  updateAddEventPerson(row.clientId, (p) => ({
+                                    ...p,
+                                    birth_date: value,
+                                  }))
+                                }
+                                placeholder="Birth date"
+                                style={modalInputStyle}
+                              />
+                              <SmartDateInput
+                                value={row.death_date}
+                                onChange={(value) =>
+                                  updateAddEventPerson(row.clientId, (p) => ({
+                                    ...p,
+                                    death_date: value,
+                                  }))
+                                }
+                                placeholder="Death date"
+                                style={modalInputStyle}
+                              />
+                            </>
+                          ) : null}
+                          {showGender ? (
+                            <select
+                              value={row.gender}
+                              onChange={(e) =>
+                                updateAddEventPerson(row.clientId, (p) => ({
+                                  ...p,
+                                  gender: e.target.value,
+                                }))
+                              }
+                              style={modalInputStyle}
+                            >
+                              <option value="">Gender</option>
+                              {GENDER_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
+                          {eventType.trim().toLowerCase() === "death" ? (
+                            <input
+                              value={row.cause_of_death}
+                              onChange={(e) =>
+                                updateAddEventPerson(row.clientId, (p) => ({
+                                  ...p,
+                                  cause_of_death: e.target.value,
+                                }))
+                              }
+                              placeholder="Cause of death"
+                              style={modalInputStyle}
+                            />
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div
+                        className={
+                          isTemplatedAddEvent
+                            ? "grid gap-3"
+                            : "grid gap-3 sm:grid-cols-2"
+                        }
+                      >
+                        {!row.isProfilePerson && !hideRelationshipInput ? (
+                          <div>
+                            <label
+                              className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              Relationship to {personFullName || "profile person"}
+                            </label>
+                            <select
+                              value={row.relationshipToProfile}
+                              onChange={(e) =>
+                                updateAddEventPerson(row.clientId, (p) => ({
+                                  ...p,
+                                  relationshipToProfile:
+                                    e.target.value as FamilyRelationshipChoice | "",
+                                }))
+                              }
+                              style={modalInputStyle}
+                            >
+                              <option value="">No relationship change</option>
+                              {(["parent", "child", "spouse", "sibling"] as const).map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {relationshipTypeLabel(opt)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : null}
+                        {!isTemplatedAddEvent ? (
+                          <div>
+                            <label
+                              className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                              style={{ fontFamily: sans, color: colors.brownMuted }}
+                            >
+                              Event type for this person
+                            </label>
+                            <select
+                              value={row.event_type}
+                              onChange={(e) =>
+                                updateAddEventPerson(row.clientId, (p) => ({
+                                  ...p,
+                                  event_type: e.target.value,
+                                }))
+                              }
+                              style={modalInputStyle}
+                            >
+                              <option value="">Use shared type</option>
+                              {buildEventTypeSelectOptions([], true).map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : null}
+                        {eventType === "land" ? (
+                          <>
+                            <div>
+                              <label
+                                className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                                style={{ fontFamily: sans, color: colors.brownMuted }}
+                              >
+                                Acres
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={row.landData.acres}
+                                onChange={(e) =>
+                                  updateAddEventPerson(row.clientId, (p) => ({
+                                    ...p,
+                                    landData: {
+                                      ...p.landData,
+                                      acres: e.target.value,
+                                    },
+                                  }))
+                                }
+                                style={modalInputStyle}
+                              />
+                            </div>
+                            <div>
+                              <label
+                                className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+                                style={{ fontFamily: sans, color: colors.brownMuted }}
+                              >
+                                Transaction Type
+                              </label>
+                              <select
+                                value={row.landData.transaction_type}
+                                onChange={(e) =>
+                                  updateAddEventPerson(row.clientId, (p) => ({
+                                    ...p,
+                                    landData: {
+                                      ...p.landData,
+                                      transaction_type: e.target.value,
+                                    },
+                                  }))
+                                }
+                                style={modalInputStyle}
+                              >
+                                <option value="">Select...</option>
+                                <option value="Acquired">Acquired</option>
+                                <option value="Sold">Sold</option>
+                                <option value="Gifted">Gifted</option>
+                                <option value="Taxed">Taxed</option>
+                                <option value="Surveyed">Surveyed</option>
+                              </select>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {activeTemplateType === "marriage" &&
+              !addEventMarriageParentsVisible ? (
+                <button
+                  type="button"
+                  onClick={() => setAddEventMarriageParentsVisible(true)}
+                  className="mt-3 rounded-md border px-3 py-2 text-sm font-semibold"
                   style={{
                     fontFamily: sans,
-                    backgroundColor: "var(--dg-cream)",
-                    color: colors.brownDark,
                     borderColor: colors.brownBorder,
+                    color: colors.forest,
+                    backgroundColor: colors.parchment,
                   }}
                 >
-                  <option value="">Select an event type…</option>
-                  {buildEventTypeSelectOptions([], false).map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  Add parents
+                </button>
+              ) : null}
 
-              <div>
-                <label
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
+              {addEventError ? (
+                <p
+                  className="mt-4 text-sm"
+                  style={{ fontFamily: sans, color: "var(--dg-danger)" }}
+                >
+                  {addEventError}
+                </p>
+              ) : null}
+              {addEventStoryNotice ? (
+                <p
+                  className="mt-4 text-sm"
                   style={{ fontFamily: sans, color: colors.brownMuted }}
                 >
-                  Date
-                </label>
-                <SmartDateInput
-                  value={addEventDraft.event_date}
-                  onChange={(val) =>
-                    setAddEventDraft((d) => ({ ...d, event_date: val }))
-                  }
-                  style={modalInputStyle}
-                  placeholder="MM/DD/YYYY"
-                />
-              </div>
-
-              <div>
-                <label
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                >
-                  Place
-                </label>
-                <PlaceInput
-                  value={addEventDraft.event_place_display}
-                  onChange={(v) =>
-                    setAddEventDraft((d) => ({
-                      ...d,
-                      event_place_display: v,
-                      event_place_id: null,
-                      event_place_fields: null,
-                    }))
-                  }
-                  onPlaceSelect={(place) =>
-                    setAddEventDraft((d) => ({
-                      ...d,
-                      event_place_display: place.display,
-                      event_place_id: place.id,
-                      event_place_fields: {
-                        township: place.township,
-                        county: place.county,
-                        state: place.state,
-                        country: place.country,
-                      },
-                    }))
-                  }
-                  style={modalInputStyle}
-                />
-              </div>
-
-              <div>
-                <label
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wider"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                >
-                  Notes
-                </label>
-                <textarea
-                  value={addEventDraft.notes}
-                  onChange={(e) =>
-                    setAddEventDraft((d) => ({ ...d, notes: e.target.value }))
-                  }
-                  rows={3}
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  style={{
-                    fontFamily: sans,
-                    backgroundColor: "var(--dg-cream)",
-                    color: colors.brownDark,
-                    borderColor: colors.brownBorder,
-                  }}
-                  placeholder="What happened? Family story, oral history, or document summary…"
-                />
-              </div>
+                  {addEventStoryNotice}
+                </p>
+              ) : null}
             </div>
 
             <div
@@ -12895,10 +14591,12 @@ export default function PersonProfilePage() {
                   opacity: addEventSaving ? 0.7 : 1,
                 }}
               >
-                {addEventSaving ? "Saving…" : "Save Event"}
+                {addEventSaving ? "Saving and writing stories..." : "Save Event"}
               </button>
             </div>
           </div>
+            );
+          })()}
         </div>
       )}
     </div>

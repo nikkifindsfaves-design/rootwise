@@ -3,6 +3,13 @@
 import { PlaceInput } from "@/components/ui/place-input";
 import { SmartDateInput } from "@/components/ui/smart-date-input";
 import { ALL_EVENT_TYPES } from "@/lib/events/event-types";
+import {
+  RELATIONSHIP_TYPES,
+  relationshipTypeLabel,
+  relationshipTypeOfFocalToRelated,
+  relationshipTypeOfRelatedToFocalFromDirected,
+  type RelationshipType,
+} from "@/lib/relationships/direction";
 import { PENDING_REVIEW_KEY } from "@/lib/review/review-keys";
 import {
   emptySharedEventDetails,
@@ -80,19 +87,7 @@ type AiResponseShape = {
   relationships?: AiRelationship[];
 };
 
-const RELATIONSHIP_OPTIONS = [
-  "parent",
-  "child",
-  "spouse",
-  "sibling",
-  "grandparent",
-  "grandchild",
-  "aunt/uncle",
-  "niece/nephew",
-  "other",
-] as const;
-
-type RelOption = (typeof RELATIONSHIP_OPTIONS)[number];
+type RelOption = RelationshipType;
 type EvOption = typeof ALL_EVENT_TYPES[number];
 const BIRTH_RECORD_EVENT_TYPES = ["birth", "child born"] as const satisfies readonly EvOption[];
 
@@ -358,41 +353,6 @@ function toForm(p: AiPerson): PersonForm {
   };
 }
 
-function normalizeRelationshipType(raw: string): RelOption {
-  const n = raw.trim().toLowerCase();
-  if (RELATIONSHIP_OPTIONS.includes(n as RelOption)) return n as RelOption;
-  if (n.includes("spouse")) return "spouse";
-  if (n === "parent" || n.includes("father") || n.includes("mother"))
-    return "parent";
-  if (n === "child" || n.includes("son") || n.includes("daughter"))
-    return "child";
-  if (n.includes("sibling")) return "sibling";
-  if (n.includes("grandparent") || n.includes("grandfather"))
-    return "grandparent";
-  if (n.includes("grandchild")) return "grandchild";
-  if (n.includes("aunt") || n.includes("uncle")) return "aunt/uncle";
-  if (n.includes("niece") || n.includes("nephew")) return "niece/nephew";
-  return "other";
-}
-
-function perspectiveWhenPersonIsA(claudeType: string): RelOption {
-  const n = claudeType.trim().toLowerCase();
-  if (n.includes("spouse")) return "spouse";
-  return normalizeRelationshipType(claudeType);
-}
-
-function perspectiveWhenPersonIsB(claudeType: string): RelOption {
-  const n = claudeType.trim().toLowerCase();
-  if (n.includes("spouse")) return "spouse";
-  if (n === "parent") return "child";
-  if (n === "child") return "parent";
-  if (n.includes("grandparent") || n === "grandparent") return "grandchild";
-  if (n.includes("grandchild") || n === "grandchild") return "grandparent";
-  if (n.includes("aunt") || n.includes("uncle")) return "niece/nephew";
-  if (n.includes("niece") || n.includes("nephew")) return "aunt/uncle";
-  return normalizeRelationshipType(claudeType);
-}
-
 function relationshipRowForPerson(
   rel: AiRelationship,
   myName: string
@@ -403,10 +363,16 @@ function relationshipRowForPerson(
   if (!pa || !pb) return null;
 
   if (namesMatch(myName, pa)) {
-    return { relatedName: pb, relType: perspectiveWhenPersonIsA(rt) };
+    return {
+      relatedName: pb,
+      relType: relationshipTypeOfRelatedToFocalFromDirected(rt, true),
+    };
   }
   if (namesMatch(myName, pb)) {
-    return { relatedName: pa, relType: perspectiveWhenPersonIsB(rt) };
+    return {
+      relatedName: pa,
+      relType: relationshipTypeOfRelatedToFocalFromDirected(rt, false),
+    };
   }
   return null;
 }
@@ -603,25 +569,19 @@ function birthPersonIndexFromCards(cards: PersonCardState[]): number | null {
   return idx === -1 ? null : idx;
 }
 
-function birthRecordChildRelationship(
-  birthPersonIndex: number | null
-): RelationshipRow[] {
-  if (birthPersonIndex === null) return [];
-  return [
-    {
-      key: newKey("rel"),
-      fromExtracted: true,
-      relatedPeerIndex: birthPersonIndex,
-      relatedNameExternal: "",
-      relationshipType: "child",
-    },
-  ];
+function birthRecordParentRelationship(parentPersonIndex: number): RelationshipRow {
+  return {
+    key: newKey("rel"),
+    fromExtracted: true,
+    relatedPeerIndex: parentPersonIndex,
+    relatedNameExternal: "",
+    relationshipType: "parent",
+  };
 }
 
 function blankPersonCard(
   recordTypeLabel: string,
-  personIndex = 0,
-  birthPersonIndex: number | null = null
+  personIndex = 0
 ): PersonCardState {
   const t = defaultEventTypeForPerson(recordTypeLabel, personIndex);
   /** Land rows need per-event acres / transaction fields in the card UI. */
@@ -630,10 +590,7 @@ function blankPersonCard(
     key: newKey("p"),
     include: true,
     form: toForm({}),
-    relationships:
-      getIsBirthRecord(recordTypeLabel) && t === "child born"
-        ? birthRecordChildRelationship(birthPersonIndex)
-        : [],
+    relationships: [],
     events: [blankEventRow(t, linkShared)],
     generateStory: true,
   };
@@ -1034,7 +991,9 @@ export default function ReviewRecordClient({
           relationships: c.relationships
             .map((r) => ({
               related_name: resolveRelationshipExportName(r, workingCards),
-              relationship_type: r.relationshipType,
+              relationship_type: relationshipTypeOfFocalToRelated(
+                r.relationshipType
+              ),
               relatedPeerIndex: r.relatedPeerIndex,
             }))
             .filter((r) => {
@@ -1338,7 +1297,7 @@ export default function ReviewRecordClient({
                 </p>
                 <button
                   type="button"
-                  onClick={() => setCards([blankPersonCard(recordTypeLabel, 0, null)])}
+                  onClick={() => setCards([blankPersonCard(recordTypeLabel, 0)])}
                   className="rounded-md border-2 px-4 py-2 text-sm font-semibold transition hover:opacity-95"
                   style={{
                     borderColor: "var(--dg-brown-outline)",
@@ -1896,7 +1855,7 @@ export default function ReviewRecordClient({
                                     className="text-[10px] font-medium uppercase tracking-wide"
                                     style={{ color: "var(--dg-brown-muted)" }}
                                   >
-                                    Related person
+                                    Person
                                   </p>
                                   {rel.fromExtracted ? (
                                     <p
@@ -1937,32 +1896,40 @@ export default function ReviewRecordClient({
                                     </>
                                   )}
                                 </div>
-                                <select
-                                  className={`${inputFieldClass} sm:max-w-[11rem] sm:shrink-0`}
-                                  style={inputFieldStyle}
-                                  value={rel.relationshipType}
-                                  onChange={(e) =>
-                                    updateCard(item.key, {
-                                      ...item,
-                                      relationships: item.relationships.map(
-                                        (r) =>
-                                          r.key === rel.key
-                                            ? {
-                                                ...r,
-                                                relationshipType: e.target
-                                                  .value as RelOption,
-                                              }
-                                            : r
-                                      ),
-                                    })
-                                  }
-                                >
-                                  {RELATIONSHIP_OPTIONS.map((opt) => (
-                                    <option key={opt} value={opt}>
-                                      {opt}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="sm:w-48 sm:shrink-0">
+                                  <p
+                                    className="mb-1 text-[10px] font-medium uppercase tracking-wide"
+                                    style={{ color: "var(--dg-brown-muted)" }}
+                                  >
+                                    Relationship to this person
+                                  </p>
+                                  <select
+                                    className={inputFieldClass}
+                                    style={inputFieldStyle}
+                                    value={rel.relationshipType}
+                                    onChange={(e) =>
+                                      updateCard(item.key, {
+                                        ...item,
+                                        relationships: item.relationships.map(
+                                          (r) =>
+                                            r.key === rel.key
+                                              ? {
+                                                  ...r,
+                                                  relationshipType: e.target
+                                                    .value as RelOption,
+                                                }
+                                              : r
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    {RELATIONSHIP_TYPES.map((opt) => (
+                                      <option key={opt} value={opt}>
+                                        {relationshipTypeLabel(opt)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -2401,14 +2368,29 @@ export default function ReviewRecordClient({
                 onClick={() =>
                   setCards((prev) => {
                     const nextIndex = prev.length;
-                    return [
-                      ...prev,
-                      blankPersonCard(
-                        recordTypeLabel,
-                        nextIndex,
-                        birthPersonIndexFromCards(prev)
-                      ),
-                    ];
+                    const nextCard = blankPersonCard(recordTypeLabel, nextIndex);
+                    const birthPersonIndex = birthPersonIndexFromCards(prev);
+                    if (
+                      getIsBirthRecord(recordTypeLabel) &&
+                      birthPersonIndex !== null &&
+                      nextCard.events.some((event) => event.eventType === "child born")
+                    ) {
+                      return [
+                        ...prev.map((card, index) =>
+                          index === birthPersonIndex
+                            ? {
+                                ...card,
+                                relationships: [
+                                  ...card.relationships,
+                                  birthRecordParentRelationship(nextIndex),
+                                ],
+                              }
+                            : card
+                        ),
+                        nextCard,
+                      ];
+                    }
+                    return [...prev, nextCard];
                   })
                 }
                 className="w-full rounded-md border-2 px-4 py-2.5 text-sm font-semibold transition hover:opacity-95"

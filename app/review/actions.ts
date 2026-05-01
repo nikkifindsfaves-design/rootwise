@@ -1,6 +1,7 @@
 "use server";
 
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
+import { inverseRelationshipType } from "@/lib/relationships/direction";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_GENDER, normalizeGender } from "@/lib/utils/gender";
 import {
@@ -450,22 +451,6 @@ async function resolveEventPlaceIdFromCardEvent(
   });
   if (!inReviewRes.ok) return { id: null, error: inReviewRes.message };
   return { id: inReviewRes.id, error: null };
-}
-
-function inverseRelationshipType(t: string): string {
-  const n = t.trim().toLowerCase();
-  const map: Record<string, string> = {
-    parent: "child",
-    child: "parent",
-    spouse: "spouse",
-    sibling: "sibling",
-    grandparent: "grandchild",
-    grandchild: "grandparent",
-    "aunt/uncle": "niece/nephew",
-    "niece/nephew": "aunt/uncle",
-    other: "other",
-  };
-  return map[n] ?? "other";
 }
 
 /**
