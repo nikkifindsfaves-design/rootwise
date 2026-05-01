@@ -143,8 +143,7 @@ function parsePlaceDisplayToFields(display: string): PlaceFields | null {
 
 async function resolveBirthPlaceIdFromBody(
   supabase: SupabaseClient,
-  p: PendingPersonBody,
-  _recordId: string
+  p: PendingPersonBody
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = p.birth_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
@@ -188,8 +187,7 @@ async function resolveBirthPlaceIdFromBody(
 
 async function resolveEventPlaceIdFromEvent(
   supabase: SupabaseClient,
-  e: Record<string, unknown>,
-  _recordId: string
+  e: Record<string, unknown>
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = e.event_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
@@ -227,8 +225,7 @@ async function resolveEventPlaceIdFromEvent(
 
 async function resolveDeathPlaceIdFromBody(
   supabase: SupabaseClient,
-  p: PendingPersonBody,
-  _recordId: string
+  p: PendingPersonBody
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = p.death_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
@@ -353,6 +350,134 @@ function observedYearFromEvents(eventsRaw: unknown): number | null {
   return null;
 }
 
+async function loadNameMap(
+  supabase: SupabaseClient,
+  userId: string,
+  recordTreeId: string | null
+): Promise<{ nameToId: Map<string, string>; error: string | null }> {
+  let nameListQuery = supabase
+    .from("persons")
+    .select("id, first_name, middle_name, last_name")
+    .eq("user_id", userId);
+  if (recordTreeId) {
+    nameListQuery = nameListQuery.eq("tree_id", recordTreeId);
+  }
+
+  const { data, error } = await nameListQuery;
+  if (error) return { nameToId: new Map(), error: error.message };
+
+  const nameToId = new Map<string, string>();
+  for (const row of (data ?? []) as PersonNameRow[]) {
+    const key = normalizeFullName(buildFullName(row));
+    if (key) nameToId.set(key, row.id);
+  }
+  return { nameToId, error: null };
+}
+
+function validateRelationshipsBeforeWrites(
+  pendingPersons: PendingPersonBody[],
+  existingNameToId: Map<string, string>
+): string | null {
+  const nameToPlannedId = new Map(existingNameToId);
+
+  for (let i = 0; i < pendingPersons.length; i++) {
+    const p = pendingPersons[i]!;
+    const payload = toPersonPayload(p);
+    const key = normalizeFullName(
+      buildFullName({
+        first_name: payload.first_name,
+        middle_name: payload.middle_name,
+        last_name: payload.last_name,
+      })
+    );
+    const existingId =
+      typeof p.existingPersonId === "string" && p.existingPersonId.trim() !== ""
+        ? p.existingPersonId.trim()
+        : `pending:${i}`;
+    if (key) nameToPlannedId.set(key, existingId);
+  }
+
+  for (let i = 0; i < pendingPersons.length; i++) {
+    const p = pendingPersons[i]!;
+    const payload = toPersonPayload(p);
+    const selfKey = normalizeFullName(
+      buildFullName({
+        first_name: payload.first_name,
+        middle_name: payload.middle_name,
+        last_name: payload.last_name,
+      })
+    );
+    const selfId =
+      typeof p.existingPersonId === "string" && p.existingPersonId.trim() !== ""
+        ? p.existingPersonId.trim()
+        : `pending:${i}`;
+    const rels = Array.isArray(p.relationships) ? p.relationships : [];
+
+    for (const rel of rels) {
+      if (typeof rel !== "object" || rel === null) continue;
+      const r = rel as Record<string, unknown>;
+      const relatedName = String(r.related_name ?? "").trim();
+      if (!relatedName) continue;
+
+      const relatedKey = normalizeFullName(relatedName);
+      const relatedId = nameToPlannedId.get(relatedKey);
+      if (!relatedId) {
+        return `No person found matching "${relatedName}". Save related people first or fix the name.`;
+      }
+      if (relatedId === selfId || (selfKey !== "" && relatedKey === selfKey)) {
+        return "A relationship cannot connect a person to themselves.";
+      }
+    }
+  }
+
+  return null;
+}
+
+async function rollbackFailedReviewSave(
+  supabase: SupabaseClient,
+  params: {
+    userId: string;
+    recordId: string;
+    insertedPersonIds: string[];
+  }
+) {
+  await supabase
+    .from("event_sources")
+    .delete()
+    .eq("user_id", params.userId)
+    .eq("record_id", params.recordId);
+
+  await supabase
+    .from("events")
+    .delete()
+    .eq("user_id", params.userId)
+    .eq("record_id", params.recordId);
+
+  await supabase
+    .from("occupations")
+    .delete()
+    .eq("record_id", params.recordId);
+
+  if (params.insertedPersonIds.length === 0) return;
+
+  await supabase
+    .from("relationships")
+    .delete()
+    .eq("user_id", params.userId)
+    .in("person_a_id", params.insertedPersonIds);
+  await supabase
+    .from("relationships")
+    .delete()
+    .eq("user_id", params.userId)
+    .in("person_b_id", params.insertedPersonIds);
+
+  await supabase
+    .from("persons")
+    .delete()
+    .eq("user_id", params.userId)
+    .in("id", params.insertedPersonIds);
+}
+
 export async function POST(request: NextRequest) {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     console.error(
@@ -417,27 +542,54 @@ export async function POST(request: NextRequest) {
       ? recordTreeIdRaw.trim()
       : null;
 
+  const existingNames = await loadNameMap(supabase, user.id, recordTreeId);
+  if (existingNames.error) {
+    console.error("[save-review]", "person-name-list", existingNames.error);
+    return NextResponse.json({ error: existingNames.error }, { status: 500 });
+  }
+  const relationshipValidationError = validateRelationshipsBeforeWrites(
+    pendingPersons,
+    existingNames.nameToId
+  );
+  if (relationshipValidationError) {
+    console.error(
+      "[save-review]",
+      "relationship-prevalidation",
+      relationshipValidationError
+    );
+    return NextResponse.json({ error: relationshipValidationError }, { status: 400 });
+  }
+
   const resolvedIds: string[] = [];
+  const insertedPersonIds: string[] = [];
   const savedEvents: Array<{
     personIndex: number;
     eventIndex: number;
     personId: string;
     eventId: string;
   }> = [];
+  const failAfterWrites = async (error: string, status = 500) => {
+    await rollbackFailedReviewSave(supabase, {
+      userId: user.id,
+      recordId,
+      insertedPersonIds,
+    });
+    return NextResponse.json({ error }, { status });
+  };
 
   for (const p of pendingPersons) {
     const existingId =
       typeof p.existingPersonId === "string" ? p.existingPersonId.trim() : "";
 
-    const birthRes = await resolveBirthPlaceIdFromBody(supabase, p, recordId);
+    const birthRes = await resolveBirthPlaceIdFromBody(supabase, p);
     if (birthRes.error) {
       console.error("[save-review]", "birth-place-resolve", birthRes.error);
-      return NextResponse.json({ error: birthRes.error }, { status: 500 });
+      return failAfterWrites(birthRes.error);
     }
-    const deathRes = await resolveDeathPlaceIdFromBody(supabase, p, recordId);
+    const deathRes = await resolveDeathPlaceIdFromBody(supabase, p);
     if (deathRes.error) {
       console.error("[save-review]", "death-place-resolve", deathRes.error);
-      return NextResponse.json({ error: deathRes.error }, { status: 500 });
+      return failAfterWrites(deathRes.error);
     }
     const payload: PersonPayload = {
       ...toPersonPayload(p),
@@ -449,7 +601,7 @@ export async function POST(request: NextRequest) {
       const { data: row, error: fetchErr } = await supabase
         .from("persons")
         .select(
-          "id, middle_name, death_date, birth_place_id, death_place_id, marital_status, cause_of_death, surviving_spouse"
+          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, gender, notes, marital_status, cause_of_death, surviving_spouse"
         )
         .eq("id", existingId)
         .eq("user_id", user.id)
@@ -457,7 +609,7 @@ export async function POST(request: NextRequest) {
 
       if (fetchErr) {
         console.error("[save-review]", "existing-person-fetch", fetchErr.message);
-        return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+        return failAfterWrites(fetchErr.message);
       }
       if (!row) {
         console.error(
@@ -465,10 +617,7 @@ export async function POST(request: NextRequest) {
           "existing-person-missing",
           `Person not found: ${existingId}`
         );
-        return NextResponse.json(
-          { error: `Person not found: ${existingId}` },
-          { status: 400 }
-        );
+        return failAfterWrites(`Person not found: ${existingId}`, 400);
       }
 
       const fieldChoices = mergeByExistingId.get(existingId) ?? {};
@@ -481,9 +630,21 @@ export async function POST(request: NextRequest) {
 
       const existingBirthPlaceId = (row as { birth_place_id?: string | null })
         .birth_place_id;
+      const existingFirstName = (row as { first_name?: string | null }).first_name;
+      if (isEmptyDbField(existingFirstName) && !isEmptyDbField(payload.first_name)) {
+        updates.first_name = payload.first_name;
+      }
       const existingMiddleName = (row as { middle_name?: string | null }).middle_name;
       if (isEmptyDbField(existingMiddleName) && !isEmptyDbField(payload.middle_name)) {
         updates.middle_name = payload.middle_name;
+      }
+      const existingLastName = (row as { last_name?: string | null }).last_name;
+      if (isEmptyDbField(existingLastName) && !isEmptyDbField(payload.last_name)) {
+        updates.last_name = payload.last_name;
+      }
+      const existingBirthDate = (row as { birth_date?: string | null }).birth_date;
+      if (isEmptyDbField(existingBirthDate) && !isEmptyDbField(payload.birth_date)) {
+        updates.birth_date = payload.birth_date;
       }
       const existingDeathDate = (row as { death_date?: string | null }).death_date;
       if (isEmptyDbField(existingDeathDate) && !isEmptyDbField(payload.death_date)) {
@@ -503,6 +664,14 @@ export async function POST(request: NextRequest) {
       ) {
         (updates as Record<string, string | null>).death_place_id =
           payload.death_place_id;
+      }
+      const existingGender = (row as { gender?: string | null }).gender;
+      if (isEmptyDbField(existingGender) && !isEmptyDbField(payload.gender)) {
+        updates.gender = payload.gender;
+      }
+      const existingNotes = (row as { notes?: string | null }).notes;
+      if (isEmptyDbField(existingNotes) && !isEmptyDbField(payload.notes)) {
+        updates.notes = payload.notes;
       }
       const existingMaritalStatus = (row as { marital_status?: string | null })
         .marital_status;
@@ -544,7 +713,7 @@ export async function POST(request: NextRequest) {
 
         if (updErr) {
           console.error("[save-review]", "person-update", updErr.message);
-          return NextResponse.json({ error: updErr.message }, { status: 500 });
+          return failAfterWrites(updErr.message);
         }
       }
 
@@ -563,7 +732,7 @@ export async function POST(request: NextRequest) {
           .eq("user_id", user.id);
         if (milUpdErr) {
           console.error("[save-review]", "military-fields-update", milUpdErr.message);
-          return NextResponse.json({ error: milUpdErr.message }, { status: 500 });
+          return failAfterWrites(milUpdErr.message);
         }
       }
 
@@ -575,9 +744,9 @@ export async function POST(request: NextRequest) {
           "new-person-name-required",
           "At least a first or last name is required for each new person."
         );
-        return NextResponse.json(
-          { error: "At least a first or last name is required for each new person." },
-          { status: 400 }
+        return failAfterWrites(
+          "At least a first or last name is required for each new person.",
+          400
         );
       }
 
@@ -620,13 +789,12 @@ export async function POST(request: NextRequest) {
           "person-insert",
           insErr?.message ?? "Failed to create person."
         );
-        return NextResponse.json(
-          { error: insErr?.message ?? "Failed to create person." },
-          { status: 500 }
-        );
+        return failAfterWrites(insErr?.message ?? "Failed to create person.");
       }
 
-      resolvedIds.push(inserted.id as string);
+      const insertedId = inserted.id as string;
+      insertedPersonIds.push(insertedId);
+      resolvedIds.push(insertedId);
     }
   }
 
@@ -651,7 +819,7 @@ export async function POST(request: NextRequest) {
         "occupation-existing-query",
         existingOccErr.message
       );
-      return NextResponse.json({ error: existingOccErr.message }, { status: 500 });
+      return failAfterWrites(existingOccErr.message);
     }
 
     if ((existingOcc ?? []).length > 0) {
@@ -676,7 +844,7 @@ export async function POST(request: NextRequest) {
             "occupation-link-update",
             occLinkErr.message
           );
-          return NextResponse.json({ error: occLinkErr.message }, { status: 500 });
+          return failAfterWrites(occLinkErr.message);
         }
       }
       continue;
@@ -700,29 +868,11 @@ export async function POST(request: NextRequest) {
 
     if (occInsertErr) {
       console.error("[save-review]", "occupation-insert", occInsertErr.message);
-      return NextResponse.json({ error: occInsertErr.message }, { status: 500 });
+      return failAfterWrites(occInsertErr.message);
     }
   }
 
-  let nameListQuery = supabase
-    .from("persons")
-    .select("id, first_name, middle_name, last_name")
-    .eq("user_id", user.id);
-  if (recordTreeId) {
-    nameListQuery = nameListQuery.eq("tree_id", recordTreeId);
-  }
-  const { data: allPersons, error: listErr } = await nameListQuery;
-
-  if (listErr) {
-    console.error("[save-review]", "person-name-list", listErr.message);
-    return NextResponse.json({ error: listErr.message }, { status: 500 });
-  }
-
-  const nameToId = new Map<string, string>();
-  for (const row of (allPersons ?? []) as PersonNameRow[]) {
-    const key = normalizeFullName(buildFullName(row));
-    if (key) nameToId.set(key, row.id);
-  }
+  const nameToId = new Map(existingNames.nameToId);
 
   for (let i = 0; i < pendingPersons.length; i++) {
     const p = pendingPersons[i];
@@ -756,11 +906,9 @@ export async function POST(request: NextRequest) {
           "relationship-related-name-not-found",
           `No person found matching "${relatedName}". Save related people first or fix the name.`
         );
-        return NextResponse.json(
-          {
-            error: `No person found matching "${relatedName}". Save related people first or fix the name.`,
-          },
-          { status: 400 }
+        return failAfterWrites(
+          `No person found matching "${relatedName}". Save related people first or fix the name.`,
+          400
         );
       }
       if (relatedId === personId) {
@@ -769,9 +917,9 @@ export async function POST(request: NextRequest) {
           "relationship-self",
           "A relationship cannot connect a person to themselves."
         );
-        return NextResponse.json(
-          { error: "A relationship cannot connect a person to themselves." },
-          { status: 400 }
+        return failAfterWrites(
+          "A relationship cannot connect a person to themselves.",
+          400
         );
       }
 
@@ -798,7 +946,7 @@ export async function POST(request: NextRequest) {
 
       if (r1) {
         console.error("[save-review]", "relationship-insert-forward", r1.message);
-        return NextResponse.json({ error: r1.message }, { status: 500 });
+        return failAfterWrites(r1.message);
       }
 
       const { error: r2 } = await supabase.from("relationships").insert(relRow2);
@@ -815,7 +963,7 @@ export async function POST(request: NextRequest) {
         }
         await del;
         console.error("[save-review]", "relationship-insert-inverse", r2.message);
-        return NextResponse.json({ error: r2.message }, { status: 500 });
+        return failAfterWrites(r2.message);
       }
     }
   }
@@ -834,12 +982,11 @@ export async function POST(request: NextRequest) {
       const storyFull = String(e.story_full ?? "").trim() || null;
       const evPlaceRes = await resolveEventPlaceIdFromEvent(
         supabase,
-        e,
-        recordId
+        e
       );
       if (evPlaceRes.error) {
         console.error("[save-review]", "event-place-resolve", evPlaceRes.error);
-        return NextResponse.json({ error: evPlaceRes.error }, { status: 500 });
+        return failAfterWrites(evPlaceRes.error);
       }
       let landData: {
         acres: number | null;
@@ -879,7 +1026,7 @@ export async function POST(request: NextRequest) {
 
       if (evSaveErr) {
         console.error("[save-review]", "event-save-dedupe", evSaveErr);
-        return NextResponse.json({ error: evSaveErr }, { status: 500 });
+        return failAfterWrites(evSaveErr);
       }
       if (typeof savedEventId === "string" && savedEventId.trim() !== "") {
         savedEvents.push({
@@ -909,7 +1056,7 @@ export async function POST(request: NextRequest) {
 
     if (asChildErr) {
       console.error("[save-review]", "sibling-parent-query", asChildErr.message);
-      return NextResponse.json({ error: asChildErr.message }, { status: 500 });
+      return failAfterWrites(asChildErr.message);
     }
 
     const parentIds = [
@@ -934,7 +1081,7 @@ export async function POST(request: NextRequest) {
 
       if (coErr) {
         console.error("[save-review]", "sibling-cochild-query", coErr.message);
-        return NextResponse.json({ error: coErr.message }, { status: 500 });
+        return failAfterWrites(coErr.message);
       }
 
       const otherChildren = [
@@ -961,7 +1108,7 @@ export async function POST(request: NextRequest) {
 
         if (s1Err) {
           console.error("[save-review]", "sibling-exists-query-a", s1Err.message);
-          return NextResponse.json({ error: s1Err.message }, { status: 500 });
+          return failAfterWrites(s1Err.message);
         }
 
         let sib2Q = supabase
@@ -979,7 +1126,7 @@ export async function POST(request: NextRequest) {
 
         if (s2Err) {
           console.error("[save-review]", "sibling-exists-query-b", s2Err.message);
-          return NextResponse.json({ error: s2Err.message }, { status: 500 });
+          return failAfterWrites(s2Err.message);
         }
 
         if (sib1 || sib2) continue;
@@ -1007,7 +1154,7 @@ export async function POST(request: NextRequest) {
 
         if (insSib1) {
           console.error("[save-review]", "sibling-insert-forward", insSib1.message);
-          return NextResponse.json({ error: insSib1.message }, { status: 500 });
+          return failAfterWrites(insSib1.message);
         }
 
         const { error: insSib2 } = await supabase
@@ -1027,7 +1174,7 @@ export async function POST(request: NextRequest) {
           }
           await delS;
           console.error("[save-review]", "sibling-insert-inverse", insSib2.message);
-          return NextResponse.json({ error: insSib2.message }, { status: 500 });
+          return failAfterWrites(insSib2.message);
         }
       }
     }

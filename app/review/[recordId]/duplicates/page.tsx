@@ -174,18 +174,13 @@ function buildFieldChoicesForMatch(
 ): Record<string, "existing" | "record"> {
   const chosen = fieldMergeChoices[matchId] ?? {};
   const out: Record<string, "existing" | "record"> = {};
-  const pendingBirthPlace = fieldStr(pending.birth_place_display);
-  const existingBirthPlace = match.birth_place ? formatPlace(match.birth_place).trim() : "";
   for (const field of MERGE_FIELDS) {
     if (chosen[field]) {
       out[field] = chosen[field]!;
       continue;
     }
-    if (
-      field === "birth_place_id" &&
-      pendingBirthPlace !== "" &&
-      existingBirthPlace === ""
-    ) {
+    const { record, tree } = displayValue(pending, match, field);
+    if (record !== "—" && tree === "—") {
       out[field] = "record";
       continue;
     }

@@ -94,6 +94,7 @@ const RELATIONSHIP_OPTIONS = [
 
 type RelOption = (typeof RELATIONSHIP_OPTIONS)[number];
 type EvOption = typeof ALL_EVENT_TYPES[number];
+const BIRTH_RECORD_EVENT_TYPES = ["birth", "child born"] as const satisfies readonly EvOption[];
 
 type PersonForm = {
   first_name: string;
@@ -575,15 +576,64 @@ function buildInitialCards(parsed: AiResponseShape): PersonCardState[] {
   });
 }
 
-function blankPersonCard(recordTypeLabel: string): PersonCardState {
-  const t = defaultEventTypeForRecord(recordTypeLabel);
+function eventTypesForRecord(recordTypeLabel: string): readonly EvOption[] {
+  if (getIsBirthRecord(recordTypeLabel)) return BIRTH_RECORD_EVENT_TYPES;
+  return ALL_EVENT_TYPES;
+}
+
+function eventTypeLabelForRecord(opt: EvOption, recordTypeLabel: string): string {
+  if (getIsBirthRecord(recordTypeLabel)) {
+    if (opt === "birth") return "Birth";
+    if (opt === "child born") return "Child Birth";
+  }
+  return opt;
+}
+
+function defaultEventTypeForPerson(recordTypeLabel: string, personIndex: number): EvOption {
+  if (getIsBirthRecord(recordTypeLabel)) {
+    return personIndex === 0 ? "birth" : "child born";
+  }
+  return defaultEventTypeForRecord(recordTypeLabel);
+}
+
+function birthPersonIndexFromCards(cards: PersonCardState[]): number | null {
+  const idx = cards.findIndex((card) =>
+    card.events.some((event) => event.eventType === "birth")
+  );
+  return idx === -1 ? null : idx;
+}
+
+function birthRecordChildRelationship(
+  birthPersonIndex: number | null
+): RelationshipRow[] {
+  if (birthPersonIndex === null) return [];
+  return [
+    {
+      key: newKey("rel"),
+      fromExtracted: true,
+      relatedPeerIndex: birthPersonIndex,
+      relatedNameExternal: "",
+      relationshipType: "child",
+    },
+  ];
+}
+
+function blankPersonCard(
+  recordTypeLabel: string,
+  personIndex = 0,
+  birthPersonIndex: number | null = null
+): PersonCardState {
+  const t = defaultEventTypeForPerson(recordTypeLabel, personIndex);
   /** Land rows need per-event acres / transaction fields in the card UI. */
   const linkShared = t !== "land";
   return {
     key: newKey("p"),
     include: true,
     form: toForm({}),
-    relationships: [],
+    relationships:
+      getIsBirthRecord(recordTypeLabel) && t === "child born"
+        ? birthRecordChildRelationship(birthPersonIndex)
+        : [],
     events: [blankEventRow(t, linkShared)],
     generateStory: true,
   };
@@ -1288,7 +1338,7 @@ export default function ReviewRecordClient({
                 </p>
                 <button
                   type="button"
-                  onClick={() => setCards([blankPersonCard(recordTypeLabel)])}
+                  onClick={() => setCards([blankPersonCard(recordTypeLabel, 0, null)])}
                   className="rounded-md border-2 px-4 py-2 text-sm font-semibold transition hover:opacity-95"
                   style={{
                     borderColor: "var(--dg-brown-outline)",
@@ -1301,7 +1351,7 @@ export default function ReviewRecordClient({
               </div>
             ) : (
               <div className="space-y-5">
-                {cards.map((item) => {
+                {cards.map((item, personIndex) => {
                   const isDeathRecord = getIsDeathRecord(recordTypeLabel);
                   const isMarriageRecord = getIsMarriageRecord(recordTypeLabel);
                   const isBirthRecordChild = getIsBirthRecordChild(
@@ -1321,6 +1371,7 @@ export default function ReviewRecordClient({
                     (e) => e.eventType === "death"
                   );
                   const isSecondaryPerson = isDeathRecord && !isPrimaryPerson;
+                  const eventTypeOptions = eventTypesForRecord(recordTypeLabel);
                   return (
                   <article
                     key={item.key}
@@ -1953,7 +2004,10 @@ export default function ReviewRecordClient({
                                 events: [
                                   ...item.events,
                                   blankEventRow(
-                                    defaultEventTypeForRecord(recordTypeLabel)
+                                    defaultEventTypeForPerson(
+                                      recordTypeLabel,
+                                      personIndex
+                                    )
                                   ),
                                 ],
                               })
@@ -2029,12 +2083,15 @@ export default function ReviewRecordClient({
                                         })
                                       }
                                     >
-                                      {ALL_EVENT_TYPES.map((opt, idx) => (
+                                      {eventTypeOptions.map((opt, idx) => (
                                         <option
                                           key={`${String(opt)}-${idx}`}
                                           value={opt}
                                         >
-                                          {opt}
+                                          {eventTypeLabelForRecord(
+                                            opt,
+                                            recordTypeLabel
+                                          )}
                                         </option>
                                       ))}
                                     </select>
@@ -2342,10 +2399,17 @@ export default function ReviewRecordClient({
               <button
                 type="button"
                 onClick={() =>
-                  setCards((prev) => [
-                    ...prev,
-                    blankPersonCard(recordTypeLabel),
-                  ])
+                  setCards((prev) => {
+                    const nextIndex = prev.length;
+                    return [
+                      ...prev,
+                      blankPersonCard(
+                        recordTypeLabel,
+                        nextIndex,
+                        birthPersonIndexFromCards(prev)
+                      ),
+                    ];
+                  })
                 }
                 className="w-full rounded-md border-2 px-4 py-2.5 text-sm font-semibold transition hover:opacity-95"
                 style={{
