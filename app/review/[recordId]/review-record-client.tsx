@@ -834,6 +834,10 @@ export default function ReviewRecordClient({
     () => extractionSkippedFromAi(aiResponse),
     [aiResponse]
   );
+  const initialReviewState = useMemo(
+    () => createInitialCardsAndShared(aiResponse),
+    [aiResponse]
+  );
   const returnPath = useMemo(() => {
     const raw = searchParams.get("returnTo");
     if (!raw) return null;
@@ -843,40 +847,31 @@ export default function ReviewRecordClient({
     return trimmed;
   }, [searchParams]);
 
-  const [cards, setCards] = useState<PersonCardState[]>(() => {
-    const init = createInitialCardsAndShared(aiResponse);
-    const p = parsedShapeFromAiResponse(aiResponse);
-    console.log("[review] buildInitialCards input", {
-      parsed: p,
-      people: p.people,
-      parent_events: p.parent_events,
-      cardCount: init.cards.length,
-    });
-    return init.cards;
-  });
+  const [cards, setCards] = useState<PersonCardState[]>(
+    () => initialReviewState.cards
+  );
   const [sharedEventDetails, setSharedEventDetails] =
-    useState<SharedEventDetailsState>(() =>
-      createInitialCardsAndShared(aiResponse).shared
-    );
+    useState<SharedEventDetailsState>(() => initialReviewState.shared);
   const [treePersonNameSuggestions, setTreePersonNameSuggestions] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadTreePersonNames() {
+      if (!recordTreeId) {
+        setTreePersonNameSuggestions([]);
+        return;
+      }
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user || cancelled) return;
 
-      let personsQuery = supabase
+      const personsQuery = supabase
         .from("persons")
         .select("first_name, middle_name, last_name")
-        .eq("user_id", user.id);
-
-      if (recordTreeId) {
-        personsQuery = personsQuery.eq("tree_id", recordTreeId);
-      }
+        .eq("user_id", user.id)
+        .eq("tree_id", recordTreeId);
 
       const { data, error } = await personsQuery;
       if (cancelled || error) return;
@@ -911,6 +906,9 @@ export default function ReviewRecordClient({
 
   function handleContinue() {
     try {
+      if (!recordTreeId) {
+        return;
+      }
       const isDeathRecord = getIsDeathRecord(recordTypeLabel);
       const primaryCard = cards.find((c) =>
         c.events.some((e) => e.eventType === "death")
@@ -1027,11 +1025,6 @@ export default function ReviewRecordClient({
           }),
         })),
       };
-
-      console.log(
-        "[review step1] pendingReview before localStorage:",
-        JSON.parse(JSON.stringify(payload))
-      );
 
       try {
         localStorage.setItem(PENDING_REVIEW_KEY, JSON.stringify(payload));

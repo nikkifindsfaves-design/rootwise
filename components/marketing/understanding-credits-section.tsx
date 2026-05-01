@@ -8,7 +8,6 @@ const dimWhite = "rgba(250, 250, 250, 0.68)";
 const dimMore = "rgba(250, 250, 250, 0.45)";
 const inactiveTab = "rgba(255, 255, 255, 0.35)";
 const amber = "#eab308";
-const amberDeep = "#d97706";
 const purpleStrong = "#a855f7";
 const green = "#22c55e";
 

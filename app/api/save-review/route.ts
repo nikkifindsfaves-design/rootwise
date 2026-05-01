@@ -50,6 +50,19 @@ type PersonNameRow = {
   last_name: string;
 };
 
+type ExistingPersonReviewRow = PersonNameRow & {
+  tree_id: string | null;
+  birth_date: string | null;
+  death_date: string | null;
+  birth_place_id: string | null;
+  death_place_id: string | null;
+  gender: string | null;
+  notes: string | null;
+  marital_status: string | null;
+  cause_of_death: string | null;
+  surviving_spouse: string | null;
+};
+
 function buildFullName(row: {
   first_name: string;
   middle_name: string | null;
@@ -338,17 +351,13 @@ function observedYearFromEvents(eventsRaw: unknown): number | null {
 async function loadNameMap(
   supabase: SupabaseClient,
   userId: string,
-  recordTreeId: string | null
+  recordTreeId: string
 ): Promise<{ nameToId: Map<string, string>; error: string | null }> {
-  let nameListQuery = supabase
+  const { data, error } = await supabase
     .from("persons")
     .select("id, first_name, middle_name, last_name")
-    .eq("user_id", userId);
-  if (recordTreeId) {
-    nameListQuery = nameListQuery.eq("tree_id", recordTreeId);
-  }
-
-  const { data, error } = await nameListQuery;
+    .eq("user_id", userId)
+    .eq("tree_id", recordTreeId);
   if (error) return { nameToId: new Map(), error: error.message };
 
   const nameToId = new Map<string, string>();
@@ -423,6 +432,7 @@ async function rollbackFailedReviewSave(
   params: {
     userId: string;
     recordId: string;
+    treeId: string;
     insertedPersonIds: string[];
   }
 ) {
@@ -449,17 +459,20 @@ async function rollbackFailedReviewSave(
     .from("relationships")
     .delete()
     .eq("user_id", params.userId)
+    .eq("tree_id", params.treeId)
     .in("person_a_id", params.insertedPersonIds);
   await supabase
     .from("relationships")
     .delete()
     .eq("user_id", params.userId)
+    .eq("tree_id", params.treeId)
     .in("person_b_id", params.insertedPersonIds);
 
   await supabase
     .from("persons")
     .delete()
     .eq("user_id", params.userId)
+    .eq("tree_id", params.treeId)
     .in("id", params.insertedPersonIds);
 }
 
@@ -527,6 +540,18 @@ export async function POST(request: NextRequest) {
       ? recordTreeIdRaw.trim()
       : null;
 
+  if (!recordTreeId) {
+    console.error(
+      "[save-review]",
+      "record-tree-missing",
+      "Review records must belong to a tree."
+    );
+    return NextResponse.json(
+      { error: "This review is missing tree context. Upload the record from a tree and try again." },
+      { status: 400 }
+    );
+  }
+
   const existingNames = await loadNameMap(supabase, user.id, recordTreeId);
   if (existingNames.error) {
     console.error("[save-review]", "person-name-list", existingNames.error);
@@ -557,6 +582,7 @@ export async function POST(request: NextRequest) {
     await rollbackFailedReviewSave(supabase, {
       userId: user.id,
       recordId,
+      treeId: recordTreeId,
       insertedPersonIds,
     });
     return NextResponse.json({ error }, { status });
@@ -583,14 +609,16 @@ export async function POST(request: NextRequest) {
     };
 
     if (existingId) {
-      const { data: row, error: fetchErr } = await supabase
+      const { data, error: fetchErr } = await supabase
         .from("persons")
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, gender, notes, marital_status, cause_of_death, surviving_spouse"
+          "id, tree_id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, gender, notes, marital_status, cause_of_death, surviving_spouse"
         )
         .eq("id", existingId)
         .eq("user_id", user.id)
+        .eq("tree_id", recordTreeId)
         .maybeSingle();
+      const row = data as ExistingPersonReviewRow | null;
 
       if (fetchErr) {
         console.error("[save-review]", "existing-person-fetch", fetchErr.message);
@@ -603,6 +631,12 @@ export async function POST(request: NextRequest) {
           `Person not found: ${existingId}`
         );
         return failAfterWrites(`Person not found: ${existingId}`, 400);
+      }
+      if (((row as { tree_id?: string | null }).tree_id ?? "").trim() !== recordTreeId) {
+        return failAfterWrites(
+          `Person does not belong to this tree: ${existingId}`,
+          400
+        );
       }
 
       const fieldChoices = mergeByExistingId.get(existingId) ?? {};
@@ -694,7 +728,8 @@ export async function POST(request: NextRequest) {
           .from("persons")
           .update(updates)
           .eq("id", existingId)
-          .eq("user_id", user.id);
+          .eq("user_id", user.id)
+          .eq("tree_id", recordTreeId);
 
         if (updErr) {
           console.error("[save-review]", "person-update", updErr.message);
@@ -714,7 +749,8 @@ export async function POST(request: NextRequest) {
           .from("persons")
           .update(militaryUpdates)
           .eq("id", existingId)
-          .eq("user_id", user.id);
+          .eq("user_id", user.id)
+          .eq("tree_id", recordTreeId);
         if (milUpdErr) {
           console.error("[save-review]", "military-fields-update", milUpdErr.message);
           return failAfterWrites(milUpdErr.message);
@@ -737,6 +773,7 @@ export async function POST(request: NextRequest) {
 
       const newPersonRow: Record<string, unknown> = {
         user_id: user.id,
+        tree_id: recordTreeId,
         first_name: payload.first_name,
         middle_name: payload.middle_name,
         last_name: payload.last_name,
@@ -758,9 +795,6 @@ export async function POST(request: NextRequest) {
         gender: payload.gender,
         notes: payload.notes,
       };
-      if (recordTreeId) {
-        newPersonRow.tree_id = recordTreeId;
-      }
 
       const { data: inserted, error: insErr } = await supabase
         .from("persons")
@@ -912,21 +946,18 @@ export async function POST(request: NextRequest) {
 
       const relRow1: Record<string, unknown> = {
         user_id: user.id,
+        tree_id: recordTreeId,
         person_a_id: personId,
         person_b_id: relatedId,
         relationship_type: relType,
       };
       const relRow2: Record<string, unknown> = {
         user_id: user.id,
+        tree_id: recordTreeId,
         person_a_id: relatedId,
         person_b_id: personId,
         relationship_type: inverseRelationshipType(relType),
       };
-      if (recordTreeId) {
-        relRow1.tree_id = recordTreeId;
-        relRow2.tree_id = recordTreeId;
-      }
-
       const { error: r1 } = await supabase.from("relationships").insert(relRow1);
 
       if (r1) {
@@ -937,15 +968,13 @@ export async function POST(request: NextRequest) {
       const { error: r2 } = await supabase.from("relationships").insert(relRow2);
 
       if (r2) {
-        let del = supabase
+        const del = supabase
           .from("relationships")
           .delete()
           .eq("user_id", user.id)
+          .eq("tree_id", recordTreeId)
           .eq("person_a_id", personId)
           .eq("person_b_id", relatedId);
-        if (recordTreeId) {
-          del = del.eq("tree_id", recordTreeId);
-        }
         await del;
         console.error("[save-review]", "relationship-insert-inverse", r2.message);
         return failAfterWrites(r2.message);
@@ -1028,15 +1057,13 @@ export async function POST(request: NextRequest) {
   // parent edge (person_a = parent, person_b = child, type parent), link them as
   // siblings to every other child of the same parent if not already linked.
   for (const personId of resolvedIds) {
-    let asChildQ = supabase
+    const asChildQ = supabase
       .from("relationships")
       .select("person_a_id")
       .eq("user_id", user.id)
+      .eq("tree_id", recordTreeId)
       .eq("person_b_id", personId)
       .eq("relationship_type", "parent");
-    if (recordTreeId) {
-      asChildQ = asChildQ.eq("tree_id", recordTreeId);
-    }
     const { data: asChildRows, error: asChildErr } = await asChildQ;
 
     if (asChildErr) {
@@ -1053,15 +1080,13 @@ export async function POST(request: NextRequest) {
     ];
 
     for (const parentId of parentIds) {
-      let coChildQ = supabase
+      const coChildQ = supabase
         .from("relationships")
         .select("person_b_id")
         .eq("user_id", user.id)
+        .eq("tree_id", recordTreeId)
         .eq("person_a_id", parentId)
         .eq("relationship_type", "parent");
-      if (recordTreeId) {
-        coChildQ = coChildQ.eq("tree_id", recordTreeId);
-      }
       const { data: coChildRows, error: coErr } = await coChildQ;
 
       if (coErr) {
@@ -1078,16 +1103,14 @@ export async function POST(request: NextRequest) {
       ];
 
       for (const otherId of otherChildren) {
-        let sib1Q = supabase
+        const sib1Q = supabase
           .from("relationships")
           .select("id")
           .eq("user_id", user.id)
+          .eq("tree_id", recordTreeId)
           .eq("relationship_type", "sibling")
           .eq("person_a_id", personId)
           .eq("person_b_id", otherId);
-        if (recordTreeId) {
-          sib1Q = sib1Q.eq("tree_id", recordTreeId);
-        }
         const { data: sib1Rows, error: s1Err } = await sib1Q.limit(1);
         const sib1 = sib1Rows?.[0] ?? null;
 
@@ -1096,16 +1119,14 @@ export async function POST(request: NextRequest) {
           return failAfterWrites(s1Err.message);
         }
 
-        let sib2Q = supabase
+        const sib2Q = supabase
           .from("relationships")
           .select("id")
           .eq("user_id", user.id)
+          .eq("tree_id", recordTreeId)
           .eq("relationship_type", "sibling")
           .eq("person_a_id", otherId)
           .eq("person_b_id", personId);
-        if (recordTreeId) {
-          sib2Q = sib2Q.eq("tree_id", recordTreeId);
-        }
         const { data: sib2Rows, error: s2Err } = await sib2Q.limit(1);
         const sib2 = sib2Rows?.[0] ?? null;
 
@@ -1118,20 +1139,18 @@ export async function POST(request: NextRequest) {
 
         const sibIns1: Record<string, unknown> = {
           user_id: user.id,
+          tree_id: recordTreeId,
           person_a_id: personId,
           person_b_id: otherId,
           relationship_type: "sibling",
         };
         const sibIns2: Record<string, unknown> = {
           user_id: user.id,
+          tree_id: recordTreeId,
           person_a_id: otherId,
           person_b_id: personId,
           relationship_type: "sibling",
         };
-        if (recordTreeId) {
-          sibIns1.tree_id = recordTreeId;
-          sibIns2.tree_id = recordTreeId;
-        }
 
         const { error: insSib1 } = await supabase
           .from("relationships")
@@ -1147,16 +1166,14 @@ export async function POST(request: NextRequest) {
           .insert(sibIns2);
 
         if (insSib2) {
-          let delS = supabase
+          const delS = supabase
             .from("relationships")
             .delete()
             .eq("user_id", user.id)
+            .eq("tree_id", recordTreeId)
             .eq("person_a_id", personId)
             .eq("person_b_id", otherId)
             .eq("relationship_type", "sibling");
-          if (recordTreeId) {
-            delS = delS.eq("tree_id", recordTreeId);
-          }
           await delS;
           console.error("[save-review]", "sibling-insert-inverse", insSib2.message);
           return failAfterWrites(insSib2.message);

@@ -16,6 +16,7 @@ export async function addPerson(formData: FormData) {
   }
 
   const first_name = String(formData.get("first_name") ?? "").trim();
+  const treeId = String(formData.get("tree_id") ?? "").trim();
   const middle_name = String(formData.get("middle_name") ?? "").trim() || null;
   const last_name = String(formData.get("last_name") ?? "").trim();
   const birthRaw = formData.get("birth_date");
@@ -37,8 +38,24 @@ export async function addPerson(formData: FormData) {
     redirect("/tree-select?error=Name+fields+are+required");
   }
 
+  if (!treeId) {
+    redirect("/tree-select?error=Choose+a+tree+before+adding+people");
+  }
+
+  const { data: treeRow, error: treeErr } = await supabase
+    .from("trees")
+    .select("id")
+    .eq("id", treeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (treeErr || !treeRow) {
+    redirect("/tree-select?error=Tree+not+found");
+  }
+
   const { error } = await supabase.from("persons").insert({
     user_id: user.id,
+    tree_id: treeId,
     first_name,
     middle_name,
     last_name,
@@ -50,11 +67,11 @@ export async function addPerson(formData: FormData) {
 
   if (error) {
     redirect(
-      `/tree-select?error=${encodeURIComponent(error.message)}`
+      `/dashboard/${treeId}?error=${encodeURIComponent(error.message)}`
     );
   }
 
-  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/${treeId}`);
   revalidatePath("/tree-select");
-  redirect("/tree-select");
+  redirect(`/dashboard/${treeId}`);
 }

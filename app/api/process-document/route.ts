@@ -482,13 +482,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function resolveAnchorPersonName(
   supabase: Awaited<ReturnType<typeof createClient>>,
   personId: string,
-  userId: string
+  userId: string,
+  treeId: string
 ): Promise<string | null> {
   const { data } = await supabase
     .from("persons")
     .select("first_name, middle_name, last_name")
     .eq("id", personId)
     .eq("user_id", userId)
+    .eq("tree_id", treeId)
     .maybeSingle();
   if (!data) return null;
   const r = data as {
@@ -646,6 +648,13 @@ export async function POST(request: NextRequest) {
     resolvedTreeId = tid;
   }
 
+  if (resolvedTreeId === null) {
+    return NextResponse.json(
+      { error: "Choose a tree before uploading records." },
+      { status: 400 }
+    );
+  }
+
   const anchorIdRaw = formData.get("anchor_person_id");
   const anchorNameRaw = formData.get("anchor_person_name");
   const anchorIdTrim =
@@ -658,8 +667,15 @@ export async function POST(request: NextRequest) {
     anchorPersonName = await resolveAnchorPersonName(
       supabase,
       anchorIdTrim,
-      user.id
+      user.id,
+      resolvedTreeId
     );
+    if (anchorPersonName === null) {
+      return NextResponse.json(
+        { error: "Anchor person does not belong to the selected tree." },
+        { status: 400 }
+      );
+    }
   } else {
     const anchorNameTrim =
       anchorNameRaw != null && String(anchorNameRaw).trim() !== ""
@@ -671,18 +687,16 @@ export async function POST(request: NextRequest) {
   }
 
   let resolvedVibe = DEFAULT_VIBE;
-  if (resolvedTreeId !== null) {
-    const { data: vibeRow, error: vibeErr } = await supabase
-      .from("trees")
-      .select("vibe")
-      .eq("id", resolvedTreeId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!vibeErr && vibeRow) {
-      const v = (vibeRow as { vibe?: string | null }).vibe;
-      if (typeof v === "string" && v.trim() !== "") {
-        resolvedVibe = v.trim();
-      }
+  const { data: vibeRow, error: vibeErr } = await supabase
+    .from("trees")
+    .select("vibe")
+    .eq("id", resolvedTreeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!vibeErr && vibeRow) {
+    const v = (vibeRow as { vibe?: string | null }).vibe;
+    if (typeof v === "string" && v.trim() !== "") {
+      resolvedVibe = v.trim();
     }
   }
 

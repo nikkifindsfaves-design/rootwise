@@ -8,7 +8,7 @@ import {
 import { NextResponse, type NextRequest } from "next/server";
 
 const PERSON_SELECT =
-  "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, birth_place:places!birth_place_id(place_identity_id, township, county, state, country), death_place:places!death_place_id(place_identity_id, township, county, state, country)";
+  "id, tree_id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, death_place_id, photo_url, gender, notes, birth_place:places!birth_place_id(place_identity_id, township, county, state, country), death_place:places!death_place_id(place_identity_id, township, county, state, country)";
 
 const MERGE_FIELD_KEYS = [
   "first_name",
@@ -35,6 +35,22 @@ function isEmpty(v: string | null | undefined): boolean {
 
 type PersonRow = Record<string, unknown> & { id: string };
 
+async function ensureTreeBelongsToUser(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  treeId: string
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("trees")
+    .select("id")
+    .eq("id", treeId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return error.message;
+  if (!data) return "Tree not found or access denied.";
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -48,6 +64,19 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") ?? "").trim();
   const excludeId = (searchParams.get("exclude") ?? "").trim();
+  const treeId = (searchParams.get("treeId") ?? "").trim();
+
+  if (!treeId) {
+    return NextResponse.json(
+      { error: "treeId is required for person search." },
+      { status: 400 }
+    );
+  }
+
+  const treeError = await ensureTreeBelongsToUser(supabase, user.id, treeId);
+  if (treeError) {
+    return NextResponse.json({ error: treeError }, { status: 403 });
+  }
 
   if (q.length < 2) {
     return NextResponse.json({ matches: [] });
@@ -58,7 +87,8 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from("persons")
     .select(PERSON_SELECT)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", treeId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -88,6 +118,7 @@ export async function GET(req: NextRequest) {
 type PostBody = {
   primaryId?: unknown;
   duplicateId?: unknown;
+  treeId?: unknown;
   fieldChoices?: unknown;
 };
 
@@ -111,12 +142,25 @@ export async function POST(req: NextRequest) {
   const primaryId = typeof body.primaryId === "string" ? body.primaryId.trim() : "";
   const duplicateId =
     typeof body.duplicateId === "string" ? body.duplicateId.trim() : "";
+  const treeId = typeof body.treeId === "string" ? body.treeId.trim() : "";
 
   if (!primaryId || !duplicateId || primaryId === duplicateId) {
     return NextResponse.json(
       { error: "primaryId and duplicateId are required and must differ." },
       { status: 400 }
     );
+  }
+
+  if (!treeId) {
+    return NextResponse.json(
+      { error: "treeId is required for person merge." },
+      { status: 400 }
+    );
+  }
+
+  const treeError = await ensureTreeBelongsToUser(supabase, user.id, treeId);
+  if (treeError) {
+    return NextResponse.json({ error: treeError }, { status: 403 });
   }
 
   const rawChoices =
@@ -129,6 +173,7 @@ export async function POST(req: NextRequest) {
     .select(PERSON_SELECT)
     .eq("id", primaryId)
     .eq("user_id", user.id)
+    .eq("tree_id", treeId)
     .maybeSingle();
 
   if (pErr || !primaryRow) {
@@ -143,6 +188,7 @@ export async function POST(req: NextRequest) {
     .select(PERSON_SELECT)
     .eq("id", duplicateId)
     .eq("user_id", user.id)
+    .eq("tree_id", treeId)
     .maybeSingle();
 
   if (dErr || !dupRow) {
@@ -154,6 +200,13 @@ export async function POST(req: NextRequest) {
 
   const primary = primaryRow as PersonRow;
   const dup = dupRow as PersonRow;
+
+  if (strVal(primary.tree_id) !== treeId || strVal(dup.tree_id) !== treeId) {
+    return NextResponse.json(
+      { error: "Both people must belong to the active tree." },
+      { status: 400 }
+    );
+  }
 
   function resolveField(key: MergeFieldKey): string | null {
     const pv = strVal(primary[key]);
@@ -232,6 +285,7 @@ export async function POST(req: NextRequest) {
   const { error: phErr } = await supabase
     .from("photo_tags")
     .update({ person_id: primaryId })
+    .eq("user_id", user.id)
     .eq("person_id", duplicateId);
 
   if (phErr) {
@@ -245,6 +299,7 @@ export async function POST(req: NextRequest) {
     .from("relationships")
     .update({ person_a_id: primaryId })
     .eq("user_id", user.id)
+    .eq("tree_id", treeId)
     .eq("person_a_id", duplicateId);
 
   if (raErr) {
@@ -255,6 +310,7 @@ export async function POST(req: NextRequest) {
     .from("relationships")
     .update({ person_b_id: primaryId })
     .eq("user_id", user.id)
+    .eq("tree_id", treeId)
     .eq("person_b_id", duplicateId);
 
   if (rbErr) {
@@ -264,7 +320,8 @@ export async function POST(req: NextRequest) {
   const { data: allRels, error: relListErr } = await supabase
     .from("relationships")
     .select("id, person_a_id, person_b_id, relationship_type")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", treeId);
 
   if (relListErr) {
     return NextResponse.json({ error: relListErr.message }, { status: 500 });
@@ -285,7 +342,8 @@ export async function POST(req: NextRequest) {
         .from("relationships")
         .delete()
         .eq("id", r.id)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .eq("tree_id", treeId);
       if (delErr) {
         return NextResponse.json({ error: delErr.message }, { status: 500 });
       }
@@ -295,7 +353,8 @@ export async function POST(req: NextRequest) {
   const { data: relsAfterSelf } = await supabase
     .from("relationships")
     .select("id, person_a_id, person_b_id, relationship_type")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", treeId);
 
   const afterRows = (relsAfterSelf ?? []) as Rel[];
   const directed = new Map<string, string[]>();
@@ -315,7 +374,8 @@ export async function POST(req: NextRequest) {
         .from("relationships")
         .delete()
         .eq("id", id)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .eq("tree_id", treeId);
       if (delErr) {
         return NextResponse.json({ error: delErr.message }, { status: 500 });
       }
@@ -326,7 +386,8 @@ export async function POST(req: NextRequest) {
     .from("persons")
     .update(updatePayload)
     .eq("id", primaryId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", treeId);
 
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 });
@@ -336,7 +397,8 @@ export async function POST(req: NextRequest) {
     .from("persons")
     .delete()
     .eq("id", duplicateId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", treeId);
 
   if (delPersonErr) {
     return NextResponse.json({ error: delPersonErr.message }, { status: 500 });

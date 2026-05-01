@@ -3,7 +3,7 @@
 import { savePersonEventWithDedupe } from "@/lib/events/dedupe";
 import { inverseRelationshipType } from "@/lib/relationships/direction";
 import { createClient } from "@/lib/supabase/server";
-import { DEFAULT_GENDER, normalizeGender } from "@/lib/utils/gender";
+import { normalizeGender } from "@/lib/utils/gender";
 import {
   findOrCreatePlace,
   findOrCreateInReviewPlace,
@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type PersonRow = {
   id: string;
+  tree_id: string | null;
   first_name: string;
   middle_name: string | null;
   last_name: string;
@@ -86,6 +87,7 @@ function parsePlaceFields(raw: unknown): PlaceFields | null {
 export async function findFuzzyPersonMatches(
   firstName: string,
   lastName: string,
+  treeId: string,
   maxDistance = 2
 ): Promise<{ matches: PersonRow[]; error?: string }> {
   const supabase = await createClient();
@@ -99,6 +101,10 @@ export async function findFuzzyPersonMatches(
 
   const fn = firstName.trim();
   const ln = lastName.trim();
+  const tid = treeId.trim();
+  if (!tid) {
+    return { matches: [], error: "Tree context is required." };
+  }
   if (!fn || !ln) {
     return { matches: [] };
   }
@@ -106,9 +112,10 @@ export async function findFuzzyPersonMatches(
   const { data, error } = await supabase
     .from("persons")
     .select(
-      "id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
+      "id, tree_id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
     )
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", tid);
 
   if (error) {
     return { matches: [], error: error.message };
@@ -139,7 +146,8 @@ export async function findFuzzyPersonMatches(
 
 export async function findPersonByName(
   firstName: string,
-  lastName: string
+  lastName: string,
+  treeId: string
 ): Promise<{ match: PersonRow | null; error?: string }> {
   const supabase = await createClient();
   const {
@@ -152,6 +160,10 @@ export async function findPersonByName(
 
   const fn = firstName.trim();
   const ln = lastName.trim();
+  const tid = treeId.trim();
+  if (!tid) {
+    return { match: null, error: "Tree context is required." };
+  }
   if (!fn || !ln) {
     return { match: null };
   }
@@ -159,9 +171,10 @@ export async function findPersonByName(
   const { data, error } = await supabase
     .from("persons")
     .select(
-      "id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
+      "id, tree_id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
     )
     .eq("user_id", user.id)
+    .eq("tree_id", tid)
     .ilike("first_name", fn)
     .ilike("last_name", ln)
     .limit(1)
@@ -175,7 +188,8 @@ export async function findPersonByName(
 }
 
 export async function insertPerson(
-  input: PersonFormInput
+  input: PersonFormInput,
+  treeId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient();
   const {
@@ -188,12 +202,17 @@ export async function insertPerson(
 
   const first_name = input.first_name.trim();
   const last_name = input.last_name.trim();
+  const tid = treeId.trim();
+  if (!tid) {
+    return { ok: false, error: "Tree context is required." };
+  }
   if (!first_name || !last_name) {
     return { ok: false, error: "First and last name are required." };
   }
 
   const { error } = await supabase.from("persons").insert({
     user_id: user.id,
+    tree_id: tid,
     first_name,
     middle_name: input.middle_name?.trim() || null,
     last_name,
@@ -211,7 +230,8 @@ export async function insertPerson(
 }
 
 export async function insertPersonReturningId(
-  input: PersonFormInput
+  input: PersonFormInput,
+  treeId: string
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const supabase = await createClient();
   const {
@@ -224,6 +244,10 @@ export async function insertPersonReturningId(
 
   const first_name = input.first_name.trim();
   const last_name = input.last_name.trim();
+  const tid = treeId.trim();
+  if (!tid) {
+    return { ok: false, error: "Tree context is required." };
+  }
   if (!first_name || !last_name) {
     return { ok: false, error: "First and last name are required." };
   }
@@ -232,6 +256,7 @@ export async function insertPersonReturningId(
     .from("persons")
     .insert({
       user_id: user.id,
+      tree_id: tid,
       first_name,
       middle_name: input.middle_name?.trim() || null,
       last_name,
@@ -255,7 +280,8 @@ export async function insertPersonReturningId(
 
 export async function mergePerson(
   personId: string,
-  input: PersonFormInput
+  input: PersonFormInput,
+  treeId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient();
   const {
@@ -268,6 +294,10 @@ export async function mergePerson(
 
   const first_name = input.first_name.trim();
   const last_name = input.last_name.trim();
+  const tid = treeId.trim();
+  if (!tid) {
+    return { ok: false, error: "Tree context is required." };
+  }
   if (!first_name || !last_name) {
     return { ok: false, error: "First and last name are required." };
   }
@@ -284,7 +314,8 @@ export async function mergePerson(
       notes: input.notes?.trim() || null,
     })
     .eq("id", personId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", tid);
 
   if (error) {
     return { ok: false, error: error.message };
@@ -331,7 +362,8 @@ function findPersonIdByFullName(
  */
 export async function insertRelationshipPairFromFullNames(
   personAFullName: string,
-  personBFullName: string
+  personBFullName: string,
+  treeId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient();
   const {
@@ -341,11 +373,16 @@ export async function insertRelationshipPairFromFullNames(
   if (!user) {
     return { ok: false, error: "Unauthorized" };
   }
+  const tid = treeId.trim();
+  if (!tid) {
+    return { ok: false, error: "Tree context is required." };
+  }
 
   const { data: persons, error: personsError } = await supabase
     .from("persons")
     .select("id, first_name, middle_name, last_name")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", tid);
 
   if (personsError) {
     return { ok: false, error: personsError.message };
@@ -373,6 +410,7 @@ export async function insertRelationshipPairFromFullNames(
 
   const { error: err1 } = await supabase.from("relationships").insert({
     user_id: user.id,
+    tree_id: tid,
     person_a_id: idA,
     person_b_id: idB,
     relationship_type: "parent",
@@ -384,6 +422,7 @@ export async function insertRelationshipPairFromFullNames(
 
   const { error: err2 } = await supabase.from("relationships").insert({
     user_id: user.id,
+    tree_id: tid,
     person_a_id: idB,
     person_b_id: idA,
     relationship_type: "child",
@@ -394,6 +433,7 @@ export async function insertRelationshipPairFromFullNames(
       .from("relationships")
       .delete()
       .eq("user_id", user.id)
+      .eq("tree_id", tid)
       .eq("person_a_id", idA)
       .eq("person_b_id", idB);
     return { ok: false, error: err2.message };
@@ -419,8 +459,7 @@ export type CardEventInput = {
 
 async function resolveEventPlaceIdFromCardEvent(
   supabase: SupabaseClient,
-  ev: CardEventInput,
-  _recordId: string
+  ev: CardEventInput
 ): Promise<{ id: string | null; error: string | null }> {
   const rawId = ev.event_place_id;
   if (typeof rawId === "string" && rawId.trim() !== "") {
@@ -462,6 +501,7 @@ async function resolveEventPlaceIdFromCardEvent(
 export async function acceptPersonCard(params: {
   form: PersonFormInput;
   recordId: string;
+  treeId: string;
   relationships: CardRelationshipInput[];
   events: CardEventInput[];
   mergeWithPersonId?: string | null;
@@ -484,13 +524,24 @@ export async function acceptPersonCard(params: {
 
   const { data: recordRow, error: recordErr } = await supabase
     .from("records")
-    .select("id")
+    .select("id, tree_id")
     .eq("id", params.recordId)
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (recordErr || !recordRow) {
     return { ok: false, error: "Record not found." };
+  }
+  const treeId = params.treeId.trim();
+  if (!treeId) {
+    return { ok: false, error: "Tree context is required." };
+  }
+  const recordTreeId =
+    typeof (recordRow as { tree_id?: string | null }).tree_id === "string"
+      ? ((recordRow as { tree_id?: string | null }).tree_id ?? "").trim()
+      : "";
+  if (recordTreeId !== treeId) {
+    return { ok: false, error: "Record does not belong to the active tree." };
   }
 
   const first_name = params.form.first_name.trim();
@@ -518,10 +569,11 @@ export async function acceptPersonCard(params: {
       const { data: existingRow, error: fetchMergeErr } = await supabase
         .from("persons")
         .select(
-          "id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
+          "id, tree_id, first_name, middle_name, last_name, birth_date, death_date, gender, notes"
         )
         .eq("id", params.mergeWithPersonId)
         .eq("user_id", user.id)
+        .eq("tree_id", treeId)
         .maybeSingle();
 
       if (fetchMergeErr || !existingRow) {
@@ -557,7 +609,8 @@ export async function acceptPersonCard(params: {
       .from("persons")
       .update(updatePayload)
       .eq("id", params.mergeWithPersonId)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("tree_id", treeId);
 
     if (mergeError) {
       return { ok: false, error: mergeError.message };
@@ -568,7 +621,8 @@ export async function acceptPersonCard(params: {
       .from("persons")
       .update(personPayload)
       .eq("id", params.existingPersonId)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("tree_id", treeId);
 
     if (updErr) {
       return { ok: false, error: updErr.message };
@@ -579,6 +633,7 @@ export async function acceptPersonCard(params: {
       .from("persons")
       .insert({
         user_id: user.id,
+        tree_id: treeId,
         ...personPayload,
       })
       .select("id")
@@ -596,7 +651,8 @@ export async function acceptPersonCard(params: {
   const { data: allPersons, error: listErr } = await supabase
     .from("persons")
     .select("id, first_name, middle_name, last_name")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("tree_id", treeId);
 
   if (listErr) {
     return { ok: false, error: listErr.message };
@@ -626,6 +682,7 @@ export async function acceptPersonCard(params: {
 
     const { error: r1 } = await supabase.from("relationships").insert({
       user_id: user.id,
+      tree_id: treeId,
       person_a_id: personId,
       person_b_id: relatedId,
       relationship_type: relType,
@@ -637,6 +694,7 @@ export async function acceptPersonCard(params: {
 
     const { error: r2 } = await supabase.from("relationships").insert({
       user_id: user.id,
+      tree_id: treeId,
       person_a_id: relatedId,
       person_b_id: personId,
       relationship_type: inverseRelationshipType(relType),
@@ -647,6 +705,7 @@ export async function acceptPersonCard(params: {
         .from("relationships")
         .delete()
         .eq("user_id", user.id)
+        .eq("tree_id", treeId)
         .eq("person_a_id", personId)
         .eq("person_b_id", relatedId);
       return { ok: false, error: r2.message };
@@ -656,8 +715,7 @@ export async function acceptPersonCard(params: {
   for (const ev of params.events) {
     const placeRes = await resolveEventPlaceIdFromCardEvent(
       supabase,
-      ev,
-      params.recordId
+      ev
     );
     if (placeRes.error) {
       return { ok: false, error: placeRes.error };

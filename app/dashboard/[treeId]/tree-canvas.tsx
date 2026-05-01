@@ -17,6 +17,7 @@ import {
   removeTaggedPersonById,
   toggleTaggedPerson,
 } from "@/lib/utils/photo-upload-tagging";
+import { TreeCanvasZoomControls } from "./tree-canvas-zoom-controls";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -32,7 +33,6 @@ import {
 import {
   TransformComponent,
   TransformWrapper,
-  useControls,
   type ReactZoomPanPinchContentRef,
 } from "react-zoom-pan-pinch";
 import { UpgradeInvoiceReturnBanner } from "@/components/billing/upgrade-invoice-return-banner";
@@ -104,12 +104,8 @@ const LAYOUT_NODE_H =
  * Leaf art is ~square; `cover` inside the tall narrow polaroid rect clips the sides flat.
  * Roots uses a wider (and slightly taller) surface centered on the same layout slot so the
  * SVG can scale up without losing the curved silhouette. Layout math still uses LAYOUT_NODE_*.
- * Width stays wide for side curves; height ≥ ~width so ~square `leaf.svg` + `cover` does not clip the tip.
+ * Width stays wide for side curves; card height is based on the roots card aspect below.
  */
-const TREE_LEAF_SURFACE_W = Math.round(LAYOUT_NODE_H * 1.464);
-const TREE_LEAF_SURFACE_H = Math.round(
-  Math.max(LAYOUT_NODE_H * 1.35, TREE_LEAF_SURFACE_W * 1.04)
-);
 const TREE_ROOTS_CARD_SURFACE_W = Math.round(LAYOUT_NODE_W * 1.341);
 const TREE_ROOTS_CARD_SURFACE_H = Math.round(TREE_ROOTS_CARD_SURFACE_W * 1.62);
 /** Roots tree cards: move photo + caption block down within the parchment card. */
@@ -1429,183 +1425,6 @@ function computeExplicitTreeLayout(
   };
 }
 
-function TreeCanvasZoomControls({
-  unlinkedPeople,
-  onSelectUnlinkedPerson,
-}: {
-  unlinkedPeople: TreeCanvasPerson[];
-  onSelectUnlinkedPerson: (personId: string) => void;
-}) {
-  const { zoomIn, zoomOut, resetTransform } = useControls();
-  const [unlinkedOpen, setUnlinkedOpen] = useState(false);
-  const unlinkedRef = useRef<HTMLDivElement>(null);
-  const btnBase: CSSProperties = {
-    fontFamily: sans,
-    minWidth: 36,
-    height: 32,
-    padding: "0 0.35rem",
-    fontSize: "1.05rem",
-    fontWeight: 700,
-    lineHeight: 1,
-    color: colors.brownDark,
-    backgroundColor: colors.parchment,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: colors.brownBorder,
-    borderRadius: 4,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    transition: "background-color 0.15s, border-color 0.15s",
-  };
-
-  useEffect(() => {
-    if (!unlinkedOpen) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      const root = unlinkedRef.current;
-      if (!root || root.contains(e.target as Node)) return;
-      setUnlinkedOpen(false);
-    };
-    document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [unlinkedOpen]);
-
-  return (
-    <div
-      className="pointer-events-auto absolute bottom-4 right-4 z-20 flex flex-col items-end gap-2"
-    >
-      {unlinkedPeople.length > 0 ? (
-        <div ref={unlinkedRef} className="relative">
-          {unlinkedOpen ? (
-            <div
-              className="absolute bottom-full right-0 mb-2 w-64 max-h-64 overflow-y-auto rounded-md border p-2 shadow-sm"
-              style={{
-                backgroundColor: colors.parchment,
-                borderColor: colors.brownBorder,
-                boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
-              }}
-            >
-              <div className="mb-1 flex items-center justify-between">
-                <p
-                  className="text-xs font-bold uppercase tracking-wide"
-                  style={{ fontFamily: sans, color: colors.brownMuted }}
-                >
-                  Unlinked people
-                </p>
-                <button
-                  type="button"
-                  className="rounded border px-1.5 py-0 text-xs"
-                  style={{
-                    fontFamily: sans,
-                    borderColor: colors.brownBorder,
-                    color: colors.brownDark,
-                    backgroundColor: colors.cream,
-                  }}
-                  aria-label="Close unlinked people list"
-                  onClick={() => setUnlinkedOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-              <ul className="space-y-1">
-                {unlinkedPeople.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      className="w-full rounded border px-2 py-1 text-left text-sm hover:opacity-90"
-                      style={{
-                        fontFamily: sans,
-                        borderColor: colors.brownBorder,
-                        color: colors.brownDark,
-                        backgroundColor: colors.cream,
-                      }}
-                      onClick={() => {
-                        onSelectUnlinkedPerson(p.id);
-                        setUnlinkedOpen(false);
-                      }}
-                    >
-                      {displayName(p)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="relative rounded-md border px-2 py-1.5 text-sm font-semibold"
-            style={{
-              fontFamily: sans,
-              color: colors.brownDark,
-              backgroundColor: colors.parchment,
-              borderColor: colors.brownBorder,
-              boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
-            }}
-            aria-label="Show unlinked people"
-            onClick={() => setUnlinkedOpen((v) => !v)}
-          >
-            ⚭
-            <span
-              className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full border px-1 text-[11px] leading-4"
-              style={{
-                borderColor: colors.brownBorder,
-                backgroundColor: colors.cream,
-                color: colors.brownDark,
-              }}
-            >
-              {unlinkedPeople.length}
-            </span>
-          </button>
-        </div>
-      ) : null}
-      <div
-        className="flex flex-col gap-1 rounded-md border p-1.5 shadow-sm"
-        style={{
-          backgroundColor: colors.parchment,
-          borderColor: colors.brownBorder,
-          boxShadow: "0 2px 12px rgb(var(--dg-shadow-rgb) / 0.14)",
-        }}
-        role="toolbar"
-        aria-label="Canvas zoom"
-      >
-      <button
-        type="button"
-        className="dg-tree-zoom-btn"
-        style={btnBase}
-        aria-label="Zoom in"
-        onClick={() => zoomIn()}
-      >
-        +
-      </button>
-      <button
-        type="button"
-        className="dg-tree-zoom-btn"
-        style={btnBase}
-        aria-label="Zoom out"
-        onClick={() => zoomOut()}
-      >
-        −
-      </button>
-      <button
-        type="button"
-        className="dg-tree-zoom-btn"
-        style={{
-          ...btnBase,
-          fontSize: "0.65rem",
-          fontWeight: 600,
-          letterSpacing: "0.02em",
-        }}
-        aria-label="Reset zoom"
-        onClick={() => resetTransform()}
-      >
-        Reset
-      </button>
-      </div>
-    </div>
-  );
-}
-
 export type TreeCanvasPerson = {
   id: string;
   first_name: string;
@@ -1628,13 +1447,6 @@ function displayName(p: TreeCanvasPerson): string {
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" ");
-}
-
-function initials(p: TreeCanvasPerson): string {
-  const f = p.first_name.trim().charAt(0);
-  const l = p.last_name.trim().charAt(0);
-  const s = (f + l).toUpperCase();
-  return s || "?";
 }
 
 function primaryDisplayYear(raw: string | null | undefined): string | null {
@@ -1795,7 +1607,6 @@ function treeLeafInnerSurfaceStyle(isDark: boolean): CSSProperties {
  */
 const POLAROID_NO_PHOTO_BG =
   "color-mix(in srgb, var(--dg-brown-mid) 38%, black)" as const;
-const POLAROID_NO_PHOTO_INITIALS = "rgb(255 252 247)" as const;
 
 /** Visual-only: tint by generation from anchor (root). Ancestors warmer; descendants lighter; anchor balanced. */
 function treeNodeGenerationSurfaceStyle(generation: number): CSSProperties {
@@ -2021,12 +1832,6 @@ export default function TreeCanvas({
   const [photoPersonSearch, setPhotoPersonSearch] = useState("");
   const [photoUploadSaving, setPhotoUploadSaving] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setExtraPersons((prev) =>
-      prev.filter((p) => !persons.some((x) => x.id === p.id))
-    );
-  }, [persons]);
 
   const mergedPersons = useMemo(() => {
     const ids = new Set(persons.map((p) => p.id));
@@ -4205,9 +4010,7 @@ export default function TreeCanvas({
               </TransformComponent>
               <TreeCanvasZoomControls
                 unlinkedPeople={unlinkedPeople}
-                onSelectUnlinkedPerson={(personId) => {
-                  zoomToPerson(personId);
-                }}
+                onSelectUnlinkedPerson={zoomToPerson}
               />
             </div>
           </TransformWrapper>

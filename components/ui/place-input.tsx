@@ -85,13 +85,16 @@ export function PlaceInput({
   }
 
   useEffect(() => {
+    const gen = ++fetchGenRef.current;
     if (locked) {
-      setSuggestions([]);
-      setListOpen(false);
-      return;
+      const clearTimer = setTimeout(() => {
+        if (gen !== fetchGenRef.current) return;
+        setSuggestions([]);
+        setListOpen(false);
+      }, 0);
+      return () => clearTimeout(clearTimer);
     }
     const term = value.trim();
-    const gen = ++fetchGenRef.current;
 
     if (term.length < PLACE_INPUT_SEARCH_THRESHOLD) {
       const clearTimer = setTimeout(() => {

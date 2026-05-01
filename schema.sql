@@ -112,7 +112,7 @@ alter table public.trees
 create table public.persons (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
-  tree_id uuid references public.trees (id) on delete set null,
+  tree_id uuid not null references public.trees (id) on delete cascade,
   first_name text,
   middle_name text,
   last_name text,
@@ -137,6 +137,10 @@ create index if not exists persons_birth_place_id_idx on public.persons (birth_p
   where birth_place_id is not null;
 create index if not exists persons_death_place_id_idx on public.persons (death_place_id)
   where death_place_id is not null;
+
+alter table public.persons
+  add constraint persons_id_tree_id_key unique (id, tree_id),
+  add constraint persons_id_user_id_key unique (id, user_id);
 
 -- ---------------------------------------------------------------------------
 -- public.records (tree_id intentionally without FK — see migration comment)
@@ -206,7 +210,7 @@ create index if not exists events_record_id_idx on public.events (record_id)
 create table public.relationships (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
-  tree_id uuid references public.trees (id) on delete set null,
+  tree_id uuid not null references public.trees (id) on delete cascade,
   person_a_id uuid not null references public.persons (id) on delete cascade,
   person_b_id uuid not null references public.persons (id) on delete cascade,
   relationship_type text not null
@@ -217,6 +221,16 @@ create index if not exists relationships_tree_id_idx on public.relationships (tr
   where tree_id is not null;
 create index if not exists relationships_person_a_idx on public.relationships (person_a_id);
 create index if not exists relationships_person_b_idx on public.relationships (person_b_id);
+
+alter table public.relationships
+  add constraint relationships_person_a_tree_id_fkey
+    foreign key (person_a_id, tree_id) references public.persons (id, tree_id) on delete cascade,
+  add constraint relationships_person_b_tree_id_fkey
+    foreign key (person_b_id, tree_id) references public.persons (id, tree_id) on delete cascade,
+  add constraint relationships_person_a_user_id_fkey
+    foreign key (person_a_id, user_id) references public.persons (id, user_id) on delete cascade,
+  add constraint relationships_person_b_user_id_fkey
+    foreign key (person_b_id, user_id) references public.persons (id, user_id) on delete cascade;
 
 -- ---------------------------------------------------------------------------
 -- public.photos

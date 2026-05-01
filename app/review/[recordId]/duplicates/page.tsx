@@ -310,6 +310,14 @@ export default function ReviewDuplicatesPage() {
         people: pr.people as PendingPerson[],
       };
 
+      if (!returnTreeId) {
+        setLoadError(
+          "This review is missing tree context. Please upload the record from the tree you want to update."
+        );
+        setLoadState("error");
+        return;
+      }
+
       payload.people.forEach((person, idx) => {
         console.log(
           `[duplicates] person[${idx}] from localStorage:`,
@@ -340,15 +348,13 @@ export default function ReviewDuplicatesPage() {
         return;
       }
 
-      let personsQuery = supabase
+      const personsQuery = supabase
         .from("persons")
         .select(
           "id, first_name, middle_name, last_name, birth_date, death_date, birth_place_id, gender, notes, birth_place:places!birth_place_id(township, county, state, country)"
         )
-        .eq("user_id", user.id);
-      if (returnTreeId) {
-        personsQuery = personsQuery.eq("tree_id", returnTreeId);
-      }
+        .eq("user_id", user.id)
+        .eq("tree_id", returnTreeId);
       const { data: persons, error: personsError } = await personsQuery;
 
       if (cancelled) return;
@@ -518,6 +524,7 @@ export default function ReviewDuplicatesPage() {
           .from("persons")
           .select("id, first_name, middle_name, last_name")
           .eq("user_id", user.id)
+          .eq("tree_id", treeId)
           .in("id", contextPersonIds);
 
         const nameById = new Map<string, string>();

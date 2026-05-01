@@ -282,15 +282,6 @@ export function normalizePlaceFields(fields: PlaceFields): PlaceFields {
   };
 }
 
-function canonicalDisplayName(fields: PlaceFields): string {
-  return formatPlace({
-    township: fields.township,
-    county: fields.county,
-    state: fields.state,
-    country: fields.country,
-  });
-}
-
 export async function findOrCreatePlace(
   supabase: SupabaseClient,
   fields: PlaceFields,

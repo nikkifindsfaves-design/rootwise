@@ -157,6 +157,7 @@ async function rollbackManualEventSave(
   supabase: SupabaseClient,
   params: {
     userId: string;
+    treeId: string;
     insertedEventIds: string[];
     insertedPersonIds: string[];
     insertedRelationshipIds: string[];
@@ -174,6 +175,7 @@ async function rollbackManualEventSave(
       .from("relationships")
       .delete()
       .eq("user_id", params.userId)
+      .eq("tree_id", params.treeId)
       .in("id", params.insertedRelationshipIds);
   }
   if (params.insertedPersonIds.length > 0) {
@@ -181,6 +183,7 @@ async function rollbackManualEventSave(
       .from("persons")
       .delete()
       .eq("user_id", params.userId)
+      .eq("tree_id", params.treeId)
       .in("id", params.insertedPersonIds);
   }
 }
@@ -277,6 +280,11 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       );
     }
+  } else {
+    return NextResponse.json(
+      { error: "Tree context is required to save people and events." },
+      { status: 400 }
+    );
   }
 
   const people = peopleRaw.filter(
@@ -297,6 +305,7 @@ export async function POST(request: NextRequest) {
   const failAfterWrites = async (error: string, status = 500) => {
     await rollbackManualEventSave(supabase, {
       userId: user.id,
+      treeId,
       insertedEventIds,
       insertedPersonIds,
       insertedRelationshipIds,
@@ -315,9 +324,10 @@ export async function POST(request: NextRequest) {
     if (existingPersonId) {
       const { data, error } = await supabase
         .from("persons")
-        .select("id, first_name, middle_name, last_name")
+        .select("id, tree_id, first_name, middle_name, last_name")
         .eq("id", existingPersonId)
         .eq("user_id", user.id)
+        .eq("tree_id", treeId)
         .maybeSingle();
       if (error) return failAfterWrites(error.message);
       if (!data) {
@@ -325,10 +335,17 @@ export async function POST(request: NextRequest) {
       }
       const row = data as {
         id: string;
+        tree_id?: string | null;
         first_name: string | null;
         middle_name: string | null;
         last_name: string | null;
       };
+      if ((row.tree_id ?? "").trim() !== treeId) {
+        return failAfterWrites(
+          `Person does not belong to the active tree: ${existingPersonId}`,
+          400
+        );
+      }
       clientIdToPersonId.set(clientId, row.id);
       resolvedPeople.push({
         clientId,
@@ -477,7 +494,8 @@ export async function POST(request: NextRequest) {
           .from("persons")
           .update(vitalUpdates)
           .eq("id", personId)
-          .eq("user_id", user.id);
+          .eq("user_id", user.id)
+          .eq("tree_id", treeId);
         if (vitalErr) return failAfterWrites(vitalErr.message);
       }
     }

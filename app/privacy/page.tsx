@@ -29,8 +29,8 @@ export default function PrivacyPage() {
 
           <h2 className="text-xl font-semibold text-black">1. Introduction</h2>
           <p className="mt-3 leading-relaxed">
-            Smith Digital LLC ("we," "us," or "our") operates Dead Gossip at
-            deadgossip.app ("the Service"). This Privacy Policy explains how we
+            Smith Digital LLC (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;) operates Dead Gossip at
+            deadgossip.app (&quot;the Service&quot;). This Privacy Policy explains how we
             collect, use, store and share information about you when you use our
             Service. It also describes your rights regarding your personal
             information and how to exercise them.

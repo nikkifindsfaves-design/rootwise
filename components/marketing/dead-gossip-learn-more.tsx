@@ -126,7 +126,6 @@ const sans =
   'var(--dg-promo-sans), "Source Sans 3", system-ui, sans-serif';
 
 const dimWhite = "rgba(250, 250, 249, 0.68)";
-const dimMore = "rgba(250, 250, 249, 0.45)";
 const inactiveTab = "rgba(255, 255, 255, 0.35)";
 const amber = "#eab308";
 const amberDeep = "#d97706";

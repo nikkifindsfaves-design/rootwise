@@ -38,6 +38,13 @@ import {
   ROOTS_PROFILE_HEADER_MOUNT_SCALE,
 } from "@/components/profile/roots-frame-portrait";
 import {
+  CollapsibleFamilyGroup,
+  FamilyMemberCard,
+  SpouseWithChildrenCollapsible,
+  UnknownParentSlot,
+  relationshipUiLabelForProfile,
+} from "./profile-family-section";
+import {
   clampCropOffsetCover,
   cropCoverRenderedSize,
   cropPercentToOffsetCover,
@@ -50,7 +57,6 @@ import {
   createElement,
   useCallback,
   useEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -1258,7 +1264,6 @@ const HEADER_POLAROID_DARK_DEPTH_INSET =
  */
 const POLAROID_NO_PHOTO_BG =
   "color-mix(in srgb, var(--dg-brown-mid) 38%, black)" as const;
-const POLAROID_NO_PHOTO_INITIALS = "rgb(255 252 247)" as const;
 
 function headerPolaroidFrameLayerStyle(
   isDark: boolean,
@@ -1373,6 +1378,13 @@ function snapshotHtmlHasDarkClass(): boolean {
 
 function snapshotHtmlHasDarkClassServer(): boolean {
   return false;
+}
+
+function initialProfileTheme(): "light" | "dark" {
+  if (typeof window === "undefined") return "light";
+  const stored = window.localStorage.getItem("dg-theme");
+  if (stored === "dark" || stored === "light") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 /** Diagonal shift outward from each print corner (px along both axes). */
@@ -1589,17 +1601,6 @@ function headerPolaroidLayerKey(layer: HeaderPolaroidLayer): string {
   return "__legacy_header__";
 }
 
-function polaroidInitialsFromLayer(layer: HeaderPolaroidLayer): string {
-  if (layer.kind === "row") {
-    const row = layer.row as Record<string, unknown>;
-    return initials({
-      first_name: String(row.first_name ?? ""),
-      last_name: String(row.last_name ?? ""),
-    });
-  }
-  return initials(layer.person);
-}
-
 function headerPolaroidLayerVisual(
   layer: HeaderPolaroidLayer
 ): {
@@ -1669,17 +1670,6 @@ function offsetToCropPercentCover(
   };
 }
 
-function initials(p: Pick<PersonRow, "first_name" | "last_name">): string {
-  const f = p.first_name.trim();
-  const l = p.last_name.trim();
-  const fi = f[0];
-  const li = l[0];
-  if (fi && li) return (fi + li).toUpperCase();
-  if (li) return li.toUpperCase();
-  if (fi) return (fi + (f[1] ?? "")).slice(0, 2).toUpperCase();
-  return "?";
-}
-
 function profilePlaceholderSilhouetteSrc(
   photoFrameStyle: PhotoFrameStyle,
   genderRaw: string | null | undefined
@@ -1710,8 +1700,8 @@ function ProfilePhotoSilhouette({
   const g = normalizeGender(gender);
   const ovalHeirloomMaleScale =
     photoFrameStyle === "oval" && g !== GENDER_VALUES.FEMALE ? 2.5 * 0.95 : 2.5;
-  // eslint-disable-next-line @next/next/no-img-element
   return (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={profilePlaceholderSilhouetteSrc(photoFrameStyle, gender)}
       alt=""
@@ -2026,34 +2016,6 @@ function firstStoryFullInCluster(cluster: EventCluster): {
   return { text: "", eventId: sorted[0]?.id ?? "" };
 }
 
-const FAMILY_MEMBER_DOSSIER_SQUARE = 44;
-
-/** Profile-centric relationship label for the family sidebar (e.g. Father, Sister). */
-function relationshipUiLabelForProfile(
-  relationshipType: string,
-  person: PersonRow
-): string {
-  const g = (person.gender ?? "").trim().toLowerCase();
-  const t = relationshipType.trim().toLowerCase();
-  if (t === "parent") {
-    if (g === "male") return "Father";
-    if (g === "female") return "Mother";
-    return "Parent";
-  }
-  if (t === "child") {
-    if (g === "male") return "Son";
-    if (g === "female") return "Daughter";
-    return "Child";
-  }
-  if (t === "spouse") return "Spouse";
-  if (t === "sibling") {
-    if (g === "male") return "Brother";
-    if (g === "female") return "Sister";
-    return "Sibling";
-  }
-  return relationshipType;
-}
-
 /** Assign linked parents to father / mother slots using gender when possible. */
 function partitionParentsIntoSlots(parents: PersonRow[]): {
   father: PersonRow | null;
@@ -2088,502 +2050,6 @@ function partitionParentsIntoSlots(parents: PersonRow[]): {
   return { father, mother, overflow };
 }
 
-function UnknownParentSlot({
-  roleLabel,
-  disabled,
-  onAdd,
-}: {
-  roleLabel: "Father" | "Mother";
-  disabled: boolean;
-  onAdd: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      className="group relative flex w-full max-w-full cursor-pointer items-start gap-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-55"
-      style={{
-        backgroundColor: "transparent",
-        border: "none",
-        color: "inherit",
-      }}
-      aria-label={`Add ${roleLabel.toLowerCase()} — link existing or create new`}
-      onClick={onAdd}
-    >
-      <div
-        className="flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed"
-        style={{
-          position: "relative",
-          width: FAMILY_MEMBER_DOSSIER_SQUARE,
-          height: FAMILY_MEMBER_DOSSIER_SQUARE,
-          backgroundColor: colors.avatarBg,
-          borderColor: `${colors.brownBorder}aa`,
-          color: colors.avatarInitials,
-        }}
-      >
-        <span
-          className="text-sm font-bold opacity-70"
-          style={{ fontFamily: serif }}
-          aria-hidden
-        >
-          ?
-        </span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p
-          className="break-words text-[15px] font-semibold leading-snug"
-          style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
-        >
-          Unknown
-        </p>
-        <p
-          className="mt-0.5 text-[11px] leading-snug"
-          style={{ fontFamily: sans, color: colors.brownMuted }}
-        >
-          {disabled
-            ? "Open this profile from your tree to add."
-            : "Click to link or create…"}
-        </p>
-      </div>
-      <span
-        className="shrink-0 self-start pt-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
-        style={{ fontFamily: sans, color: colors.brownMuted }}
-      >
-        {roleLabel}
-      </span>
-    </button>
-  );
-}
-
-function FamilyMemberCard({
-  p,
-  crop_x,
-  crop_y,
-  crop_zoom,
-  natural_width,
-  natural_height,
-  relationshipLabel,
-  nameMeta,
-  hideRelationshipLabel = false,
-  onEditRelationship,
-}: {
-  p: PersonRow;
-  crop_x?: number | null;
-  crop_y?: number | null;
-  crop_zoom?: number | null;
-  natural_width?: number | null;
-  natural_height?: number | null;
-  relationshipLabel: string;
-  nameMeta?: string | null;
-  hideRelationshipLabel?: boolean;
-  onEditRelationship?: () => void;
-}) {
-  const familyCardParams = useParams() as { treeId?: string };
-  const familyCardTreeId =
-    typeof familyCardParams.treeId === "string" && familyCardParams.treeId.trim() !== ""
-      ? familyCardParams.treeId.trim()
-      : "";
-  const displayName = [p.first_name, p.middle_name ?? "", p.last_name]
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join(" ");
-  const nameLine = displayName.trim() || "—";
-  const photo =
-    (p as { photo_url?: string | null }).photo_url ?? null;
-
-  const hasPixelCrop =
-    typeof natural_width === "number" &&
-    natural_width > 0 &&
-    typeof natural_height === "number" &&
-    natural_height > 0 &&
-    typeof crop_x === "number" &&
-    Number.isFinite(crop_x) &&
-    typeof crop_y === "number" &&
-    Number.isFinite(crop_y) &&
-    typeof crop_zoom === "number" &&
-    Number.isFinite(crop_zoom);
-
-  let pixelAvatarStyle: CSSProperties | null = null;
-  if (hasPixelCrop) {
-    const { w: rw, h: rh } = cropCoverRenderedSize(
-      natural_width,
-      natural_height,
-      FAMILY_MEMBER_DOSSIER_SQUARE,
-      FAMILY_MEMBER_DOSSIER_SQUARE,
-      crop_zoom
-    );
-    const offset = cropPercentToOffsetCover(
-      crop_x,
-      crop_y,
-      rw,
-      rh,
-      FAMILY_MEMBER_DOSSIER_SQUARE,
-      FAMILY_MEMBER_DOSSIER_SQUARE
-    );
-    pixelAvatarStyle = {
-      position: "absolute",
-      left: offset.x,
-      top: offset.y,
-      width: rw,
-      height: rh,
-      maxWidth: "none",
-    };
-  }
-
-  const dateDetail = [
-    p.birth_date ? `b. ${formatDateString(p.birth_date)}` : "",
-    p.death_date ? `d. ${formatDateString(p.death_date)}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const familyCardHref =
-    familyCardTreeId !== ""
-      ? `/dashboard/${familyCardTreeId}/person/${p.id}`
-      : `/person/${p.id}`;
-
-  return (
-    <Link
-      href={familyCardHref}
-      className="flex min-w-0 items-start gap-3 py-3"
-      style={{
-        textDecoration: "none",
-        color: "inherit",
-        backgroundColor: "transparent",
-      }}
-    >
-      <div
-        className="shrink-0 overflow-hidden rounded-md"
-        style={{
-          position: "relative",
-          width: FAMILY_MEMBER_DOSSIER_SQUARE,
-          height: FAMILY_MEMBER_DOSSIER_SQUARE,
-          backgroundColor: colors.avatarBg,
-        }}
-      >
-        {photo ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={photo}
-            alt=""
-            className={hasPixelCrop ? undefined : "h-full w-full"}
-            style={
-              hasPixelCrop
-                ? pixelAvatarStyle ?? undefined
-                : {
-                    objectFit: "cover",
-                    objectPosition: `${p.crop_x ?? 50}% ${p.crop_y ?? 50}%`,
-                    width: "100%",
-                    height: "100%",
-                  }
-            }
-          />
-        ) : (
-          <span
-            className="flex h-full w-full items-center justify-center text-sm font-bold"
-            style={{ fontFamily: serif, color: colors.avatarInitials }}
-          >
-            {initials(p)}
-          </span>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <p
-            className="break-words text-[15px] font-semibold leading-snug"
-            style={{ fontFamily: serif, color: "var(--dg-brown-dark)" }}
-          >
-            {nameLine}
-          </p>
-          {nameMeta ? (
-            <span
-              className="shrink-0 text-[11px] font-semibold"
-              style={{ fontFamily: sans, color: colors.brownMuted }}
-            >
-              {nameMeta}
-            </span>
-          ) : null}
-        </div>
-        {dateDetail ? (
-          <p
-            className="mt-0.5 break-words text-[11px] leading-snug"
-            style={{ fontFamily: sans, color: colors.brownMuted }}
-          >
-            {dateDetail}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-start justify-end gap-1.5 self-start pt-0.5">
-        {onEditRelationship ? (
-          <button
-            type="button"
-            className="rounded px-0.5 text-xs leading-none"
-            style={{ color: colors.brownMuted }}
-            aria-label="Edit relationship"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEditRelationship();
-            }}
-          >
-            ✎
-          </button>
-        ) : null}
-        {!hideRelationshipLabel ? (
-          <span
-            className="max-w-[5.5rem] text-right text-[10px] font-bold uppercase leading-snug tracking-[0.14em]"
-            style={{ fontFamily: sans, color: colors.brownMuted, wordBreak: "break-word" }}
-          >
-            {relationshipLabel}
-          </span>
-        ) : null}
-      </div>
-    </Link>
-  );
-}
-
-function CollapsibleFamilyGroup({
-  title,
-  members,
-  relationshipMetaByPersonId,
-  onEditRelationship,
-  defaultExpanded = false,
-  defaultRelationshipType = "sibling",
-  containerClassName = "mb-3",
-}: {
-  title: string;
-  members: PersonRow[];
-  relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
-  onEditRelationship: (meta: RelationshipMeta) => void;
-  defaultExpanded?: boolean;
-  /** Used when `relationshipMetaByPersonId` has no row for a member. */
-  defaultRelationshipType?: string;
-  containerClassName?: string;
-}) {
-  const baseId = useId();
-  const headerId = `${baseId}-hdr`;
-  const listId = `${baseId}-list`;
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  if (members.length === 0) return null;
-
-  return (
-    <div className={containerClassName}>
-      <button
-        type="button"
-        id={headerId}
-        aria-expanded={expanded}
-        aria-controls={listId}
-        onClick={() => setExpanded((v) => !v)}
-        className="mb-2 flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-0 py-1 text-left transition hover:border-[color-mix(in_srgb,var(--dg-brown-border)_55%,transparent)]"
-        style={{ fontFamily: sans }}
-      >
-        <span
-          className="text-xs font-bold uppercase tracking-widest"
-          style={{ color: colors.brownMuted }}
-        >
-          {title}
-        </span>
-        <span
-          className="flex shrink-0 items-center gap-2 text-xs font-semibold tabular-nums"
-          style={{ color: colors.brownMuted }}
-        >
-          <span>({members.length})</span>
-          <span aria-hidden className="inline-block w-3 text-center">
-            {expanded ? "−" : "+"}
-          </span>
-        </span>
-      </button>
-      {expanded ? (
-        <ul
-          id={listId}
-          className="m-0 list-none p-0"
-          role="region"
-          aria-labelledby={headerId}
-        >
-          {members.map((p) => (
-            <li
-              key={p.id}
-              className="border-0 border-b border-solid last:border-b-0"
-              style={{ borderBottomColor: colors.brownBorder }}
-            >
-              {(() => {
-                const relMeta = relationshipMetaByPersonId[p.id];
-                const relType =
-                  relMeta?.relationshipType ?? defaultRelationshipType;
-                return (
-                  <FamilyMemberCard
-                    p={p}
-                    crop_x={p.crop_x}
-                    crop_y={p.crop_y}
-                    crop_zoom={p.crop_zoom}
-                    natural_width={p.natural_width}
-                    natural_height={p.natural_height}
-                    relationshipLabel={relationshipUiLabelForProfile(
-                      relType,
-                      p
-                    )}
-                    onEditRelationship={
-                      relMeta ? () => onEditRelationship(relMeta) : undefined
-                    }
-                  />
-                );
-              })()}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-function SpouseWithChildrenCollapsible({
-  spouse,
-  children: kids,
-  marriageYear,
-  relationshipMetaByPersonId,
-  onEditRelationship,
-  onAddChildWithSpouse,
-  defaultExpanded = false,
-}: {
-  spouse: PersonRow;
-  children: PersonRow[];
-  marriageYear?: string | null;
-  relationshipMetaByPersonId: Record<string, RelationshipMeta | undefined>;
-  onEditRelationship: (meta: RelationshipMeta) => void;
-  onAddChildWithSpouse: (spouse: PersonRow) => void;
-  defaultExpanded?: boolean;
-}) {
-  const baseId = useId();
-  const panelId = `${baseId}-panel`;
-  const toggleId = `${baseId}-toggle`;
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  const childCountLabel = kids.length === 1 ? "1 child" : `${kids.length} children`;
-  const spouseRelMeta = relationshipMetaByPersonId[spouse.id];
-  return (
-    <div
-      className="mb-3 rounded-md border p-2.5"
-      style={{
-        borderColor: colors.brownBorder,
-        borderLeftWidth: 3,
-        borderLeftColor: "color-mix(in srgb, var(--dg-forest) 60%, var(--dg-brown-border))",
-        backgroundColor: "color-mix(in srgb, var(--dg-parchment) 82%, var(--dg-cream))",
-      }}
-    >
-      <p
-        className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em]"
-        style={{ fontFamily: sans, color: colors.brownMuted }}
-      >
-        Spouse
-      </p>
-      <div
-        className="border-0 border-b border-solid"
-        style={{ borderBottomColor: colors.brownBorder }}
-      >
-        <FamilyMemberCard
-          p={spouse}
-          crop_x={spouse.crop_x}
-          crop_y={spouse.crop_y}
-          crop_zoom={spouse.crop_zoom}
-          natural_width={spouse.natural_width}
-          natural_height={spouse.natural_height}
-          relationshipLabel=""
-          nameMeta={marriageYear ? `m. ${marriageYear}` : null}
-          hideRelationshipLabel
-          onEditRelationship={
-            spouseRelMeta ? () => onEditRelationship(spouseRelMeta) : undefined
-          }
-        />
-      </div>
-      <div className="mt-1.5 flex items-center justify-between">
-        <button
-          type="button"
-          id={toggleId}
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          onClick={() => setExpanded((v) => !v)}
-          className="inline-flex items-center gap-2 border-none bg-transparent p-0 text-left text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline"
-          style={{ fontFamily: sans, color: colors.brownMuted }}
-        >
-          <span
-            className="inline-flex h-4 w-4 items-center justify-center text-[11px] leading-none"
-            aria-hidden
-          >
-            {expanded ? "−" : "+"}
-          </span>
-          <span>{expanded ? `Hide ${childCountLabel}` : `Show ${childCountLabel}`}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onAddChildWithSpouse(spouse)}
-          className="border-none bg-transparent p-0 text-xs font-bold uppercase tracking-wide underline-offset-2 transition hover:underline"
-          style={{ fontFamily: sans, color: colors.forest }}
-        >
-          + Add child
-        </button>
-      </div>
-      {expanded ? (
-        <div
-          id={panelId}
-          className="mt-2 space-y-3"
-          role="region"
-          aria-labelledby={toggleId}
-        >
-          {kids.length > 0 ? (
-            <div>
-              <ul className="m-0 list-none p-0">
-                {kids.map((p, i) => {
-                  const relMeta = relationshipMetaByPersonId[p.id];
-                  return (
-                    <li
-                      key={p.id}
-                      className={
-                        i < kids.length - 1
-                          ? "border-0 border-b border-solid"
-                          : undefined
-                      }
-                      style={
-                        i < kids.length - 1
-                          ? { borderBottomColor: colors.brownBorder }
-                          : undefined
-                      }
-                    >
-                      <FamilyMemberCard
-                        p={p}
-                        crop_x={p.crop_x}
-                        crop_y={p.crop_y}
-                        crop_zoom={p.crop_zoom}
-                        natural_width={p.natural_width}
-                        natural_height={p.natural_height}
-                        relationshipLabel={relationshipUiLabelForProfile(
-                          relMeta?.relationshipType ?? "child",
-                          p
-                        )}
-                        onEditRelationship={
-                          relMeta
-                            ? () => onEditRelationship(relMeta)
-                            : undefined
-                        }
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : (
-            <p
-              className="text-sm italic"
-              style={{ fontFamily: sans, color: colors.brownMuted }}
-            >
-              No children linked with this spouse in your tree.
-            </p>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function TimelineEventStoryBlock({
   storyText,
   typ,
@@ -2602,7 +2068,6 @@ function TimelineEventStoryBlock({
 
   useLayoutEffect(() => {
     if (isFallback) {
-      setHasOverflow(false);
       return;
     }
     const el = bodyRef.current;
@@ -2769,16 +2234,7 @@ export default function PersonProfilePage() {
       : "/tree-select";
   const backToTreeLabel = "Return to tree";
 
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    const stored = localStorage.getItem("dg-theme");
-    if (stored === "dark" || stored === "light") {
-      setTheme(stored);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-    }
-  }, []);
+  const [theme, setTheme] = useState<"light" | "dark">(initialProfileTheme);
 
   const toggleTheme = useCallback(() => {
     const next = theme === "light" ? "dark" : "light";
@@ -2835,6 +2291,11 @@ export default function PersonProfilePage() {
   const [editRelType, setEditRelType] = useState("");
   const [editRelBusy, setEditRelBusy] = useState(false);
   const [editRelError, setEditRelError] = useState<string | null>(null);
+  const handleEditRelationship = useCallback((meta: RelationshipMeta) => {
+    setEditRelModal(meta);
+    setEditRelType(meta.relationshipType);
+    setEditRelError(null);
+  }, []);
   const [deskPanelOpen, setDeskPanelOpen] = useState<PersonDeskPanel>("none");
   const [occupations, setOccupations] = useState<OccupationRow[]>([]);
   const [occupationLoading, setOccupationLoading] = useState(false);
@@ -3308,7 +2769,7 @@ export default function PersonProfilePage() {
       )
     );
     cropOffsetHydratedRef.current = true;
-  }, [cropModalPhoto, cropNaturalSize]);
+  }, [cropModalPhoto, cropNaturalSize, cropZoom]);
 
   useEffect(() => {
     if (!photoSetupModal || !photoSetupNaturalSize) {
@@ -3337,7 +2798,7 @@ export default function PersonProfilePage() {
       )
     );
     photoSetupOffsetHydratedRef.current = true;
-  }, [photoSetupModal, photoSetupNaturalSize]);
+  }, [photoSetupModal, photoSetupNaturalSize, photoSetupZoom]);
 
   useEffect(() => {
     if (!cropNaturalSize) return;
@@ -3703,6 +3164,7 @@ export default function PersonProfilePage() {
             "id, first_name, middle_name, last_name, birth_date, death_date, photo_url, gender"
           )
           .eq("user_id", user.id)
+          .eq("tree_id", effectiveTreeForRels)
           .in("id", relatedIds),
         supabase
           .from("photo_tags")
@@ -3950,15 +3412,13 @@ export default function PersonProfilePage() {
       }));
       otherChildrenRows = [];
     } else {
-      let parentRelsQuery = supabase
+      const parentRelsQuery = supabase
         .from("relationships")
         .select("person_a_id, person_b_id")
         .eq("user_id", user.id)
+        .eq("tree_id", effectiveTreeForRels)
         .eq("relationship_type", "parent")
         .in("person_b_id", childIdArr);
-      if (effectiveTreeForRels !== "") {
-        parentRelsQuery = parentRelsQuery.eq("tree_id", effectiveTreeForRels);
-      }
       const { data: parentRelRows, error: prelErr } = await parentRelsQuery;
       if (prelErr) {
         setError(prelErr.message);
@@ -4381,7 +3841,7 @@ export default function PersonProfilePage() {
   }, [addFamilyCoParentId, family]);
 
   useEffect(() => {
-    if (!mergeModalOpen || !personId) return;
+    if (!mergeModalOpen || !personId || effectiveTreeIdForFamily === "") return;
     const q = mergeSearchQuery.trim();
     if (q.length < 2) {
       setMergeSearchResults([]);
@@ -4394,7 +3854,7 @@ export default function PersonProfilePage() {
         setMergeSearchError(null);
         try {
           const r = await fetch(
-            `/api/merge-persons?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(personId)}`,
+            `/api/merge-persons?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(personId)}&treeId=${encodeURIComponent(effectiveTreeIdForFamily)}`,
             { credentials: "include" }
           );
           const j = (await r.json()) as {
@@ -4417,10 +3877,10 @@ export default function PersonProfilePage() {
       })();
     }, 320);
     return () => window.clearTimeout(handle);
-  }, [mergeSearchQuery, mergeModalOpen, personId]);
+  }, [mergeSearchQuery, mergeModalOpen, personId, effectiveTreeIdForFamily]);
 
   useEffect(() => {
-    if (!addEventOpen || !personId) return;
+    if (!addEventOpen || !personId || effectiveTreeIdForFamily === "") return;
     const q = addEventPersonSearch.trim();
     if (q.length < 2) {
       setAddEventPersonSearchResults([]);
@@ -4437,7 +3897,7 @@ export default function PersonProfilePage() {
         setAddEventPersonSearchLoading(true);
         try {
           const res = await fetch(
-            `/api/merge-persons?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(personId)}`,
+            `/api/merge-persons?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(personId)}&treeId=${encodeURIComponent(effectiveTreeIdForFamily)}`,
             { credentials: "include" }
           );
           const data = (await res.json()) as {
@@ -4462,23 +3922,9 @@ export default function PersonProfilePage() {
     addEventAttachedPeople,
     addEventOpen,
     addEventPersonSearch,
+    effectiveTreeIdForFamily,
     personId,
   ]);
-
-  useEffect(() => {
-    if (
-      !addEventOpen ||
-      normalizeAddEventType(addEventDraft.event_type) !== "death" ||
-      family.parents.length === 0
-    ) {
-      return;
-    }
-    setAddEventAttachedPeople((prev) => {
-      const deceasedSlot = prev.find((row) => row.clientId === "death:deceased");
-      if (!deceasedSlot) return prev;
-      return applyParentRowsToChildSlot(prev, deceasedSlot, family.parents);
-    });
-  }, [addEventDraft.event_type, addEventOpen, family.parents]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5515,7 +4961,8 @@ export default function PersonProfilePage() {
       .from("persons")
       .select("id, first_name, middle_name, last_name")
       .in("id", personIds)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("tree_id", effectiveTreeIdForFamily);
     if (personsErr) {
       setPhotoSetupError(personsErr.message);
       return;
@@ -5990,6 +5437,7 @@ export default function PersonProfilePage() {
         body: JSON.stringify({
           primaryId: person.id,
           duplicateId: mergeSelectedDup.id,
+          treeId: effectiveTreeIdForFamily,
           fieldChoices: mergeFieldChoices,
         }),
       });
@@ -6342,7 +5790,12 @@ export default function PersonProfilePage() {
         addFamilyCreateRel
       );
       if (!primaryLink.ok) {
-        await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
+        await supabase
+          .from("persons")
+          .delete()
+          .eq("id", otherId)
+          .eq("user_id", user.id)
+          .eq("tree_id", effectiveTreeIdForFamily);
         setAddFamilyCreateError(primaryLink.error);
         return;
       }
@@ -6357,7 +5810,12 @@ export default function PersonProfilePage() {
           "child"
         );
         if (!secondLink.ok) {
-          await supabase.from("persons").delete().eq("id", otherId).eq("user_id", user.id);
+          await supabase
+            .from("persons")
+            .delete()
+            .eq("id", otherId)
+            .eq("user_id", user.id)
+            .eq("tree_id", effectiveTreeIdForFamily);
           setAddFamilyCreateError(secondLink.error);
           return;
         }
@@ -6827,10 +6285,10 @@ export default function PersonProfilePage() {
     );
   }
 
-  function addEventPersonFromExistingSlot(
+  const addEventPersonFromExistingSlot = useCallback((
     slot: AddEventSlotConfig,
     row: PersonRow
-  ): AddEventAttachedPerson {
+  ): AddEventAttachedPerson => {
     return {
       clientId: slot.clientId,
       existingPersonId: row.id,
@@ -6851,7 +6309,7 @@ export default function PersonProfilePage() {
       relationshipToProfile: "",
       landData: { acres: "", transaction_type: "" },
     };
-  }
+  }, [addEventDraft.event_type]);
 
   function parentRowsForKnownChild(childId: string): PersonRow[] {
     if (!personId) return [];
@@ -6869,11 +6327,11 @@ export default function PersonProfilePage() {
     );
   }
 
-  function applyParentRowsToChildSlot(
+  const applyParentRowsToChildSlot = useCallback((
     people: AddEventAttachedPerson[],
     childSlot: AddEventAttachedPerson,
     parentRows: PersonRow[]
-  ): AddEventAttachedPerson[] {
+  ): AddEventAttachedPerson[] => {
     if (parentRows.length === 0) return people;
     const parentSlots = people.filter(
       (row) => row.eventRole === "parent" && row.relatedToClientId === childSlot.clientId
@@ -6903,7 +6361,22 @@ export default function PersonProfilePage() {
     });
     if (parentBySlotId.size === 0) return people;
     return people.map((row) => parentBySlotId.get(row.clientId) ?? row);
-  }
+  }, [addEventDraft.event_type, addEventPersonFromExistingSlot]);
+
+  useEffect(() => {
+    if (
+      !addEventOpen ||
+      normalizeAddEventType(addEventDraft.event_type) !== "death" ||
+      family.parents.length === 0
+    ) {
+      return;
+    }
+    setAddEventAttachedPeople((prev) => {
+      const deceasedSlot = prev.find((row) => row.clientId === "death:deceased");
+      if (!deceasedSlot) return prev;
+      return applyParentRowsToChildSlot(prev, deceasedSlot, family.parents);
+    });
+  }, [addEventDraft.event_type, addEventOpen, applyParentRowsToChildSlot, family.parents]);
 
   function autofillKnownParentsForChildSlot(
     people: AddEventAttachedPerson[],
@@ -6927,10 +6400,12 @@ export default function PersonProfilePage() {
   }
 
   async function fetchParentsForExistingChild(childId: string): Promise<PersonRow[]> {
+    if (effectiveTreeIdForFamily === "") return [];
     const supabase = createClient();
-    let relQuery = supabase
+    const relQuery = supabase
       .from("relationships")
       .select("person_a_id, person_b_id, relationship_type")
+      .eq("tree_id", effectiveTreeIdForFamily)
       .or(`person_a_id.eq.${childId},person_b_id.eq.${childId}`);
     const { data: relRows, error: relErr } = await relQuery;
     if (relErr || !relRows || relRows.length === 0) return [];
@@ -6960,6 +6435,7 @@ export default function PersonProfilePage() {
       .select(
         "id, first_name, middle_name, last_name, birth_date, death_date, gender"
       )
+      .eq("tree_id", effectiveTreeIdForFamily)
       .in("id", parentIds);
     if (parentErr || !parentRows) return [];
     const byId = new Map((parentRows as PersonRow[]).map((row) => [row.id, row]));
@@ -10185,11 +9661,7 @@ export default function PersonProfilePage() {
                       relationshipMetaByPersonId={relationshipMetaByPersonId}
                       defaultExpanded={false}
                       containerClassName="mb-0"
-                      onEditRelationship={(meta) => {
-                        setEditRelModal(meta);
-                        setEditRelType(meta.relationshipType);
-                        setEditRelError(null);
-                      }}
+                      onEditRelationship={handleEditRelationship}
                     />
                   </div>
                 ) : null}
@@ -10198,7 +9670,7 @@ export default function PersonProfilePage() {
                 <SpouseWithChildrenCollapsible
                   key={group.spouse.id}
                   spouse={group.spouse}
-                  children={group.children}
+                  childPeople={group.children}
                   marriageYear={marriageYearBySpouseId.get(group.spouse.id) ?? null}
                   relationshipMetaByPersonId={relationshipMetaByPersonId}
                   onAddChildWithSpouse={(spouse) =>
@@ -10208,11 +9680,7 @@ export default function PersonProfilePage() {
                     })
                   }
                   defaultExpanded={idx === 0}
-                  onEditRelationship={(meta) => {
-                    setEditRelModal(meta);
-                    setEditRelType(meta.relationshipType);
-                    setEditRelError(null);
-                  }}
+                  onEditRelationship={handleEditRelationship}
                 />
               ))}
               {family.otherChildren.length > 0 ? (
@@ -10222,11 +9690,7 @@ export default function PersonProfilePage() {
                   relationshipMetaByPersonId={relationshipMetaByPersonId}
                   defaultRelationshipType="child"
                   defaultExpanded={family.spouseWithChildrenGroups.length === 0}
-                  onEditRelationship={(meta) => {
-                    setEditRelModal(meta);
-                    setEditRelType(meta.relationshipType);
-                    setEditRelError(null);
-                  }}
+                  onEditRelationship={handleEditRelationship}
                 />
               ) : null}
               <div
@@ -10442,6 +9906,20 @@ export default function PersonProfilePage() {
                               style={{ fontFamily: sans, color: colors.brownMuted }}
                             >
                               Loading occupations...
+                            </p>
+                          ) : null}
+                          {occupationError ? (
+                            <p
+                              className="mb-2 rounded border px-2 py-1 text-sm"
+                              style={{
+                                fontFamily: sans,
+                                borderColor: "var(--dg-error-border)",
+                                backgroundColor: "var(--dg-error-bg)",
+                                color: "var(--dg-error-text)",
+                              }}
+                              role="alert"
+                            >
+                              {occupationError}
                             </p>
                           ) : null}
                           {addingOccupation ? (
@@ -13983,7 +13461,7 @@ export default function PersonProfilePage() {
                 </div>
               </div>
 
-              {!isTemplatedAddEvent && activeTemplate?.allowManualPeople !== false ? (
+              {!isTemplatedAddEvent ? (
                 <>
                   <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
                     <div className="flex-1">
